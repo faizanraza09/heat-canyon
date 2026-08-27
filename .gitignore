@@ -246,3 +246,18 @@ data/street_view/*
 !data/env_params/
 data/env_params/*
 !data/env_params/env_params_parcel_*.json
+
+# HeatCanyon build artifacts
+.venv/
+web/data/*.bin
+
+# HeatCanyon caches ARE shipped, deliberately: the FortyGuard responses cost
+# credits and the NYC Open Data pulls take minutes, so committing them makes the
+# whole pipeline reproducible offline at zero cost and zero API calls.
+!data/manhattan/
+data/manhattan/*
+!data/manhattan/*.json
+!data/nyc/
+data/nyc/*
+!data/nyc/*.json
+!data/nyc/*.geojson

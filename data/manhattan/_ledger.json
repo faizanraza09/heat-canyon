@@ -1,0 +1,213 @@
+{
+  "calls": [
+    {
+      "at": "2026-08-27T13:35:28Z",
+      "endpoint": "/v1/heatmap",
+      "label": "probe_fidi_day",
+      "activity_id": "8e5c91ec-434b-424c-b365-f4a9aaa23757",
+      "elapsed_s": 31.8,
+      "credits_before": 2000000,
+      "credits_after": 1995780,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__probe_fidi_day__21756b195759.json"
+    },
+    {
+      "at": "2026-08-27T13:37:40Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_peakhour",
+      "activity_id": "e4ac1360-5f9a-435b-86fa-a907d5b83a42",
+      "elapsed_s": 33.9,
+      "credits_before": 1995780,
+      "credits_after": 1991560,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_peakhour__a8340c4b47a9.json"
+    },
+    {
+      "at": "2026-08-27T13:38:12Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_fullday",
+      "activity_id": "5a45b4f2-91c9-4166-8ffa-4622f8014f9f",
+      "elapsed_s": 27.8,
+      "credits_before": 1991560,
+      "credits_after": 1987340,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_fullday__e1d874b787c5.json"
+    },
+    {
+      "at": "2026-08-27T13:38:55Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_exceedance_35C",
+      "activity_id": "2c1212e9-cdcc-41a1-84ab-0decddbb6963",
+      "elapsed_s": 38.0,
+      "credits_before": 1987340,
+      "credits_after": 1983120,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_exceedance_35C__e5a5e013ac2c.json"
+    },
+    {
+      "at": "2026-08-27T13:39:30Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_persistence_35C",
+      "activity_id": "97fc180a-fa00-4c26-9fe7-841b3cf44e2e",
+      "elapsed_s": 30.3,
+      "credits_before": 1983120,
+      "credits_after": 1978900,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_persistence_35C__248196d3b4dc.json"
+    },
+    {
+      "at": "2026-08-27T13:39:57Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_timeofpeak",
+      "activity_id": "448ceb57-e7d4-4dd9-9cbd-243e96f18f1f",
+      "elapsed_s": 21.9,
+      "credits_before": 1978900,
+      "credits_after": 1974680,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_timeofpeak__697bd16102a1.json"
+    },
+    {
+      "at": "2026-08-27T13:40:17Z",
+      "endpoint": "/v1/env_params",
+      "label": "midtown_env_bryant_park_2026-07-02",
+      "activity_id": "33a8f69e-47a7-4c0f-8454-aa50c5e93276",
+      "elapsed_s": 3.9,
+      "credits_before": 1974680,
+      "credits_after": 1971780,
+      "credits_delta": 2900,
+      "cache_file": "v1_env_params__midtown_env_bryant_park_2026-07-02__d01e9909824b.json"
+    },
+    {
+      "at": "2026-08-27T13:40:27Z",
+      "endpoint": "/v1/env_params",
+      "label": "midtown_env_grand_central_2026-07-02",
+      "activity_id": "07f6ef30-6128-4151-9da2-2d130ea3c117",
+      "elapsed_s": 9.1,
+      "credits_before": 1971780,
+      "credits_after": 1968880,
+      "credits_delta": 2900,
+      "cache_file": "v1_env_params__midtown_env_grand_central_2026-07-02__90d814e4b974.json"
+    },
+    {
+      "at": "2026-08-27T13:40:46Z",
+      "endpoint": "/v1/env_params",
+      "label": "midtown_env_hudson_yards_2026-07-02",
+      "activity_id": "e158d720-dc5f-4ccc-9f5c-470d6740c463",
+      "elapsed_s": 11.8,
+      "credits_before": 1968880,
+      "credits_after": 1965980,
+      "credits_delta": 2900,
+      "cache_file": "v1_env_params__midtown_env_hudson_yards_2026-07-02__4801e79177f6.json"
+    },
+    {
+      "at": "2026-08-27T13:48:39Z",
+      "endpoint": "/v1/env_params",
+      "label": "midtown_solar_bryant_2026-07-02",
+      "activity_id": "5ccfd444-c3fa-4bf6-91f1-686495cb43c3",
+      "elapsed_s": 6.7,
+      "credits_before": 1965980,
+      "credits_after": 1963080,
+      "credits_delta": 2900,
+      "cache_file": "v1_env_params__midtown_solar_bryant_2026-07-02__d3c5ac1314d9.json"
+    },
+    {
+      "at": "2026-08-27T13:50:18Z",
+      "endpoint": "/v1/heatmap",
+      "label": "tzcontrol_1000",
+      "activity_id": "5d15d834-59f2-4c42-8823-a64cf42646f6",
+      "elapsed_s": 29.4,
+      "credits_before": 1963080,
+      "credits_after": 1958860,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__tzcontrol_1000__46486ebc6c6a.json"
+    },
+    {
+      "at": "2026-08-27T13:51:20Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h02",
+      "activity_id": "3b5ba587-b218-49f6-a15c-3d2caa2adc43",
+      "elapsed_s": 21.8,
+      "credits_before": 1958860,
+      "credits_after": 1954640,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h02__9e7f153b1f3e.json"
+    },
+    {
+      "at": "2026-08-27T13:51:53Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h05",
+      "activity_id": "452223f7-6188-47a9-a5b0-aaf1cd25529c",
+      "elapsed_s": 28.2,
+      "credits_before": 1954640,
+      "credits_after": 1950420,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h05__cf36ef55e972.json"
+    },
+    {
+      "at": "2026-08-27T13:52:30Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h08",
+      "activity_id": "c431d42e-d8e2-43da-8800-150aae86b45e",
+      "elapsed_s": 32.0,
+      "credits_before": 1950420,
+      "credits_after": 1946200,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h08__45ec7ad92a75.json"
+    },
+    {
+      "at": "2026-08-27T13:53:12Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h11",
+      "activity_id": "f5b26699-1398-4069-9c7f-33cc8e901e7c",
+      "elapsed_s": 36.8,
+      "credits_before": 1946200,
+      "credits_after": 1941980,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h11__fac791489755.json"
+    },
+    {
+      "at": "2026-08-27T13:53:42Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h14",
+      "activity_id": "085a34aa-dcd0-4161-b273-a16d1acf13c3",
+      "elapsed_s": 25.7,
+      "credits_before": 1941980,
+      "credits_after": 1937760,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h14__62ac8efb86d3.json"
+    },
+    {
+      "at": "2026-08-27T13:54:13Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h17",
+      "activity_id": "999a4d04-83bb-47ce-9836-7b492e7b4ffe",
+      "elapsed_s": 26.6,
+      "credits_before": 1937760,
+      "credits_after": 1933540,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h17__935c6a700ef1.json"
+    },
+    {
+      "at": "2026-08-27T13:54:56Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h20",
+      "activity_id": "9cdf3b57-4be9-41de-81d6-84fdad37f0c0",
+      "elapsed_s": 38.2,
+      "credits_before": 1933540,
+      "credits_after": 1929320,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h20__785e693a7652.json"
+    },
+    {
+      "at": "2026-08-27T13:55:37Z",
+      "endpoint": "/v1/heatmap",
+      "label": "midtown_tcm_h23",
+      "activity_id": "08154a4b-1451-4da1-bb74-0a46f48a13f7",
+      "elapsed_s": 35.9,
+      "credits_before": 1929320,
+      "credits_after": 1925100,
+      "credits_delta": 4220,
+      "cache_file": "v1_heatmap__midtown_tcm_h23__8fd761c1016b.json"
+    }
+  ]
+}
