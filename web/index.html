@@ -1,7 +1,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>HeatCanyon — Midtown Manhattan</title>
-<meta name="description" content="A 3D street-canyon heat exposure model of Midtown Manhattan, built on the FortyGuard Temperature API and free public data." />
+<meta name="description" content="A 3D street-canyon heat exposure model of Midtown Manhattan, built on the FortyGuard Temperature API." />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,75 +21,62 @@
 <div id="app">
   <canvas id="gl"></canvas>
 
-  <!-- Boot -------------------------------------------------------------- -->
   <div id="boot">
     <h1>HeatCanyon</h1>
     <div class="bar"><i id="boot-bar"></i></div>
     <div class="sub" id="boot-msg">loading</div>
   </div>
 
-  <!-- Masthead ---------------------------------------------------------- -->
-  <header id="head" class="panel">
-    <p class="title">HeatCanyon</p>
-    <p class="strap">
-      Heat exposure in three dimensions. FortyGuard measures air temperature at 2&nbsp;m;
-      this model resolves what that means on every facade, floor and sidewalk of a
-      Manhattan street canyon.
-    </p>
-    <div class="where" id="head-where"></div>
-  </header>
+  <!-- LEFT ---------------------------------------------------------------- -->
+  <aside id="left" class="panel">
+    <header class="brand">
+      <h1>HeatCanyon</h1>
+      <p id="brand-sub"></p>
+    </header>
 
-  <!-- Left rail --------------------------------------------------------- -->
-  <div id="rail" class="panel">
-    <div class="sec">
-      <h3>Layer</h3>
-      <div class="seg" id="layers"></div>
-      <div id="legend">
-        <div class="ramp" id="legend-ramp"></div>
-        <div class="ticks" id="legend-ticks"></div>
-        <div class="cap" id="legend-cap"></div>
-      </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="view" aria-pressed="true">View</button>
+      <button data-tab="whatif" aria-pressed="false">What if</button>
+      <button data-tab="ask" aria-pressed="false">Ask</button>
+    </nav>
+
+    <div class="tabbody">
+      <section id="tab-view" class="tabpane">
+        <div class="seg" id="layers"></div>
+        <div id="legend">
+          <div class="ramp" id="legend-ramp"></div>
+          <div class="ticks" id="legend-ticks"></div>
+          <p class="cap" id="legend-cap"></p>
+        </div>
+        <div class="camrow">
+          <button id="cam-orbit" aria-pressed="true">Fly over</button>
+          <button id="cam-street" aria-pressed="false">Walk the street</button>
+          <button id="cam-next" hidden>Next street</button>
+        </div>
+        <p class="hint" id="cam-hint"></p>
+      </section>
+
+      <section id="tab-whatif" class="tabpane" hidden></section>
+      <section id="tab-ask" class="tabpane" hidden></section>
     </div>
+  </aside>
 
-    <div class="sec">
-      <h3>Ask the analyst <span class="tag d" id="ai-state">checking</span></h3>
-      <div id="ai"></div>
-    </div>
-
-    <div class="sec">
-      <h3>What if <span class="dim small" id="sc-site"></span></h3>
-      <div id="scenarios"></div>
-    </div>
-
-    <div class="sec">
-      <h3>Provenance</h3>
-      <div id="prov"></div>
-    </div>
-  </div>
-
-  <!-- Right panel ------------------------------------------------------- -->
+  <!-- RIGHT --------------------------------------------------------------- -->
   <aside id="side" class="panel">
     <div class="hd">
-      <h2 id="side-title">Priority buildings</h2>
+      <h2 id="side-title">Where to act first</h2>
       <p id="side-sub"></p>
     </div>
     <div class="body" id="side-body"></div>
   </aside>
 
-  <!-- Time -------------------------------------------------------------- -->
+  <!-- BOTTOM -------------------------------------------------------------- -->
   <div id="time" class="panel">
     <div class="row">
       <button class="play" id="play" title="Play the day">&#9658;</button>
       <div class="hours" id="hours"></div>
     </div>
     <div class="meta" id="time-meta"></div>
-  </div>
-
-  <!-- Camera ------------------------------------------------------------ -->
-  <div id="cam" class="panel">
-    <button id="cam-orbit" aria-pressed="true">orbit</button>
-    <button id="cam-street" aria-pressed="false">street level</button>
-    <span class="hint" id="cam-hint">drag to orbit &middot; scroll to zoom</span>
   </div>
 
   <div id="hover"></div>

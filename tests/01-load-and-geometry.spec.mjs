@@ -151,7 +151,7 @@ test('every facade quad is finite and non-degenerate', async ({ page }) => {
 });
 
 test('facade colours are varied rather than saturated flat', async ({ page }) => {
-  await openApp(page, { layer: 'Facade surface temperature' });
+  await openApp(page, { layer: 'Facade temperature' });
   const c = await facadeColorStats(page);
   // A flat or clipped field is the failure this guards against: the first build
   // mapped the whole afternoon into the top of the ramp and read as one colour.

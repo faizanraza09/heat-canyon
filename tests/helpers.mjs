@@ -32,13 +32,30 @@ export async function openApp(page, { hour, layer } = {}) {
   return { errors, failedRequests };
 }
 
+/** Select a layer by (partial) label. Switches to the View tab first, since the
+ *  layer list lives inside it and is hidden while another tab is showing. */
 export async function setLayer(page, label) {
   await page.evaluate((l) => {
+    document.querySelector('#tabs button[data-tab="view"]')?.click();
     const b = [...document.querySelectorAll('#layers button')]
       .find((x) => x.textContent.includes(l));
-    if (!b) throw new Error(`no layer button matching ${l}`);
+    if (!b) {
+      const have = [...document.querySelectorAll('#layers button')]
+        .map((x) => x.textContent.trim()).join(' | ');
+      throw new Error(`no layer button matching "${l}". Available: ${have}`);
+    }
     b.click();
   }, label);
+  await settle(page);
+}
+
+/** Switch the left panel to a named tab: view | whatif | ask. */
+export async function setTab(page, name) {
+  await page.evaluate((n) => {
+    const b = document.querySelector(`#tabs button[data-tab="${n}"]`);
+    if (!b) throw new Error(`no tab ${n}`);
+    b.click();
+  }, name);
   await settle(page);
 }
 

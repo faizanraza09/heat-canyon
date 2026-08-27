@@ -20,6 +20,12 @@ async function int16(name, scale = 100) {
   return out;
 }
 
+async function bytes(name) {
+  const r = await fetch(`${BASE}/${name}`);
+  if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
 async function bits(name) {
   const r = await fetch(`${BASE}/${name}`);
   if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
@@ -51,6 +57,9 @@ export async function load(onProgress = () => {}) {
   out.tiles = await json('tiles.json');          tick('temperature field');
   out.ranked = await json('ranked.json');        tick('exposure ranking');
   out.scenarios = await json('scenarios.json');  tick('scenarios');
+  out.heights = await bytes('heights.bin');       tick('collision grid');
+  out.svfBands = await bytes('svf_bands.bin');   tick('sky view factors');
+  out.groundSun = await bytes('ground_sun.bin'); tick('cast shadows');
   out.thermal = await int16('thermal.bin');      tick('facade temperatures');
   out.air = await int16('air.bin');              tick('air profiles');
   out.airSigma = await int16('air_sigma.bin');   tick('uncertainty');
@@ -63,6 +72,17 @@ export async function load(onProgress = () => {}) {
 
   out.dims = { nPan, nBand, nHour };
 
+  // Building height at a world position, from the coarse grid. Used for
+  // collision so the walker cannot pass through a tower.
+  const hg = out.meta.height_grid;
+  out.heightAt = (x, y) => {
+    if (!hg || !out.heights) return 0;
+    const j = Math.floor((x - hg.x0) / hg.res);
+    const i = Math.floor((y - hg.y0) / hg.res);
+    if (i < 0 || i >= hg.ny || j < 0 || j >= hg.nx) return 0;
+    return out.heights[i * hg.nx + j];
+  };
+
   /** Surface temperature of one band of one panel at one hour, degC. */
   out.surfaceAt = (hour, panel, band) =>
     out.thermal[(hour * nPan + panel) * nBand + band];
@@ -74,6 +94,20 @@ export async function load(onProgress = () => {}) {
   /** One-sigma uncertainty on that air temperature, K. */
   out.sigmaAt = (hour, panel, band) =>
     out.airSigma[(hour * nPan + panel) * nBand + band];
+
+  /** Sky view factor of one facade band, 0..0.5 (a wall sees at most half). */
+  out.svfAt = (panel, band) => (out.svfBands[panel * nBand + band] / 255) * 0.5;
+
+  /** Whether the ground at a world position is in direct sun at an hour. */
+  const sg = out.meta.shadow_grid;
+  out.groundSunAt = (hour, x, y) => {
+    if (!sg || !out.groundSun) return 1;
+    const j = Math.floor((x - sg.x0) / sg.res);
+    const i = Math.floor((y - sg.y0) / sg.res);
+    if (i < 0 || i >= sg.ny || j < 0 || j >= sg.nx) return 1;
+    const bit = (hour * sg.ny + i) * sg.nx + j;
+    return (out.groundSun[bit >> 3] >> (7 - (bit & 7))) & 1;
+  };
 
   /** Whether that band is in direct sun. */
   out.sunlitAt = (hour, panel, band) => {

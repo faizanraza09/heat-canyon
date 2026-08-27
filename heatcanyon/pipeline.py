@@ -43,7 +43,12 @@ OUT = Path("web/data")
 #: The diurnal hours we bought from FortyGuard, as (API GMT-5 hour, wall-clock EDT).
 HOURS = [(2, 3), (5, 6), (8, 9), (11, 12), (14, 15), (17, 18), (20, 21), (23, 0)]
 PEAK_INDEX = 4          # 14:00 GMT-5 = 15:00 EDT, the anchor hour
-N_BANDS = 6             # facade height bands
+N_BANDS = 10            # facade height bands
+# Ten rather than six. Six put a single band across 70 m of a 400 m tower, which
+# is coarser than the shadow line it is meant to resolve and visibly faceted at
+# street level. Ten costs about 4.7 MB in the browser and a few seconds in the
+# solve, and it is the resolution at which a climbing shadow actually reads as a
+# gradient rather than a staircase.
 STUDY_DATE = (2026, 7, 2)
 WAVE = ("2026-06-29", "2026-07-05")
 THRESHOLD_C = 35.0
@@ -245,6 +250,11 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
     n_hr = len(HOURS)
     therm = np.zeros((n_hr, n_pan, N_BANDS), dtype=np.float32)
     sunlit_bits = np.zeros((n_hr, n_pan, N_BANDS), dtype=bool)
+    # Per-band sky view factor. Already computed inside the solve; exporting it
+    # lets the renderer do physically real ambient occlusion instead of the
+    # crude orientation-only shading it had, which is most of why the scene
+    # looked like flat cardboard.
+    svf_band = np.zeros((n_pan, N_BANDS), dtype=np.float32)
     air_prof = np.zeros((n_hr, n_pan, N_BANDS), dtype=np.float32)
     air_sig = np.zeros((n_hr, n_pan, N_BANDS), dtype=np.float32)
 
@@ -302,6 +312,8 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
             for bi in range(N_BANDS):
                 z = h_wall * (bi + 0.5) / N_BANDS
                 svf_w = G.svf_wall_point(z, h_opp, W)
+                if hi == 0:
+                    svf_band[pi, bi] = svf_w
                 # Sunlit test: sample the 3D shadow raster a little way out from
                 # the wall at this height. A panel is lit only if the sun is on
                 # its side and nothing blocks the ray.
@@ -340,6 +352,42 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
     (OUT / "air_sigma.bin").write_bytes(_q16(air_sig.reshape(-1)))
     packed = np.packbits(sunlit_bits.reshape(-1))
     (OUT / "sunlit.bin").write_bytes(packed.tobytes())
+
+    # Coarse height grid, for collision in the walker. The browser needs to know
+    # where the buildings are so a pedestrian cannot stroll through a tower, and
+    # re-deriving that from 5,000 polygons client-side would be both slow and a
+    # second source of truth. This is the same surface model the physics used,
+    # downsampled to 4 m and clamped to one byte per cell.
+    step = max(1, int(round(4.0 / dsm.res)))
+    coarse = dsm.height[::step, ::step]
+    grid = np.clip(np.ceil(coarse), 0, 255).astype(np.uint8)
+    (OUT / "heights.bin").write_bytes(grid.tobytes())
+    grid_meta = {
+        "nx": int(grid.shape[1]), "ny": int(grid.shape[0]),
+        "res": round(dsm.res * step, 3),
+        "x0": round(dsm.x0, 2), "y0": round(dsm.y0, 2),
+    }
+
+    # Wall sky view factor, one byte per band. A facade deep in a canyon sees
+    # almost no sky, and rendering that as genuine darkening is what makes a
+    # street read as a canyon rather than a corridor of lit boxes.
+    (OUT / "svf_bands.bin").write_bytes(
+        np.clip(np.round(svf_band / 0.5 * 255.0), 0, 255).astype(np.uint8).tobytes()
+    )
+
+    # Cast shadows on the ground, per hour, from the same ray-traced masks the
+    # physics used. Painting these onto the ground plane is exact rather than
+    # decorative: it is the identical geometry that decided which facade bands
+    # were sunlit.
+    sh_step = max(1, int(round(6.0 / dsm.res)))
+    sh_stack = np.stack([sh[::sh_step, ::sh_step] for sh in shadows], axis=0)
+    (OUT / "ground_sun.bin").write_bytes(np.packbits(sh_stack.reshape(-1)).tobytes())
+    shadow_meta = {
+        "nx": int(sh_stack.shape[2]), "ny": int(sh_stack.shape[1]),
+        "res": round(dsm.res * sh_step, 3),
+        "x0": round(dsm.x0, 2), "y0": round(dsm.y0, 2),
+        "hours": int(sh_stack.shape[0]),
+    }
     log(f"binaries: thermal {(OUT/'thermal.bin').stat().st_size/1e6:.1f} MB, "
         f"air {(OUT/'air.bin').stat().st_size/1e6:.1f} MB, "
         f"sunlit {(OUT/'sunlit.bin').stat().st_size/1e3:.0f} kB")
@@ -352,6 +400,7 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
         f_daymax=f_daymax, f_daymin=f_daymin, exc=exc, per=per, env_params=env_params,
         om=om, dsm=dsm, svf_grid=svf_grid, lambda_p=lambda_p, lambda_f=lambda_f, h_bar=h_bar,
         d_disp=d_disp, z0=z0, log=log, t_start=t_start, N_BANDS=N_BANDS,
+        grid_meta=grid_meta, shadow_meta=shadow_meta,
     )
 
 
@@ -734,6 +783,8 @@ def _finish(**kw) -> dict:
             "t2m": om.get("temperature_2m"),
             "convention": "preceding-hour mean, local EDT",
         },
+        "height_grid": kw["grid_meta"],
+        "shadow_grid": kw["shadow_meta"],
         "viewpoints": street_viewpoints(canyons, dsm, proj),
         "provenance": _provenance(),
         "spend": json.loads((Path("data/manhattan/_ledger.json")).read_text())
@@ -777,8 +828,14 @@ def street_viewpoints(
         if c.is_canyon and c.name and 18.0 <= c.width_m <= 48.0
         and c.aspect_ratio >= 1.0 and c.d_left > 4.0 and c.d_right > 4.0
     ]
-    # Deepest first: those are the canyons the model has the most to say about.
-    cands.sort(key=lambda c: -c.aspect_ratio)
+    # Order for readability, not for extremity. Sorting purely by depth put the
+    # single most extreme canyon in Midtown first -- 21 m wide between a 109 m
+    # and a 427 m wall -- which is a real place and a genuinely bad first
+    # impression: at a sky view factor near 0.1 almost nothing is visible. The
+    # key below prefers canyons near H/W 4, which is deep enough to feel
+    # enclosed and open enough to see along, and the extremes remain reachable
+    # through the next-street control.
+    cands.sort(key=lambda c: abs(c.aspect_ratio - 4.0))
 
     for c in cands:
         if c.name in seen_streets:
@@ -872,24 +929,43 @@ def _representative_canyons(canyons, cstates) -> list[tuple[str, int]]:
     they do a great deal, and a strongly asymmetric canyon where the answer
     depends on the hour.
     """
-    cy = [(i, c) for i, c in enumerate(canyons) if c.is_canyon and c.name]
+    # Restrict to streets a person would recognise before ranking them. Picking
+    # purely by extremes surfaced a 6 m Park Avenue service slot as the
+    # "deepest canyon", which is true of the data and useless as an example:
+    # the scenario panel is there to compare places, so the places have to be
+    # legible.
+    cy = [
+        (i, c) for i, c in enumerate(canyons)
+        if c.is_canyon and c.name and c.width_m >= 15.0
+        and c.d_left > 4.0 and c.d_right > 4.0
+    ]
+    if not cy:
+        cy = [(i, c) for i, c in enumerate(canyons) if c.is_canyon and c.name]
     if not cy:
         return []
+
     picks: list[tuple[str, int]] = []
+    used_names: set[str] = set()
 
     def pick(label, keyfn, filt=None):
-        pool = [(i, c) for i, c in cy if (filt(c) if filt else True)]
+        pool = [
+            (i, c) for i, c in cy
+            if (filt(c) if filt else True) and c.name not in used_names
+        ]
         if not pool:
             return
         i, c = max(pool, key=lambda t: keyfn(t[1]))
         picks.append((label, i))
+        used_names.add(c.name)
 
-    pick("Deepest symmetric canyon", lambda c: c.aspect_ratio - 4.0 * c.asymmetry,
-         lambda c: c.asymmetry < 0.25)
-    pick("Most asymmetric canyon", lambda c: c.asymmetry * min(c.aspect_ratio, 6.0))
-    pick("Widest open street", lambda c: c.svf)
-    pick("Narrowest street", lambda c: -c.width_m)
-    # De-duplicate while preserving order.
+    # Three regimes that give genuinely different answers, so the comparison
+    # teaches something rather than repeating itself.
+    pick("Deep canyon", lambda c: c.aspect_ratio - 4.0 * c.asymmetry,
+         lambda c: c.asymmetry < 0.3)
+    pick("One-sided canyon", lambda c: c.asymmetry * min(c.aspect_ratio, 6.0),
+         lambda c: c.asymmetry > 0.4)
+    pick("Open street", lambda c: c.svf, lambda c: c.aspect_ratio < 2.0)
+
     seen = set(); out = []
     for label, i in picks:
         if i in seen:

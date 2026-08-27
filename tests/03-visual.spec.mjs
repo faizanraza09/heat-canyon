@@ -96,10 +96,10 @@ test.describe('visual appearance', () => {
     // 09:00 EDT: sun low in the east, so the lit/shaded split is at its clearest.
     await setHour(page, 2);
 
-    await setLayer(page, 'Facade surface temperature');
+    await setLayer(page, 'Facade temperature');
     const cont = await pixelStats(page, await shoot(page, '02a-temperature-09h'));
 
-    await setLayer(page, 'Direct sun');
+    await setLayer(page, 'Sun and shade');
     const binary = await pixelStats(page, await shoot(page, '02b-sun-shade-09h'));
 
     // The sun layer assigns one of two colours per band, so it must render as a
@@ -116,7 +116,7 @@ test.describe('visual appearance', () => {
   });
 
   test('night is visibly cooler-toned than mid-afternoon', async ({ page }) => {
-    await openApp(page, { layer: 'Facade surface temperature' });
+    await openApp(page, { layer: 'Facade temperature' });
     await setHour(page, 0);                       // 03:00 EDT
     const nf = await shoot(page, '03-night-03h');
     const night = await pixelStats(page, nf);
@@ -135,7 +135,7 @@ test.describe('visual appearance', () => {
     // Guards the roof-index bug directly. Corrupt triangles drew near-straight
     // bright lines hundreds of pixels long over unrelated geometry, which no
     // array assertion noticed.
-    await openApp(page, { layer: 'Facade surface temperature' });
+    await openApp(page, { layer: 'Facade temperature' });
     const f = await shoot(page, '05-streak-check');
     const b64 = fs.readFileSync(f).toString('base64');
     const streaks = await page.evaluate(async (data) => {
@@ -189,7 +189,7 @@ test.describe('visual appearance', () => {
   });
 
   test('street-level camera looks down a canyon, not into a wall', async ({ page }) => {
-    await openApp(page, { layer: 'Facade surface temperature' });
+    await openApp(page, { layer: 'Facade temperature' });
     await page.click('#cam-street');
     await settle(page);
     await page.waitForTimeout(1200);
@@ -246,7 +246,7 @@ test.describe('visual appearance', () => {
   });
 
   test('selecting a building isolates it visually', async ({ page }) => {
-    await openApp(page, { layer: 'Facade surface temperature' });
+    await openApp(page, { layer: 'Facade temperature' });
     const before = await pixelStats(page, await shoot(page, '08a-before-select'));
     await page.click('#side-body .rank >> nth=0');
     await settle(page);
@@ -261,7 +261,7 @@ test.describe('visual appearance', () => {
   });
 
   test('full-page composition at 1600x1000 has no layout overflow', async ({ page }) => {
-    await openApp(page, { layer: 'Facade surface temperature' });
+    await openApp(page, { layer: 'Facade temperature' });
     await page.click('#side-body .rank >> nth=0');
     await settle(page);
     await page.waitForTimeout(1200);
@@ -269,7 +269,7 @@ test.describe('visual appearance', () => {
 
     const overflow = await page.evaluate(() => {
       const bad = [];
-      for (const id of ['head', 'rail', 'side', 'time', 'cam']) {
+      for (const id of ['left', 'side', 'time']) {
         const el = document.getElementById(id);
         if (!el) { bad.push(`${id}: missing`); continue; }
         const r = el.getBoundingClientRect();
@@ -277,6 +277,18 @@ test.describe('visual appearance', () => {
         if (r.bottom > window.innerHeight + 1 || r.top < -1) bad.push(`${id}: vertical`);
         if (r.width < 40 || r.height < 20) bad.push(`${id}: collapsed`);
       }
+      // Panels must not overlap each other. The first layout positioned the
+      // left rail at a fixed top offset that assumed the masthead above it was
+      // a particular height; once its text wrapped one more line the two
+      // collided, and the camera row landed on the time scrubber.
+      const r = (id) => document.getElementById(id).getBoundingClientRect();
+      const hits = (a, b) => !(a.right <= b.left || b.right <= a.left
+                            || a.bottom <= b.top || b.bottom <= a.top);
+      const L = r('left'), S = r('side'), T = r('time');
+      if (hits(L, S)) bad.push('left overlaps side');
+      if (hits(L, T)) bad.push('left overlaps time');
+      if (hits(S, T)) bad.push('side overlaps time');
+
       return {
         bad,
         bodyScrollsX: document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -287,7 +299,7 @@ test.describe('visual appearance', () => {
   });
 
   test('all eight hours render without error and each differs', async ({ page }) => {
-    const { errors } = await openApp(page, { layer: 'Facade surface temperature' });
+    const { errors } = await openApp(page, { layer: 'Facade temperature' });
     const seen = [];
     for (let i = 0; i < 8; i++) {
       await setHour(page, i);

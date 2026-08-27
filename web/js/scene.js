@@ -22,6 +22,23 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RAMPS, norm } from './colors.js';
 
+/** Contrast curve, indexed 0-255. A smoothstep-weighted lift: dark values fall
+ *  away faster, bright values are left nearly alone, nothing clips. Built once
+ *  because it is applied to every one of ~700,000 vertices on every recolour. */
+const CONTRAST = (() => {
+  const t = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const x = i / 255;
+    const sm = x * x * (3 - 2 * x);
+    t[i] = Math.min(1, (x * 0.40 + sm * 0.60) * 1.05);
+  }
+  return t;
+})();
+
+/** Table index for a 0..1 value, clamped so an over-bright input cannot run off
+ *  the end of the curve. */
+const curve = (v) => (v <= 0 ? 0 : v >= 1 ? 255 : (v * 255) | 0);
+
 export class Scene {
   constructor(canvas, data) {
     this.data = data;
@@ -59,8 +76,18 @@ export class Scene {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x07090d, 1);
-    this.renderer.shadowMap.enabled = false;   // shadows are in the data, not the render
+    // Shadows come from the data, not from a shadow map: the pipeline already
+    // ray-traced them through the same surface model the physics used, which is
+    // both exact and free at render time.
+    this.renderer.shadowMap.enabled = false;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // No tone mapping, deliberately. ACES was tried here and made things
+    // markedly worse: it expects linear HDR input, whereas these vertex colours
+    // come straight from a display-space colour ramp, so it lifted and
+    // desaturated the whole scene into pale pastel and cancelled the ambient
+    // occlusion it was meant to complement. Contrast is shaped in the colour
+    // computation instead, where it applies to the data rather than the frame.
+    this.renderer.toneMapping = THREE.NoToneMapping;
   }
 
   _initScene() {
@@ -73,6 +100,45 @@ export class Scene {
     // No lights. Every mesh that carries data uses MeshBasicMaterial with
     // vertex colours, so scene lighting would have nothing to act on — the
     // depth cues come from baked shading and from fog instead.
+    this._buildSky();
+  }
+
+  /** A large inward-facing sphere carrying a vertical gradient.
+   *
+   * A flat black clear colour made the skyline look cut out with scissors.
+   * Real air has depth; a horizon that lifts slightly toward a warm haze gives
+   * the buildings something to sit against and reads as atmosphere.
+   */
+  _buildSky() {
+    const geo = new THREE.SphereGeometry(9000, 32, 16);
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false,
+      uniforms: {
+        top: { value: new THREE.Color(0x05070b) },
+        horizon: { value: new THREE.Color(0x1a1a24) },
+        glow: { value: new THREE.Color(0x2e2422) },
+      },
+      vertexShader: `
+        varying float vH;
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          vH = normalize(world.xyz).y;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }`,
+      fragmentShader: `
+        uniform vec3 top; uniform vec3 horizon; uniform vec3 glow;
+        varying float vH;
+        void main() {
+          float h = clamp(vH, -1.0, 1.0);
+          // Warm band hugging the horizon, cooling upward into near-black.
+          vec3 c = mix(horizon, top, smoothstep(0.0, 0.55, h));
+          c = mix(c, glow, smoothstep(0.10, -0.05, h) * 0.6);
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+    });
+    this.sky = new THREE.Mesh(geo, mat);
+    this.sky.frustumCulled = false;
+    this.scene.add(this.sky);
   }
 
   // ---------------------------------------------------------------- ground
@@ -95,8 +161,8 @@ export class Scene {
     // the measured layer, and it is drawn *under* the modelled facades so the
     // two are never visually confused.
     this.groundCanvas = document.createElement('canvas');
-    this.groundCanvas.width = 1024;
-    this.groundCanvas.height = 1024;
+    this.groundCanvas.width = 2048;
+    this.groundCanvas.height = 2048;
     this.groundTex = new THREE.CanvasTexture(this.groundCanvas);
     this.groundTex.colorSpace = THREE.SRGBColorSpace;
     // Mipmapping and anisotropy are both essential here, and leaving them off
@@ -115,7 +181,7 @@ export class Scene {
     // opaque ground at peak hour drowns them.
     const g = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
-      new THREE.MeshBasicMaterial({ map: this.groundTex, transparent: true, opacity: 0.34 })
+      new THREE.MeshBasicMaterial({ map: this.groundTex, transparent: true, opacity: 0.62 })
     );
     g.rotation.x = -Math.PI / 2;
     g.position.y = -0.25;
@@ -183,6 +249,38 @@ export class Scene {
       ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},0.95)`;
       ctx.fillRect(px - cell / 2, py - cell / 2, cell, cell);
     }
+
+    // Cast building shadows, from the ray-traced masks the pipeline exported.
+    // This is the single largest realism gain available here: the 60 m
+    // temperature lattice is far too coarse to look like a street, whereas the
+    // 6 m shadow mask draws the actual pattern of towers falling across the
+    // ground at this hour. It is the same geometry that decided which facade
+    // bands are sunlit, so none of it is decorative.
+    const sg = meta.shadow_grid;
+    if (sg && this.data.groundSun && this.data.meta.hours[this.hour].sun_alt > 0) {
+      const sw = (sg.res / aw) * W + 1;
+      ctx.fillStyle = 'rgba(4,5,9,0.44)';
+      for (let i = 0; i < sg.ny; i++) {
+        const wy = sg.y0 + (i + 0.5) * sg.res;
+        const py2 = H - ((wy + ah / 2) / ah) * H;
+        if (py2 < -sw || py2 > H + sw) continue;
+        // Merge contiguous shaded cells into one rectangle per run: far fewer
+        // fill calls than one per cell, and no visible seams between them.
+        let runStart = -1;
+        for (let j = 0; j <= sg.nx; j++) {
+          const shaded = j < sg.nx
+            && !this.data.groundSunAt(this.hour, sg.x0 + (j + 0.5) * sg.res, wy);
+          if (shaded && runStart < 0) runStart = j;
+          if (!shaded && runStart >= 0) {
+            const pxa = ((sg.x0 + runStart * sg.res + aw / 2) / aw) * W;
+            const pxb = ((sg.x0 + j * sg.res + aw / 2) / aw) * W;
+            ctx.fillRect(pxa, py2 - sw / 2, Math.max(pxb - pxa, 1), sw);
+            runStart = -1;
+          }
+        }
+      }
+    }
+
     // Repainting the canvas invalidates the mipmap chain as well as the base
     // level, so both have to be re-uploaded.
     this.groundTex.needsUpdate = true;
@@ -243,18 +341,32 @@ export class Scene {
       }
     }
 
-    // Fixed shading factor per quad: a notional light from the north-west plus
-    // a gentle darkening towards the canyon floor. Constant per surface, so it
-    // reads as form without ever being confusable with the data.
-    this.quadShade = new Float32Array(nQuad);
-    const LX = -0.55, LY = 0.72, LZ = 0.42;   // notional light direction
+    // Ambient occlusion, from the sky view factor the physics already computed
+    // for every band. This replaced a fixed "notional light from the
+    // north-west", which lit every wall in the city identically regardless of
+    // how enclosed it was, and was the main reason the scene read as flat
+    // cardboard. A band deep in a canyon genuinely receives very little diffuse
+    // light, and drawing that is both more truthful and far more legible,
+    // because it is what makes a canyon look deep.
+    //
+    // Wall SVF runs 0 to 0.5, so it is normalised against 0.5 first. The floor
+    // of 0.26 keeps the deepest bands readable rather than crushed to black,
+    // and the exponent is there because perceived brightness does not track
+    // irradiance linearly.
+    this.quadAO = new Float32Array(nQuad);
+    this.quadNX = new Float32Array(nQuad);
+    this.quadNZ = new Float32Array(nQuad);
     for (let q = 0; q < nQuad; q++) {
-      const p = this.quadPanel[q];
+      const p = this.quadPanel[q], b = this.quadBand[q];
+      const svf = Math.min(1, this.data.svfAt(p, b) / 0.5);
+      // The floor is a bounce term, not a fudge. A wall that sees almost no sky
+      // still receives light reflected from the road and the facade opposite,
+      // which is why a real deep canyon is dim rather than pitch black. Without
+      // it the deepest canyons rendered as unreadable murk.
+      this.quadAO[q] = 0.34 + 0.66 * Math.pow(svf, 0.58);
       const a = (facades.az[p] * Math.PI) / 180;
-      const nx = Math.sin(a), nz = -Math.cos(a);   // outward normal, world XZ
-      const d = Math.max(0, nx * LX + nz * LZ) + LY * 0.22;
-      const bandFrac = (this.quadBand[q] + 0.5) / nBand;
-      this.quadShade[q] = (0.62 + 0.38 * Math.min(1, d)) * (0.84 + 0.16 * bandFrac);
+      this.quadNX[q] = Math.sin(a);
+      this.quadNZ[q] = -Math.cos(a);
     }
 
     const geo = new THREE.BufferGeometry();
@@ -365,26 +477,85 @@ export class Scene {
       pos: new THREE.Vector3(0, 1.7, 0),
       yaw: 0, pitch: 0,
       keys: new Set(),
-      speed: 34,
+      speed: 11,   // brisk walking pace; Shift for a jog
     };
     this._initFirstPerson();
   }
 
   _initFirstPerson() {
     const el = this.renderer.domElement;
+
+    // Never steal keystrokes from a form field. Without this guard, typing a
+    // question into the analyst box both drove the camera and lost characters
+    // to preventDefault — "why is west 47th street so warm" arrived as
+    // "hyiet47thtreetorm".
+    const typing = () => {
+      const a = document.activeElement;
+      if (!a) return false;
+      const tag = a.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || a.isContentEditable;
+    };
+
+    const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft'];
     window.addEventListener('keydown', (e) => {
-      if (this.mode !== 'street') return;
+      if (this.mode !== 'street' || typing()) return;
       this.fp.keys.add(e.code);
-      if (['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft'].includes(e.code)) e.preventDefault();
+      if (MOVE_KEYS.includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.fp.keys.delete(e.code));
+    // Losing focus must not leave a key stuck down.
+    window.addEventListener('blur', () => this.fp.keys.clear());
+
     el.addEventListener('mousemove', (e) => {
       if (this.mode !== 'street' || !this._dragging) return;
-      this.fp.yaw -= e.movementX * 0.0026;
-      this.fp.pitch = Math.max(-1.35, Math.min(1.35, this.fp.pitch - e.movementY * 0.0026));
+      // Yaw must INCREASE when the pointer moves right. Forward is
+      // (sin yaw, 0, -cos yaw), so a growing yaw swings the view clockwise,
+      // which is what dragging right should do. The original subtracted here
+      // and turned the view the wrong way, which is a large part of why the
+      // street view felt broken.
+      this.fp.yaw += e.movementX * 0.0028;
+      this.fp.pitch = Math.max(-1.3, Math.min(1.3, this.fp.pitch - e.movementY * 0.0028));
     });
-    el.addEventListener('mousedown', () => { this._dragging = true; });
+    el.addEventListener('mousedown', (e) => {
+      if (e.button === 0) this._dragging = true;
+    });
     window.addEventListener('mouseup', () => { this._dragging = false; });
+
+    // Scroll should do something in street mode too. With OrbitControls
+    // disabled the wheel was simply inert, which reads as a broken control, so
+    // it dollies the walker along the view direction.
+    el.addEventListener('wheel', (e) => {
+      if (this.mode !== 'street') return;
+      e.preventDefault();
+      const step = -Math.sign(e.deltaY) * 6.0;
+      const fwd = new THREE.Vector3(Math.sin(this.fp.yaw), 0, -Math.cos(this.fp.yaw));
+      this._tryMove(fwd, step);
+    }, { passive: false });
+  }
+
+  /** Move the walker if the destination is not inside a building.
+   *
+   * Collision is a lookup against the coarse height grid the pipeline exports
+   * from the same surface model the physics used. Without it the walker strolled
+   * straight through a 109 m tower, which makes the street view feel like a
+   * rendering rather than a place.
+   */
+  _tryMove(dir, dist) {
+    const f = this.fp;
+    const R = 1.4;                      // shoulder clearance, metres
+    const nx = f.pos.x + dir.x * dist;
+    const nz = f.pos.z + dir.z * dist;
+    const blocked = (x, z) => this.data.heightAt(x, -z) > f.pos.y + 0.4;
+
+    // Try the full move, then each axis alone, so sliding along a wall works
+    // instead of stopping dead.
+    if (!blocked(nx + Math.sign(dir.x) * R, nz + Math.sign(dir.z) * R)
+        && !blocked(nx, nz)) {
+      f.pos.x = nx; f.pos.z = nz;
+      return;
+    }
+    if (!blocked(nx + Math.sign(dir.x) * R, f.pos.z)) f.pos.x = nx;
+    if (!blocked(f.pos.x, nz + Math.sign(dir.z) * R)) f.pos.z = nz;
   }
 
   setMode(mode, at) {
@@ -481,7 +652,20 @@ export class Scene {
       this._lastPointer = { x: e.clientX, y: e.clientY };
     });
     el.addEventListener('pointerleave', () => { this.pointer.set(-9, -9); });
-    el.addEventListener('click', () => {
+
+    // Distinguish a click from the end of a drag. Orbiting the camera ends in a
+    // mouseup that the browser also reports as a click, so without this a
+    // camera move would select or deselect a building every time.
+    let downAt = null;
+    el.addEventListener('pointerdown', (e) => {
+      downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!downAt) return;
+      const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+      const held = performance.now() - downAt.t;
+      downAt = null;
+      if (moved > 6 || held > 500) return;   // that was a drag, not a click
       const hit = this.hitTest();
       if (this.onPick) this.onPick(hit);
     });
@@ -573,6 +757,17 @@ export class Scene {
     // building stands out without changing its data colour.
     const sel = this.selected;
 
+    // Directional term from the *actual* solar position this hour, so the form
+    // the eye reads agrees with the physics instead of contradicting it: the
+    // faces that look brightest are the faces the sun is really on. Below the
+    // horizon it falls back to ambient occlusion alone.
+    const Hh = d.meta.hours[this.hour];
+    const sunUp = Hh.sun_alt > 0;
+    const altR = (Hh.sun_alt * Math.PI) / 180;
+    const azR = (Hh.sun_az * Math.PI) / 180;
+    const sx = Math.cos(altR) * Math.sin(azR);
+    const sz = -Math.cos(altR) * Math.cos(azR);
+
     for (let q = 0; q < this.nQuad; q++) {
       const p = this.quadPanel[q], b = this.quadBand[q];
       let c;
@@ -588,8 +783,22 @@ export class Scene {
       } else {
         c = f(norm(d.surfaceAt(this.hour, p, b), dom[0], dom[1]));
       }
-      const sh = this.quadShade[q];
+      let sh = this.quadAO[q];
+      if (sunUp) {
+        const facing = Math.max(0, this.quadNX[q] * sx + this.quadNZ[q] * sz);
+        const lit = (layer === 'sun') ? 1 : (d.sunlitAt(this.hour, p, b) ? 1 : 0);
+        sh *= 1.0 + 0.38 * facing * lit;
+      }
       let r = (c[0] / 255) * sh, g = (c[1] / 255) * sh, bl = (c[2] / 255) * sh;
+      // Gentle S-curve. Multiplying a colour ramp by an occlusion factor pulls
+      // everything toward mid grey and reads as chalky; deepening the low end
+      // while holding the top restores the sense that a shaded canyon is dark
+      // and a sunlit wall is bright, without shifting the hue that carries the
+      // measurement.
+      // Clamp before indexing. The solar term can push the shading factor above
+      // 1.0, so an unclamped index ran off the end of the 256-entry table and
+      // returned undefined, which propagated as NaN into the colour buffer.
+      r = CONTRAST[curve(r)]; g = CONTRAST[curve(g)]; bl = CONTRAST[curve(bl)];
       if (sel !== null && this.quadBuilding[q] !== sel) {
         const grey = (r + g + bl) / 3;
         r = r * 0.34 + grey * 0.18; g = g * 0.34 + grey * 0.18; bl = bl * 0.34 + grey * 0.22;
@@ -635,7 +844,11 @@ export class Scene {
         }
         c = RAMPS.temperature(norm(t, dom[0], dom[1]));
       }
-      let r = (c[0] / 255) * 1.0, g = (c[1] / 255) * 1.0, bl = (c[2] / 255) * 1.0;
+      // Roofs are the least obstructed surface in the city, so they carry
+      // nearly the full value — trimmed only enough to stop them flaring
+      // against the occluded facades below.
+      const rs = 0.94;
+      let r = (c[0] / 255) * rs, g = (c[1] / 255) * rs, bl = (c[2] / 255) * rs;
       if (sel !== null && i !== sel) {
         const grey = (r + g + bl) / 3;
         r = r * 0.34 + grey * 0.18; g = g * 0.34 + grey * 0.18; bl = bl * 0.34 + grey * 0.22;
@@ -682,17 +895,20 @@ export class Scene {
   tick(dt) {
     if (this.mode === 'street') {
       const f = this.fp, k = f.keys;
-      const sp = f.speed * dt * (k.has('ShiftLeft') ? 3.2 : 1);
+      const sp = f.speed * dt * (k.has('ShiftLeft') ? 3.0 : 1);
       // Forward and right on the ground plane, from the yaw. World axes are
       // x = east, z = -north, so a compass bearing maps to (sin, 0, -cos).
       const fwd = new THREE.Vector3(Math.sin(f.yaw), 0, -Math.cos(f.yaw));
       const rgt = new THREE.Vector3(Math.cos(f.yaw), 0, Math.sin(f.yaw));
-      if (k.has('KeyW')) f.pos.addScaledVector(fwd, sp);
-      if (k.has('KeyS')) f.pos.addScaledVector(fwd, -sp);
-      if (k.has('KeyD')) f.pos.addScaledVector(rgt, sp);
-      if (k.has('KeyA')) f.pos.addScaledVector(rgt, -sp);
-      if (k.has('KeyE')) f.pos.y = Math.min(400, f.pos.y + sp);
+      if (k.has('KeyW')) this._tryMove(fwd, sp);
+      if (k.has('KeyS')) this._tryMove(fwd, -sp);
+      if (k.has('KeyD')) this._tryMove(rgt, sp);
+      if (k.has('KeyA')) this._tryMove(rgt, -sp);
+      if (k.has('KeyE')) f.pos.y = Math.min(420, f.pos.y + sp);
       if (k.has('KeyQ')) f.pos.y = Math.max(1.7, f.pos.y - sp);
+      // If a roof has been climbed onto, stand on it rather than inside it.
+      const ground = this.data.heightAt(f.pos.x, -f.pos.z);
+      if (ground > 0 && f.pos.y < ground + 1.7) f.pos.y = ground + 1.7;
       // Aim with lookAt rather than composing Euler rotations.
       //
       // This was a genuine bug and an instructive one. A yaw applied as
