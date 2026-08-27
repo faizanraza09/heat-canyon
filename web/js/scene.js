@@ -1,0 +1,652 @@
+/* The 3D scene.
+ *
+ * Why three.js rather than deck.gl or MapLibre fill-extrusion: this project's
+ * whole point is that temperature varies *across a single facade* — up its
+ * height and by which way it faces. Both deck.gl's extruded polygon layers and
+ * MapLibre's fill-extrusion assign one colour per building, and MapLibre's
+ * `fill-extrusion-vertical-gradient` is a fixed shading darkening, not a
+ * data-driven ramp. Getting a real per-band, per-orientation field out of either
+ * means injecting custom GLSL into someone else's shader.
+ *
+ * Building the facade geometry directly as coloured triangles removes that
+ * fight entirely: every band of every wall is its own quad with its own vertex
+ * colours, so the vertical structure the physics computed is exactly what gets
+ * drawn. The cost is having to supply our own basemap, which is fine here —
+ * a photographic basemap would fight the data for attention anyway.
+ *
+ * Coordinates: the pipeline exports a local east-north-up frame in metres. Map
+ * it to three.js's Y-up convention as (east, up, -north).
+ */
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RAMPS, norm } from './colors.js';
+
+export class Scene {
+  constructor(canvas, data) {
+    this.data = data;
+    this.canvas = canvas;
+    this.hour = data.meta.peak_index;
+    this.layer = 'surface';
+    this.selected = null;
+    this.mode = 'orbit';
+
+    this._initRenderer();
+    this._initScene();
+    this._buildGround();
+    this._buildFacades();
+    this._buildRoofs();
+    this._initCameras();
+    this._initPicking();
+
+    // Colour domains must exist before the first recolour. The scene derives
+    // its own defaults from the data so it is valid the moment it is
+    // constructed; setDomains() can still override them afterwards. Depending
+    // on an external call ordering here was a real bug — the constructor
+    // recolours, so a domain set later arrives too late.
+    this._defaultDomains();
+    this.setHour(this.hour);
+    window.addEventListener('resize', () => this._resize());
+    this._resize();
+  }
+
+  // ------------------------------------------------------------- plumbing
+
+  _initRenderer() {
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas, antialias: true, powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setClearColor(0x07090d, 1);
+    this.renderer.shadowMap.enabled = false;   // shadows are in the data, not the render
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+  }
+
+  _initScene() {
+    this.scene = new THREE.Scene();
+    // Fog does real work here: at street level it stops the far side of
+    // Midtown reading as a wall of noise, and it gives depth cues that a flat
+    // unlit colour field otherwise lacks.
+    this.scene.fog = new THREE.Fog(0x07090d, 1400, 4800);
+
+    // No lights. Every mesh that carries data uses MeshBasicMaterial with
+    // vertex colours, so scene lighting would have nothing to act on — the
+    // depth cues come from baked shading and from fog instead.
+  }
+
+  // ---------------------------------------------------------------- ground
+
+  _buildGround() {
+    const meta = this.data.meta;
+    const w = meta.aoi.width_m, h = meta.aoi.height_m;
+    const pad = 600;
+
+    // Backdrop plane, so the city does not float in a void.
+    const back = new THREE.Mesh(
+      new THREE.PlaneGeometry(w + pad * 4, h + pad * 4),
+      new THREE.MeshBasicMaterial({ color: 0x0a0d13 })
+    );
+    back.rotation.x = -Math.PI / 2;
+    back.position.y = -0.8;
+    this.scene.add(back);
+
+    // The FortyGuard 2 m field, painted onto the ground as a texture. This is
+    // the measured layer, and it is drawn *under* the modelled facades so the
+    // two are never visually confused.
+    this.groundCanvas = document.createElement('canvas');
+    this.groundCanvas.width = 1024;
+    this.groundCanvas.height = 1024;
+    this.groundTex = new THREE.CanvasTexture(this.groundCanvas);
+    this.groundTex.colorSpace = THREE.SRGBColorSpace;
+    // Mipmapping and anisotropy are both essential here, and leaving them off
+    // was a real bug: a single 2 km plane viewed at a grazing angle undersamples
+    // its own texture badly, and with plain LinearFilter (which suppresses
+    // mipmaps) that aliasing appeared as long bright streaks shooting across the
+    // city, which read exactly like broken geometry. Trilinear filtering plus
+    // the driver's maximum anisotropy removes it completely.
+    this.groundTex.minFilter = THREE.LinearMipmapLinearFilter;
+    this.groundTex.magFilter = THREE.LinearFilter;
+    this.groundTex.generateMipmaps = true;
+    this.groundTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+
+    // Deliberately semi-transparent over the dark backdrop: the ground carries
+    // the measured 2 m field, but the facades carry the finding, and a fully
+    // opaque ground at peak hour drowns them.
+    const g = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ map: this.groundTex, transparent: true, opacity: 0.34 })
+    );
+    g.rotation.x = -Math.PI / 2;
+    g.position.y = -0.25;
+    this.scene.add(g);
+    this.ground = g;
+
+    // Street centre lines, drawn as thin bright lines. They read as a street
+    // map and make the canyon structure legible from above.
+    const pts = [];
+    for (const c of this.data.canyons) {
+      const a = (c.bearing * Math.PI) / 180;
+      const dx = Math.sin(a) * 11, dy = Math.cos(a) * 11;
+      pts.push(c.x - dx, 0.15, -(c.y - dy), c.x + dx, 0.15, -(c.y + dy));
+    }
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    this.streets = new THREE.LineSegments(
+      lg, new THREE.LineBasicMaterial({ color: 0x2c3547, transparent: true, opacity: 0.85 })
+    );
+    this.scene.add(this.streets);
+  }
+
+  _paintGround() {
+    const { tiles, meta } = this.data;
+    const ctx = this.groundCanvas.getContext('2d');
+    const W = this.groundCanvas.width, H = this.groundCanvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const layer = this.groundLayer || 'exceedance';
+    let pts, dom, rampName;
+    if (layer === 'persistence') {
+      pts = tiles.persistence;
+      const s = tiles.stats.persistence;
+      dom = [s.min, s.max]; rampName = 'duration';
+    } else if (layer === 'air') {
+      // Air temperature across the AOI spans only about 1-2.6 K at any one
+      // hour. Painted against the whole-day domain it saturates to a single
+      // flat colour, which hides the very spatial pattern a 60 m grid exists to
+      // show. So this layer alone is contrast-stretched to the hour's own
+      // range, and the interface says so wherever it is selected. Absolute
+      // values stay available in the scrubber readout and on hover.
+      pts = tiles.air[this.hour];
+      const st = tiles.stats.air[this.hour];
+      dom = st ? [st.p10, st.p90] : this.airDomain;
+      rampName = 'temperature';
+    } else {
+      pts = tiles.exceedance;
+      const s = tiles.stats.exceedance;
+      dom = [s.min, s.max]; rampName = 'duration';
+    }
+    this.groundDomain = dom;
+    this.groundRamp = rampName;
+    const f = RAMPS[rampName];
+
+    const aw = meta.aoi.width_m, ah = meta.aoi.height_m;
+    // Slight overlap between neighbouring tiles so the 60 m lattice reads as a
+    // continuous field rather than a grid of separated squares.
+    const cell = (tiles.grid_m / aw) * W * 1.08;
+    for (const [x, y, v] of pts) {
+      // Local metres -> texture pixels. The plane's UV origin is bottom-left
+      // in world terms, which after the -PI/2 rotation means +y maps upward.
+      const px = ((x + aw / 2) / aw) * W;
+      const py = H - ((y + ah / 2) / ah) * H;
+      const c = f(norm(v, dom[0], dom[1]));
+      ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},0.95)`;
+      ctx.fillRect(px - cell / 2, py - cell / 2, cell, cell);
+    }
+    // Repainting the canvas invalidates the mipmap chain as well as the base
+    // level, so both have to be re-uploaded.
+    this.groundTex.needsUpdate = true;
+    this.groundTex.generateMipmaps = true;
+  }
+
+  // --------------------------------------------------------------- facades
+
+  _buildFacades() {
+    const { facades, buildings, dims } = this.data;
+    const nPan = facades.n, nBand = facades.bands;
+    const xy = facades.xy, base = facades.base, top = facades.top;
+
+    const nQuad = nPan * nBand;
+    const pos = new Float32Array(nQuad * 4 * 3);
+    const col = new Float32Array(nQuad * 4 * 3);
+    const idx = new Uint32Array(nQuad * 6);
+    // Per-vertex panel and band index, so picking and recolouring can go
+    // straight from a vertex back to the physics cell it came from.
+    this.quadPanel = new Int32Array(nQuad);
+    this.quadBand = new Uint8Array(nQuad);
+    this.quadBuilding = new Int32Array(nQuad);
+
+    let q = 0;
+    for (let p = 0; p < nPan; p++) {
+      const x0 = xy[p * 4], y0 = xy[p * 4 + 1];
+      const x1 = xy[p * 4 + 2], y1 = xy[p * 4 + 3];
+      // Render on a flat datum: walls run from 0 to their height above their own
+      // local ground, not from their NAVD88 ground elevation.
+      //
+      // This matters. Midtown's terrain sits 0-26 m above the datum, so drawing
+      // each building from its absolute base left 98% of the city floating a
+      // median 13 m above the ground plane — and the bright measured field
+      // painted on that plane showed through the gap as streaks along every
+      // street. There is no terrain mesh here, and every quantity the physics
+      // computes is a height above local ground, so a flat datum is both the
+      // honest choice and the consistent one. The absolute elevation is kept in
+      // the data for anyone who needs it.
+      const hh = Math.max(top[p] - base[p], 0.5);
+      const zb = 0;
+      const bi = facades.building[p];
+      for (let b = 0; b < nBand; b++) {
+        const za = zb + (hh * b) / nBand;
+        const zc = zb + (hh * (b + 1)) / nBand;
+        const o = q * 12;
+        // Quad corners: bottom-left, bottom-right, top-right, top-left.
+        pos[o + 0] = x0; pos[o + 1] = za; pos[o + 2] = -y0;
+        pos[o + 3] = x1; pos[o + 4] = za; pos[o + 5] = -y1;
+        pos[o + 6] = x1; pos[o + 7] = zc; pos[o + 8] = -y1;
+        pos[o + 9] = x0; pos[o + 10] = zc; pos[o + 11] = -y0;
+        const v = q * 4, e = q * 6;
+        idx[e] = v; idx[e + 1] = v + 1; idx[e + 2] = v + 2;
+        idx[e + 3] = v; idx[e + 4] = v + 2; idx[e + 5] = v + 3;
+        this.quadPanel[q] = p;
+        this.quadBand[q] = b;
+        this.quadBuilding[q] = bi;
+        q++;
+      }
+    }
+
+    // Fixed shading factor per quad: a notional light from the north-west plus
+    // a gentle darkening towards the canyon floor. Constant per surface, so it
+    // reads as form without ever being confusable with the data.
+    this.quadShade = new Float32Array(nQuad);
+    const LX = -0.55, LY = 0.72, LZ = 0.42;   // notional light direction
+    for (let q = 0; q < nQuad; q++) {
+      const p = this.quadPanel[q];
+      const a = (facades.az[p] * Math.PI) / 180;
+      const nx = Math.sin(a), nz = -Math.cos(a);   // outward normal, world XZ
+      const d = Math.max(0, nx * LX + nz * LZ) + LY * 0.22;
+      const bandFrac = (this.quadBand[q] + 0.5) / nBand;
+      this.quadShade[q] = (0.62 + 0.38 * Math.min(1, d)) * (0.84 + 0.16 * bandFrac);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(new THREE.Uint32BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+
+    // MeshBasicMaterial, not Lambert: on this mesh the colour *is* the
+    // measurement, and letting a light source multiply it would mean a facade's
+    // apparent temperature depended on which way the camera was facing. Form
+    // instead comes from a fixed shading factor baked into the vertex colours
+    // per panel orientation (see _shadeFor), which is constant per surface and
+    // therefore cannot be mistaken for data.
+    this.facadeMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide,
+    }));
+    this.scene.add(this.facadeMesh);
+    this.facadeColors = geo.getAttribute('color');
+    this.nQuad = nQuad;
+  }
+
+  // ----------------------------------------------------------------- roofs
+
+  _buildRoofs() {
+    const { buildings } = this.data;
+    const rings = buildings.rings, attrs = buildings.attrs;
+    const pos = [], col = [], idx = [];
+    this.roofVertBuilding = [];
+    let vbase = 0;
+    this.roofRange = [];
+
+    for (let i = 0; i < rings.length; i++) {
+      const flat = rings[i];
+      const n = flat.length / 2;
+      if (n < 3) { this.roofRange.push([vbase, 0]); continue; }
+      const contour = [];
+      for (let k = 0; k < n; k++) contour.push(new THREE.Vector2(flat[k * 2], flat[k * 2 + 1]));
+
+      // Pass a COPY. THREE.ShapeUtils.triangulateShape mutates the array it is
+      // given — it pops a duplicate end point when the first and last vertices
+      // coincide — and that mutation was the source of a genuinely nasty bug:
+      // the loop pushed contour.length vertices but advanced the write cursor
+      // by the original n, so from the first affected footprint onward every
+      // building's indices pointed into a neighbour's vertices. The result was
+      // roof triangles with edges up to 3 km, spanning the whole study area and
+      // slicing across the city as bright streaks that looked for all the world
+      // like a data problem rather than an off-by-one.
+      let tris;
+      try { tris = THREE.ShapeUtils.triangulateShape(contour.slice(), []); }
+      catch (e) { tris = []; }
+
+      // Flat datum, matching the facades — see the note in _buildFacades.
+      const zt = attrs[i].h;
+      const start = vbase;
+      for (const v of contour) {
+        pos.push(v.x, zt, -v.y);
+        col.push(0, 0, 0);
+        this.roofVertBuilding.push(i);
+      }
+      const count = contour.length;
+      for (const t of tris) {
+        // Belt and braces: never emit an index outside this footprint's own
+        // vertices, so a future change to the triangulator cannot silently
+        // reintroduce cross-building geometry.
+        if (t[0] >= count || t[1] >= count || t[2] >= count) continue;
+        idx.push(start + t[0], start + t[2], start + t[1]);
+      }
+      vbase += count;
+      this.roofRange.push([start, count]);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    this.roofMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide,
+    }));
+    this.scene.add(this.roofMesh);
+    this.roofColors = geo.getAttribute('color');
+  }
+
+  // --------------------------------------------------------------- cameras
+
+  _initCameras() {
+    const aspect = window.innerWidth / window.innerHeight;
+    // A tight near plane matters at street level; a far plane of 12 km is
+    // plenty and keeps depth precision comfortable across the city.
+    this.camera = new THREE.PerspectiveCamera(46, aspect, 0.8, 14000);
+    // Start outside and above the study area looking north-east across it, so
+    // the first frame reads as a city rather than as the inside of one building.
+    // The default used to sit among the towers, which put 70 m facade panels
+    // right against the near plane and looked like abstract sheets.
+    this.camera.position.set(-1500, 1250, 1750);
+
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.07;
+    this.controls.maxPolarAngle = Math.PI / 2 - 0.015;  // never go under the ground
+    this.controls.minDistance = 30;
+    this.controls.maxDistance = 6000;
+    this.controls.target.set(0, 40, 0);
+
+    // First-person street walker.
+    this.fp = {
+      pos: new THREE.Vector3(0, 1.7, 0),
+      yaw: 0, pitch: 0,
+      keys: new Set(),
+      speed: 34,
+    };
+    this._initFirstPerson();
+  }
+
+  _initFirstPerson() {
+    const el = this.renderer.domElement;
+    window.addEventListener('keydown', (e) => {
+      if (this.mode !== 'street') return;
+      this.fp.keys.add(e.code);
+      if (['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft'].includes(e.code)) e.preventDefault();
+    });
+    window.addEventListener('keyup', (e) => this.fp.keys.delete(e.code));
+    el.addEventListener('mousemove', (e) => {
+      if (this.mode !== 'street' || !this._dragging) return;
+      this.fp.yaw -= e.movementX * 0.0026;
+      this.fp.pitch = Math.max(-1.35, Math.min(1.35, this.fp.pitch - e.movementY * 0.0026));
+    });
+    el.addEventListener('mousedown', () => { this._dragging = true; });
+    window.addEventListener('mouseup', () => { this._dragging = false; });
+  }
+
+  setMode(mode, at) {
+    this.mode = mode;
+    if (mode === 'street') {
+      this.controls.enabled = false;
+      const p = at || this._findStreetPoint();
+      this.fp.pos.set(p.x, 1.7, -p.y);
+      this.fp.yaw = ((p.bearing || 0) * Math.PI) / 180;
+      this.scene.fog.near = 40; this.scene.fog.far = 1100;
+    } else {
+      this.controls.enabled = true;
+      this.scene.fog.near = 1400; this.scene.fog.far = 4800;
+      if (at) this.controls.target.set(at.x, Math.min(at.h || 40, 120), -at.y);
+    }
+  }
+
+  /** Pick a canyon worth standing in: deep, and with a real name. */
+  _findStreetPoint() {
+    const cs = this.data.canyons.filter((c) => c.canyon && c.name && c.hw > 1.5);
+    const c = cs.length ? cs[Math.floor(cs.length / 2)] : this.data.canyons[0];
+    return { x: c.x, y: c.y, bearing: c.bearing };
+  }
+
+  /** Move the street camera to a specific canyon by index. */
+  gotoCanyon(i) {
+    const c = this.data.canyons[i];
+    if (!c) return;
+    this.setMode('street', { x: c.x, y: c.y, bearing: c.bearing });
+  }
+
+  // --------------------------------------------------------------- picking
+
+  _initPicking() {
+    this.ray = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2(-9, -9);
+    const el = this.renderer.domElement;
+    el.addEventListener('pointermove', (e) => {
+      const r = el.getBoundingClientRect();
+      this.pointer.set(
+        ((e.clientX - r.left) / r.width) * 2 - 1,
+        -((e.clientY - r.top) / r.height) * 2 + 1
+      );
+      this._lastPointer = { x: e.clientX, y: e.clientY };
+    });
+    el.addEventListener('pointerleave', () => { this.pointer.set(-9, -9); });
+    el.addEventListener('click', () => {
+      const hit = this.hitTest();
+      if (this.onPick) this.onPick(hit);
+    });
+  }
+
+  /** Ray-cast into the facade mesh and resolve the hit back to a physics cell.
+   *
+   * Called from a throttled loop rather than every frame: the facade mesh has
+   * no acceleration structure, so each call is a linear scan over roughly
+   * 350,000 triangles. `far` is clamped so the scan gives up before testing
+   * geometry on the far side of the city that no tooltip would ever describe.
+   */
+  hitTest() {
+    if (this.pointer.x < -2) return null;
+    this.ray.setFromCamera(this.pointer, this.camera);
+    this.ray.far = 3000;
+    const hits = this.ray.intersectObjects([this.facadeMesh, this.roofMesh], false);
+    if (!hits.length) return null;
+    const h = hits[0];
+    if (h.object === this.roofMesh) {
+      const b = this.roofVertBuilding[h.face.a];
+      return { building: b, panel: null, band: null, kind: 'roof', point: h.point };
+    }
+    const quad = Math.floor(h.face.a / 4);
+    return {
+      building: this.quadBuilding[quad],
+      panel: this.quadPanel[quad],
+      band: this.quadBand[quad],
+      kind: 'facade',
+      point: h.point,
+    };
+  }
+
+  // ------------------------------------------------------------- colouring
+
+  /** Sampled percentile domain over a large typed array. */
+  static _domain(arr, loPct = 1, hiPct = 99, sample = 120000) {
+    const stride = Math.max(1, Math.floor(arr.length / sample));
+    const s = [];
+    for (let i = 0; i < arr.length; i += stride) if (isFinite(arr[i])) s.push(arr[i]);
+    if (!s.length) return [0, 1];
+    s.sort((a, b) => a - b);
+    return [s[Math.floor((loPct / 100) * (s.length - 1))],
+            s[Math.floor((hiPct / 100) * (s.length - 1))]];
+  }
+
+  _defaultDomains() {
+    // Wide percentiles for the same reason main.js gives: a tight window puts
+    // the whole afternoon in the top of the ramp and clips the hottest walls.
+    this.surfaceDomain = Scene._domain(this.data.thermal, 0.5, 99.8);
+    this.airDomain = Scene._domain(this.data.air, 0.5, 99.5);
+  }
+
+  setDomains(d) {
+    if (d?.surface) this.surfaceDomain = d.surface;
+    if (d?.air) this.airDomain = d.air;
+    this._recolour();
+    this._paintGround();
+  }
+
+  setLayer(layer) {
+    this.layer = layer;
+    // The ground shows whichever measured field pairs with the chosen facade
+    // layer. For the modelled layers it shows exceedance, because that is the
+    // measured field with real spatial structure and it grounds the modelled
+    // surfaces in something observed.
+    this.groundLayer = (layer === 'persistence') ? 'persistence'
+                     : (layer === 'air') ? 'air'
+                     : 'exceedance';
+    this._recolour();
+    this._paintGround();
+  }
+
+  setHour(h) {
+    this.hour = h;
+    this._recolour();
+    this._paintGround();
+  }
+
+  _recolour() {
+    const d = this.data;
+    const nBand = d.facades.bands;
+    const arr = this.facadeColors.array;
+    const layer = this.layer;
+    const dom = layer === 'air' ? this.airDomain : this.surfaceDomain;
+    const f = (layer === 'priority') ? RAMPS.priority : RAMPS.temperature;
+
+    // Selection highlight: everything not selected desaturates, so the chosen
+    // building stands out without changing its data colour.
+    const sel = this.selected;
+
+    for (let q = 0; q < this.nQuad; q++) {
+      const p = this.quadPanel[q], b = this.quadBand[q];
+      let c;
+      if (layer === 'priority') {
+        const bi = this.quadBuilding[q];
+        const a = d.buildings.attrs[bi];
+        c = f(norm(a && a.pr !== undefined ? a.pr : NaN, 0, 85));
+      } else if (layer === 'air') {
+        c = f(norm(d.airAt(this.hour, p, b), dom[0], dom[1]));
+      } else if (layer === 'sun') {
+        c = d.sunlitAt(this.hour, p, b)
+          ? [252, 200, 90] : [46, 54, 70];
+      } else {
+        c = f(norm(d.surfaceAt(this.hour, p, b), dom[0], dom[1]));
+      }
+      const sh = this.quadShade[q];
+      let r = (c[0] / 255) * sh, g = (c[1] / 255) * sh, bl = (c[2] / 255) * sh;
+      if (sel !== null && this.quadBuilding[q] !== sel) {
+        const grey = (r + g + bl) / 3;
+        r = r * 0.34 + grey * 0.18; g = g * 0.34 + grey * 0.18; bl = bl * 0.34 + grey * 0.22;
+      }
+      const o = q * 12;
+      for (let k = 0; k < 4; k++) { arr[o + k * 3] = r; arr[o + k * 3 + 1] = g; arr[o + k * 3 + 2] = bl; }
+    }
+    this.facadeColors.needsUpdate = true;
+    this._recolourRoofs();
+  }
+
+  _recolourRoofs() {
+    const d = this.data;
+    const arr = this.roofColors.array;
+    const sel = this.selected;
+    const dom = this.layer === 'air' ? this.airDomain : this.surfaceDomain;
+
+    for (let i = 0; i < this.roofRange.length; i++) {
+      const [start, n] = this.roofRange[i];
+      if (!n) continue;
+      const a = d.buildings.attrs[i];
+      let c;
+      if (this.layer === 'priority') {
+        c = RAMPS.priority(norm(a && a.pr !== undefined ? a.pr : NaN, 0, 85));
+      } else if (this.layer === 'sun') {
+        c = [252, 200, 90];   // roofs are always the most exposed surface
+      } else {
+        // A roof sees the whole sky and nothing shades it, so it sits near the
+        // top of the range whenever the sun is up. Taken from the panels of the
+        // same building at their highest band, which is the closest solved
+        // value to roof level.
+        const ps = d.panelsOfBuilding.get(i);
+        let t = NaN;
+        if (ps && ps.length) {
+          let sum = 0, cnt = 0;
+          for (const p of ps) {
+            const v = this.layer === 'air'
+              ? d.airAt(this.hour, p, d.facades.bands - 1)
+              : d.surfaceAt(this.hour, p, d.facades.bands - 1);
+            if (isFinite(v)) { sum += v; cnt++; }
+          }
+          if (cnt) t = sum / cnt;
+        }
+        c = RAMPS.temperature(norm(t, dom[0], dom[1]));
+      }
+      let r = (c[0] / 255) * 1.0, g = (c[1] / 255) * 1.0, bl = (c[2] / 255) * 1.0;
+      if (sel !== null && i !== sel) {
+        const grey = (r + g + bl) / 3;
+        r = r * 0.34 + grey * 0.18; g = g * 0.34 + grey * 0.18; bl = bl * 0.34 + grey * 0.22;
+      }
+      for (let k = 0; k < n; k++) {
+        const o = (start + k) * 3;
+        arr[o] = r; arr[o + 1] = g; arr[o + 2] = bl;
+      }
+    }
+    this.roofColors.needsUpdate = true;
+  }
+
+  select(buildingIndex) {
+    this.selected = buildingIndex;
+    this._recolour();
+  }
+
+  focus(buildingIndex) {
+    const a = this.data.buildings.attrs[buildingIndex];
+    if (!a) return;
+    const ps = this.data.panelsOfBuilding.get(buildingIndex);
+    let x = 0, y = 0;
+    if (ps && ps.length) {
+      const xy = this.data.facades.xy;
+      for (const p of ps) { x += xy[p * 4]; y += xy[p * 4 + 1]; }
+      x /= ps.length; y /= ps.length;
+    }
+    const h = a.h;
+    this.setMode('orbit');
+    this.controls.target.set(x, Math.min(h * 0.55, 140), -y);
+    const dist = Math.max(150, h * 2.4);
+    this.camera.position.set(x + dist * 0.75, h * 1.05 + 90, -y + dist * 0.75);
+  }
+
+  // ------------------------------------------------------------------ loop
+
+  _resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  tick(dt) {
+    if (this.mode === 'street') {
+      const f = this.fp, k = f.keys;
+      const sp = f.speed * dt * (k.has('ShiftLeft') ? 3.2 : 1);
+      const fwd = new THREE.Vector3(Math.sin(f.yaw), 0, -Math.cos(f.yaw));
+      const rgt = new THREE.Vector3(Math.cos(f.yaw), 0, Math.sin(f.yaw));
+      if (k.has('KeyW')) f.pos.addScaledVector(fwd, sp);
+      if (k.has('KeyS')) f.pos.addScaledVector(fwd, -sp);
+      if (k.has('KeyD')) f.pos.addScaledVector(rgt, sp);
+      if (k.has('KeyA')) f.pos.addScaledVector(rgt, -sp);
+      if (k.has('KeyE')) f.pos.y = Math.min(400, f.pos.y + sp);
+      if (k.has('KeyQ')) f.pos.y = Math.max(1.7, f.pos.y - sp);
+      this.camera.position.copy(f.pos);
+      this.camera.rotation.set(0, 0, 0);
+      this.camera.rotateY(f.yaw);
+      this.camera.rotateX(f.pitch);
+    } else {
+      this.controls.update();
+    }
+    this.renderer.render(this.scene, this.camera);
+  }
+}

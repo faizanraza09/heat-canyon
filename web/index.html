@@ -1,0 +1,98 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HeatCanyon — Midtown Manhattan</title>
+<meta name="description" content="A 3D street-canyon heat exposure model of Midtown Manhattan, built on the FortyGuard Temperature API and free public data." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%2307090d%27/%3E%3Crect x=%274%27 y=%2710%27 width=%277%27 height=%2718%27 fill=%27%23f6d746%27/%3E%3Crect x=%2713%27 y=%2716%27 width=%276%27 height=%2712%27 fill=%27%23bc3754%27/%3E%3Crect x=%2721%27 y=%275%27 width=%277%27 height=%2723%27 fill=%27%23f98e25%27/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="./css/app.css" />
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<div id="app">
+  <canvas id="gl"></canvas>
+
+  <!-- Boot -------------------------------------------------------------- -->
+  <div id="boot">
+    <h1>HeatCanyon</h1>
+    <div class="bar"><i id="boot-bar"></i></div>
+    <div class="sub" id="boot-msg">loading</div>
+  </div>
+
+  <!-- Masthead ---------------------------------------------------------- -->
+  <header id="head" class="panel">
+    <p class="title">HeatCanyon</p>
+    <p class="strap">
+      Heat exposure in three dimensions. FortyGuard measures air temperature at 2&nbsp;m;
+      this model resolves what that means on every facade, floor and sidewalk of a
+      Manhattan street canyon.
+    </p>
+    <div class="where" id="head-where"></div>
+  </header>
+
+  <!-- Left rail --------------------------------------------------------- -->
+  <div id="rail" class="panel">
+    <div class="sec">
+      <h3>Layer</h3>
+      <div class="seg" id="layers"></div>
+      <div id="legend">
+        <div class="ramp" id="legend-ramp"></div>
+        <div class="ticks" id="legend-ticks"></div>
+        <div class="cap" id="legend-cap"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Ask the analyst <span class="tag d" id="ai-state">checking</span></h3>
+      <div id="ai"></div>
+    </div>
+
+    <div class="sec">
+      <h3>What if <span class="dim small" id="sc-site"></span></h3>
+      <div id="scenarios"></div>
+    </div>
+
+    <div class="sec">
+      <h3>Provenance</h3>
+      <div id="prov"></div>
+    </div>
+  </div>
+
+  <!-- Right panel ------------------------------------------------------- -->
+  <aside id="side" class="panel">
+    <div class="hd">
+      <h2 id="side-title">Priority buildings</h2>
+      <p id="side-sub"></p>
+    </div>
+    <div class="body" id="side-body"></div>
+  </aside>
+
+  <!-- Time -------------------------------------------------------------- -->
+  <div id="time" class="panel">
+    <div class="row">
+      <button class="play" id="play" title="Play the day">&#9658;</button>
+      <div class="hours" id="hours"></div>
+    </div>
+    <div class="meta" id="time-meta"></div>
+  </div>
+
+  <!-- Camera ------------------------------------------------------------ -->
+  <div id="cam" class="panel">
+    <button id="cam-orbit" aria-pressed="true">orbit</button>
+    <button id="cam-street" aria-pressed="false">street level</button>
+    <span class="hint" id="cam-hint">drag to orbit &middot; scroll to zoom</span>
+  </div>
+
+  <div id="hover"></div>
+</div>
+
+<script type="module" src="./js/main.js"></script>

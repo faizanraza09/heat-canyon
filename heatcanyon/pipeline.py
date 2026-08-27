@@ -248,7 +248,8 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
 
     for pi, fpanel in enumerate(facades):
         mx, my = fpanel.mid
-        pan_canyon[pi] = nearest_canyon(mx, my) if canyons else -1
+        nc = nearest_canyon(mx, my) if canyons else None
+        pan_canyon[pi] = -1 if nc is None else nc
         b = buildings[fpanel.building]
         mat = P.facade_material(b.get("year"), b["height_m"])
         pan_material[pi] = MATS.index(mat) if mat in MATS else 2
@@ -392,7 +393,18 @@ def _finish(**kw) -> dict:
         ring_index.append([start, len(flat) // 2])
 
         lot = lots.get(b.get("bbl") or "")
-        floors = int(lot["floors"]) if (lot and lot.get("floors")) else max(1, int(b["height_m"] / 3.5))
+        # Reconcile PLUTO's floor count against the measured footprint height.
+        # PLUTO counts floors per tax *lot*, while a footprint is one building
+        # mass, so a lot holding a tower and a low annexe reports the tower's
+        # floor count against both. Where the two disagree badly, the measured
+        # height wins, because that is what the physics is actually solved on.
+        h_floors = max(1, int(round(b["height_m"] / 3.2)))
+        floors = h_floors
+        floors_source = "height"
+        if lot and lot.get("floors"):
+            pl = int(lot["floors"])
+            if pl > 0 and 0.5 <= pl / h_floors <= 2.0:
+                floors, floors_source = pl, "pluto"
         zipc = lot.get("zipcode") if lot else None
         mat = P.facade_material(b.get("year"), b["height_m"])
 
@@ -425,7 +437,7 @@ def _finish(**kw) -> dict:
         rec = {
             "i": bi, "bin": b.get("bin"), "bbl": b.get("bbl"),
             "h": round(b["height_m"], 1), "base": round(b.get("base_m") or 0.0, 1),
-            "floors": floors, "year": b.get("year"),
+            "floors": floors, "floors_src": floors_source, "year": b.get("year"),
             "mat": MATS.index(mat) if mat in MATS else 2,
             "in_aoi": 1 if inside else 0,
             "lon": round(lon, 6), "lat": round(lat, 6),
