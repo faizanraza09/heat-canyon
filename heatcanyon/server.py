@@ -19,6 +19,16 @@ from pydantic import BaseModel, Field
 
 from .ai import SUGGESTED, Analyst, Store
 
+# Load .env so `heatcanyon serve` picks up GOOGLE_MAPS_API_KEY the same way the
+# notebooks pick up the FortyGuard key. Optional import: the server has always
+# run without dotenv installed, and a missing photoreal key is a valid state.
+try:  # pragma: no cover - trivial
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:  # noqa: BLE001
+    pass
+
 WEB = Path("web")
 
 app = FastAPI(title="HeatCanyon", version="1.0.0")
@@ -69,6 +79,23 @@ def health() -> dict:
     }
 
 
+@app.get("/api/config")
+def config() -> dict:
+    """Client configuration, currently just the optional Google Maps key.
+
+    A Maps Platform key used from a browser is necessarily visible to that
+    browser — there is no arrangement in which the page can request tiles
+    without holding the key. So this endpoint is not a secrecy leak, it is the
+    normal shape of the thing; the protections that actually matter are on the
+    key itself: restrict it to the Map Tiles API, add an HTTP-referrer
+    restriction, and cap the root-tile-request quota.
+
+    Absent from the environment, the response simply carries no key and the
+    photoreal layer stays off, which is also the free-by-default state.
+    """
+    return {"gmaps_key": os.environ.get("GOOGLE_MAPS_API_KEY", "")}
+
+
 @app.get("/api/suggestions")
 def suggestions() -> dict:
     return {"suggestions": SUGGESTED}
@@ -96,9 +123,9 @@ if WEB.exists():
         return FileResponse(WEB / "index.html")
 
 
-def main() -> None:
+def main(port: int | None = None) -> None:
     import uvicorn
-    port = int(os.getenv("PORT", "8000"))
+    port = int(port or os.getenv("PORT", "8000"))
     print(f"HeatCanyon -> http://127.0.0.1:{port}")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 

@@ -37,7 +37,11 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `PORT=${PORT} .venv/bin/python -m heatcanyon.cli serve`,
+    // Pass the port as a flag, not via PORT, so this command line differs
+    // textually from the one a developer types. Playwright's teardown kills the
+    // server by matching the command it spawned, and while both were identical
+    // every test run also killed whatever dev server happened to be open.
+    command: `.venv/bin/python -m heatcanyon.cli serve --port ${PORT}`,
     url: `http://127.0.0.1:${PORT}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,
