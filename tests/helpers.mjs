@@ -9,6 +9,11 @@
  * inside a requestAnimationFrame callback does not fail a Playwright action —
  * the page carries on looking fine while doing nothing. Several tests assert on
  * `errors` for exactly that reason.
+ *
+ * `?intro=0` suppresses the opening film. Every test in this suite is about the
+ * application, and none of them should have to click past ninety seconds of
+ * cinema first — nor should a screenshot comparison be at the mercy of which
+ * frame of a cross-fade it happened to catch. The film has its own spec.
  */
 
 export async function openApp(page, { hour, layer } = {}) {
@@ -20,7 +25,7 @@ export async function openApp(page, { hour, layer } = {}) {
   });
   page.on('requestfailed', (r) => failedRequests.push(`${r.url()} ${r.failure()?.errorText}`));
 
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?intro=0', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => !document.getElementById('boot'), null, { timeout: 150_000 });
   await page.waitForFunction(() => !!window.HC?.scene, null, { timeout: 30_000 });
   // One extra frame so the first recolour has certainly landed.

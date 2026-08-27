@@ -1,3 +1,12 @@
+/* Street-mode navigation, probed with real input events.
+ *
+ * Orbit-mode drag semantics live in 98-drag-probe.spec.mjs, which owns them and
+ * checks them more rigorously. They used to be duplicated here, and when the
+ * left-drag binding changed from orbit to pan the copy in this file was left
+ * asserting the old behaviour — two suites making contradictory claims about
+ * the same control. One owner per behaviour.
+ */
+
 import { test, expect } from '@playwright/test';
 import { openApp, settle } from './helpers.mjs';
 
@@ -13,57 +22,6 @@ const cam = (page) => page.evaluate(() => {
     fwd: (() => { const v = new (c.constructor)(); s.camera.getWorldDirection(v);
       return [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]; })(),
   };
-});
-
-test('ORBIT: scroll wheel zooms', async ({ page }) => {
-  await openApp(page);
-  const a = await cam(page);
-  await page.mouse.move(900, 500);
-  for (let i = 0; i < 5; i++) { await page.mouse.wheel(0, -240); await page.waitForTimeout(60); }
-  await settle(page); await page.waitForTimeout(400);
-  const b = await cam(page);
-  console.log('ZOOM dist', a.dist, '->', b.dist);
-  expect(b.dist).toBeLessThan(a.dist * 0.95);
-});
-
-test('ORBIT: left-drag rotates', async ({ page }) => {
-  await openApp(page);
-  const a = await cam(page);
-  await page.mouse.move(900, 500);
-  await page.mouse.down();
-  for (let i = 0; i < 8; i++) { await page.mouse.move(900 + i * 25, 500); await page.waitForTimeout(30); }
-  await page.mouse.up();
-  await settle(page); await page.waitForTimeout(500);
-  const b = await cam(page);
-  console.log('ROTATE pos', a.pos, '->', b.pos);
-  const moved = Math.hypot(b.pos[0]-a.pos[0], b.pos[1]-a.pos[1], b.pos[2]-a.pos[2]);
-  expect(moved).toBeGreaterThan(50);
-});
-
-test('ORBIT: drag must NOT select a building', async ({ page }) => {
-  await openApp(page);
-  await page.mouse.move(900, 500);
-  await page.mouse.down();
-  for (let i = 0; i < 8; i++) { await page.mouse.move(900 + i*25, 500 + i*8); await page.waitForTimeout(30); }
-  await page.mouse.up();
-  await page.waitForTimeout(600);
-  const b = await cam(page);
-  console.log('after drag, selected =', b.selected);
-  expect(b.selected, 'a drag should not count as a click-to-select').toBeNull();
-});
-
-test('ORBIT: right-drag pans the target', async ({ page }) => {
-  await openApp(page);
-  const a = await cam(page);
-  await page.mouse.move(900, 500);
-  await page.mouse.down({ button: 'right' });
-  for (let i = 0; i < 8; i++) { await page.mouse.move(900 + i*20, 500 + i*20); await page.waitForTimeout(30); }
-  await page.mouse.up({ button: 'right' });
-  await settle(page); await page.waitForTimeout(400);
-  const b = await cam(page);
-  console.log('PAN target', a.target, '->', b.target);
-  const moved = Math.hypot(b.target[0]-a.target[0], b.target[2]-a.target[2]);
-  expect(moved).toBeGreaterThan(5);
 });
 
 test('STREET: W moves forward along the view direction', async ({ page }) => {

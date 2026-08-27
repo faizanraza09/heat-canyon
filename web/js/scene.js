@@ -19,12 +19,26 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+// MapControls, not OrbitControls. Same class underneath, but with the mouse
+// bindings people already have in their hands from every web map: left-drag
+// pans, right-drag rotates, wheel zooms. Plain OrbitControls made a left-drag
+// *orbit*, so pulling the mouse left swung the whole city around its centre
+// rather than sliding it left, which is disorienting unless you are already
+// thinking in polar coordinates.
+import { MapControls } from 'three/addons/controls/MapControls.js';
 import { RAMPS, norm } from './colors.js';
+import { Photoreal, findApiKey } from './photoreal.js';
 
 /** Contrast curve, indexed 0-255. A smoothstep-weighted lift: dark values fall
  *  away faster, bright values are left nearly alone, nothing clips. Built once
  *  because it is applied to every one of ~700,000 vertices on every recolour. */
+/* How far the coloured facade skin is pushed out from the wall it represents,
+ * in metres, when the photoreal layer is on. Large enough to beat depth-buffer
+ * precision at street level against Google's mesh, small enough that it is not
+ * visible as a gap: the photogrammetry facade and the footprint edge already
+ * disagree by more than this. */
+const FACADE_OUTWARD_M = 0.7;
+
 const CONTRAST = (() => {
   const t = new Float32Array(256);
   for (let i = 0; i < 256; i++) {
@@ -48,6 +62,19 @@ export class Scene {
     this.selected = null;
     this.mode = 'orbit';
     this.viewpointIndex = 0;
+    this.photorealOn = false;
+    this.showSolids = false;
+
+    /* The NAVD88 elevation that this scene's y = 0 stands for.
+     *
+     * The scene draws every building on a flat datum (see _buildFacades), which
+     * is the right call on its own but leaves the question of *which* elevation
+     * that datum represents unanswered — it never had to be answered, because
+     * nothing else in the scene knew about real elevations. The photoreal layer
+     * does, so the median building ground elevation becomes the answer: it puts
+     * the tileset's terrain at the height most of Midtown actually sits at, and
+     * makes the residual error symmetric instead of one-sided. */
+    this.datumM = Scene._medianBase(data);
 
     this._initRenderer();
     this._initScene();
@@ -149,13 +176,22 @@ export class Scene {
     const pad = 600;
 
     // Backdrop plane, so the city does not float in a void.
+    //
+    // Sized for the opening film rather than for the default view: the descent
+    // starts about five kilometres up, where a plane merely padded around the
+    // study area ends well inside the frame and the city arrives sitting on a
+    // visible rectangle. It is one flat dark quad, so the extra area is free.
     const back = new THREE.Mesh(
-      new THREE.PlaneGeometry(w + pad * 4, h + pad * 4),
+      new THREE.PlaneGeometry(w + pad * 4 + 14000, h + pad * 4 + 14000),
       new THREE.MeshBasicMaterial({ color: 0x0a0d13 })
     );
     back.rotation.x = -Math.PI / 2;
     back.position.y = -0.8;
     this.scene.add(back);
+    // Kept as a handle so the photoreal layer can hide it; it exists only to
+    // stop the city floating in a void, which stops being a problem once a
+    // real world is underneath.
+    this.backdrop = back;
 
     // The FortyGuard 2 m field, painted onto the ground as a texture. This is
     // the measured layer, and it is drawn *under* the modelled facades so the
@@ -369,6 +405,45 @@ export class Scene {
       this.quadNZ[q] = -Math.cos(a);
     }
 
+    // Azimuth bucket per panel, matching the eight the projection LUT uses.
+    // Precomputed because the recolour loop runs it 294,150 times per hour.
+    this.panelBucket = new Uint8Array(nPan);
+    for (let p = 0; p < nPan; p++) {
+      this.panelBucket[p] = Math.floor(((facades.az[p] + 22.5) % 360) / 45) & 7;
+    }
+
+    // A second copy of the vertices, on true NAVD88 elevations and pushed a
+    // little way out along each panel's outward normal. This is what gets used
+    // when the photoreal layer is on.
+    //
+    // Both offsets are needed and for unrelated reasons. The elevation offset
+    // undoes the flat datum: Google's mesh carries real terrain, so a city
+    // drawn flat would sink or float by up to 13 m against it, which is four
+    // storeys of misregistration. The outward offset stops the coloured skin
+    // from z-fighting the photogrammetry facade it is meant to sit on — the two
+    // surfaces are within centimetres of each other by design, and without a
+    // bias they interleave into speckle.
+    //
+    // These are real vertex positions rather than a vertex-shader offset
+    // because picking raycasts against the CPU-side geometry: offsetting in the
+    // shader would leave every click landing on the pre-offset wall.
+    const posElev = new Float32Array(pos.length);
+    posElev.set(pos);
+    for (let qq = 0; qq < nQuad; qq++) {
+      const p = this.quadPanel[qq];
+      const dy = base[p] - this.datumM;
+      const ox = this.quadNX[qq] * FACADE_OUTWARD_M;
+      const oz = this.quadNZ[qq] * FACADE_OUTWARD_M;
+      const o = qq * 12;
+      for (let v = 0; v < 4; v++) {
+        posElev[o + v * 3 + 0] += ox;
+        posElev[o + v * 3 + 1] += dy;
+        posElev[o + v * 3 + 2] += oz;
+      }
+    }
+    this.facadePosFlat = pos;
+    this.facadePosElev = posElev;
+
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -394,7 +469,7 @@ export class Scene {
   _buildRoofs() {
     const { buildings } = this.data;
     const rings = buildings.rings, attrs = buildings.attrs;
-    const pos = [], col = [], idx = [];
+    const pos = [], posElev = [], col = [], idx = [];
     this.roofVertBuilding = [];
     let vbase = 0;
     this.roofRange = [];
@@ -421,9 +496,11 @@ export class Scene {
 
       // Flat datum, matching the facades — see the note in _buildFacades.
       const zt = attrs[i].h;
+      const dyElev = (attrs[i].base || 0) - this.datumM;
       const start = vbase;
       for (const v of contour) {
         pos.push(v.x, zt, -v.y);
+        posElev.push(v.x, zt + dyElev, -v.y);
         col.push(0, 0, 0);
         this.roofVertBuilding.push(i);
       }
@@ -449,6 +526,8 @@ export class Scene {
     }));
     this.scene.add(this.roofMesh);
     this.roofColors = geo.getAttribute('color');
+    this.roofPosFlat = new Float32Array(pos);
+    this.roofPosElev = new Float32Array(posElev);
   }
 
   // --------------------------------------------------------------- cameras
@@ -464,13 +543,30 @@ export class Scene {
     // right against the near plane and looked like abstract sheets.
     this.camera.position.set(-1500, 1250, 1750);
 
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls = new MapControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.07;
-    this.controls.maxPolarAngle = Math.PI / 2 - 0.015;  // never go under the ground
-    this.controls.minDistance = 30;
+    this.controls.dampingFactor = 0.08;
+    // Stop well short of the horizon. Panning runs along the ground plane, and
+    // as the camera approaches grazing incidence that plane intersection races
+    // toward infinity, turning a small drag into an enormous jump.
+    this.controls.maxPolarAngle = Math.PI / 2 - 0.14;
+    this.controls.minDistance = 40;
     this.controls.maxDistance = 6000;
-    this.controls.target.set(0, 40, 0);
+    this.controls.screenSpacePanning = false;   // pan across the ground, not the screen
+    this.controls.zoomToCursor = true;          // zoom toward what is under the pointer
+    this.controls.target.set(0, 20, 0);
+    // Keep the view over the study area instead of drifting into empty space.
+    this._panLimit = {
+      x: this.data.meta.aoi.width_m / 2 + 900,
+      z: this.data.meta.aoi.height_m / 2 + 900,
+    };
+
+    // Any deliberate input during the opening descent takes the camera back.
+    // A cinematic that ignores the mouse is a cinematic that feels broken.
+    const bail = () => this._abortFly();
+    this.renderer.domElement.addEventListener('pointerdown', bail);
+    this.renderer.domElement.addEventListener('wheel', bail, { passive: true });
+    window.addEventListener('keydown', bail);
 
     // First-person street walker.
     this.fp = {
@@ -639,6 +735,112 @@ export class Scene {
 
   // --------------------------------------------------------------- picking
 
+  /** Median ground elevation across the footprints, metres NAVD88. */
+  static _medianBase(data) {
+    const attrs = (data.buildings && data.buildings.attrs) || [];
+    const v = [];
+    for (const a of attrs) {
+      const b = a && a.base;
+      if (typeof b === 'number' && isFinite(b)) v.push(b);
+    }
+    if (!v.length) return 0;
+    v.sort((x, y) => x - y);
+    return v[v.length >> 1];
+  }
+
+  /* -------------------------------------------------------- photoreal layer */
+
+  /** Build the layer lazily. No TilesRenderer is constructed and no root tile
+   *  request is issued until the user actually switches it on, which is what
+   *  keeps the default state free of charge. */
+  _ensurePhotoreal() {
+    if (this.photoreal) return this.photoreal;
+    const meta = this.data.meta;
+    const w = meta.aoi.width_m, h = meta.aoi.height_m;
+    this.photoreal = new Photoreal({
+      scene: this.scene,
+      camera: this.camera,
+      renderer: this.renderer,
+      meta,
+      data: this.data,
+      datumM: this.datumM,
+      fieldTex: this.groundTex,
+      // The ground texture spans the AOI exactly, centred on the origin, and is
+      // drawn north-up — the same rectangle _buildGround gives its plane.
+      fieldRect: { x0: -w / 2, y0: -h / 2, w, h },
+      onAttribution: (list) => { this.onAttribution?.(list); },
+      onStatus: (state, detail) => { this.onPhotorealStatus?.(state, detail); },
+      // The lookup tables are built on the first tile load, which is after the
+      // scene's own first recolour, so the table has to be filled once more the
+      // moment it exists or the first tiles paint with an empty LUT.
+      onLutReady: () => { this._recolour(); },
+    });
+    return this.photoreal;
+  }
+
+  /** Switch the photoreal context layer on or off.
+   *
+   * Turning it on also moves our own geometry onto true elevations and hides
+   * the synthetic ground, backdrop and sky, because all three exist only to
+   * substitute for a real world that is now present. Leaving the ground plane
+   * in would drive a flat sheet through Google's terrain. */
+  setPhotoreal(on, apiKey) {
+    const want = !!on;
+    if (want) {
+      const pr = this._ensurePhotoreal();
+      if (!pr.enable(apiKey || findApiKey())) return false;
+    } else if (this.photoreal) {
+      this.photoreal.disable();
+    }
+    this.photorealOn = want;
+
+    this._useElevation(want);
+    if (this.ground) this.ground.visible = !want;
+    if (this.backdrop) this.backdrop.visible = !want;
+    if (this.sky) this.sky.visible = !want;
+    this._applySolids();
+    if (want) this._recolour();
+    return true;
+  }
+
+  /* Our extruded prisms and Google's photogrammetry cannot both be drawn.
+   *
+   * They describe the same buildings with different geometry — ours a flat-lidded
+   * prism on the footprint, theirs the measured surface — so wherever they
+   * disagree the two interpenetrate: a real roof slices through flat colour, a
+   * real wall pokes out of ours, and the seam flickers as the camera moves.
+   * There is no offset that fixes it, because the problem is shape, not depth
+   * bias.
+   *
+   * So when the real geometry is present, ours steps aside and the field is
+   * projected onto theirs instead (see Photoreal._patchMaterials). The data is
+   * unchanged; only the surface carrying it is. `showSolids` exists because
+   * comparing the two is the fastest way to check registration by eye. */
+  _applySolids() {
+    const hide = this.photorealOn && !this.showSolids;
+    if (this.facadeMesh) this.facadeMesh.visible = !hide;
+    if (this.roofMesh) this.roofMesh.visible = !hide;
+  }
+
+  setShowSolids(on) {
+    this.showSolids = !!on;
+    this._applySolids();
+  }
+
+  /** Swap both meshes between the flat datum and true NAVD88 elevations. */
+  _useElevation(on) {
+    const swap = (mesh, flat, elev) => {
+      if (!mesh || !flat || !elev) return;
+      const attr = mesh.geometry.getAttribute('position');
+      attr.array.set(on ? elev : flat);
+      attr.needsUpdate = true;
+      mesh.geometry.computeBoundingSphere();
+      mesh.geometry.computeBoundingBox();
+    };
+    swap(this.facadeMesh, this.facadePosFlat, this.facadePosElev);
+    swap(this.roofMesh, this.roofPosFlat, this.roofPosElev);
+  }
+
   _initPicking() {
     this.ray = new THREE.Raycaster();
     this.pointer = new THREE.Vector2(-9, -9);
@@ -749,6 +951,12 @@ export class Scene {
     const d = this.data;
     const nBand = d.facades.bands;
     const arr = this.facadeColors.array;
+
+    // Only pay for the projection table when something is going to read it.
+    const pr = this.photorealOn && this.photoreal && this.photoreal.beginLut()
+      ? this.photoreal : null;
+    const lutSum = pr ? pr.lutSum : null;
+    const lutCount = pr ? pr.lutCount : null;
     const layer = this.layer;
     const dom = layer === 'air' ? this.airDomain : this.surfaceDomain;
     const f = (layer === 'priority') ? RAMPS.priority : RAMPS.temperature;
@@ -805,8 +1013,24 @@ export class Scene {
       }
       const o = q * 12;
       for (let k = 0; k < 4; k++) { arr[o + k * 3] = r; arr[o + k * 3 + 1] = g; arr[o + k * 3 + 2] = bl; }
+
+      // Accumulate the projection lookup from the very same numbers. Deriving
+      // it here rather than in a second pass is deliberate: a separate
+      // implementation of the ramp, the shading and the contrast curve would
+      // drift, and the projected colour would stop agreeing with the geometry's
+      // colour in ways nobody would notice until a screenshot looked wrong.
+      if (lutSum !== null) {
+        const bIdx = this.quadBuilding[q];
+        if (bIdx >= 0) {
+          const cell = (bIdx * 8 + this.panelBucket[p]) * nBand + b;
+          const s3 = cell * 3;
+          lutSum[s3] += r; lutSum[s3 + 1] += g; lutSum[s3 + 2] += bl;
+          lutCount[cell]++;
+        }
+      }
     }
     this.facadeColors.needsUpdate = true;
+    if (lutSum !== null) this.photoreal.commitLut();
     this._recolourRoofs();
   }
 
@@ -883,6 +1107,100 @@ export class Scene {
     this.camera.position.set(x + dist * 0.75, h * 1.05 + 90, -y + dist * 0.75);
   }
 
+  // -------------------------------------------------------------- fly-in
+
+  /** The descent the opening film hands over to.
+   *
+   * Interpolating the camera position directly would draw a straight line
+   * through the air, which reads as a dolly on rails. Interpolating the offset
+   * from the look-at point in *spherical* coordinates instead keeps the city
+   * centred while the camera loses altitude and swings around it, which is what
+   * an aerial shot actually does. The extra `swing` term bows the azimuth out
+   * and back so the arc is not a monotonic turn either.
+   *
+   * Fog has to be animated along with it. The default near/far pair is tuned
+   * for an eye-level view a couple of kilometres out; left alone at five
+   * kilometres up it renders the entire city as flat fog colour, so the film
+   * would cross-fade into an empty grey frame.
+   */
+  flyIn({ seconds = 9 } = {}) {
+    this.setMode('orbit');
+    const to = {
+      pos: new THREE.Vector3(-1500, 1250, 1750),
+      target: new THREE.Vector3(0, 40, 0),
+    };
+    const toSph = new THREE.Spherical().setFromVector3(to.pos.clone().sub(to.target));
+    const from = {
+      target: new THREE.Vector3(0, 60, 0),
+      // About 3.2 km up. Higher was tried and the study area arrives as a small
+      // bright chip in the middle of an empty plane; from here the model fills
+      // the frame at the moment the cross-fade uncovers it.
+      sph: new THREE.Spherical(3400, 0.34, toSph.theta - 0.85),
+    };
+    this._fly = {
+      t: 0, t0: performance.now(), dur: seconds, swing: 0.22,
+      fromTarget: from.target, toTarget: to.target,
+      fromSph: from.sph, toSph,
+      fog: [{ near: 2200, far: 12000 }, { near: 1400, far: 4800 }],
+      cur: from.target.clone(),
+    };
+    this.controls.enabled = false;
+    this._stepFly();
+    return seconds;
+  }
+
+  _stepFly() {
+    const f = this._fly;
+    if (!f) return;
+    // Wall clock rather than accumulated frame time, for the same reason the
+    // film uses one: this descent runs underneath narration that the platform
+    // speaks in real seconds. Clamped frame deltas on a slow renderer would
+    // stretch a ten-second flight into two minutes and leave the camera still
+    // falling long after the closing caption.
+    f.t = Math.min(f.dur, (performance.now() - f.t0) / 1000);
+    const u = f.dur > 0 ? f.t / f.dur : 1;
+    const e = u * u * (3 - 2 * u);
+    const mix = (a, b) => a + (b - a) * e;
+
+    const tgt = f.cur.lerpVectors(f.fromTarget, f.toTarget, e);
+    let dth = f.toSph.theta - f.fromSph.theta;
+    while (dth > Math.PI) dth -= Math.PI * 2;
+    while (dth < -Math.PI) dth += Math.PI * 2;
+    const off = new THREE.Vector3().setFromSphericalCoords(
+      mix(f.fromSph.radius, f.toSph.radius),
+      mix(f.fromSph.phi, f.toSph.phi),
+      f.fromSph.theta + dth * e + Math.sin(Math.PI * u) * f.swing
+    );
+    this.camera.position.copy(tgt).add(off);
+    this.camera.up.set(0, 1, 0);
+    this.camera.lookAt(tgt);
+
+    this.scene.fog.near = mix(f.fog[0].near, f.fog[1].near);
+    this.scene.fog.far = mix(f.fog[0].far, f.fog[1].far);
+
+    if (f.t >= f.dur) {
+      this._fly = null;
+      this.controls.target.copy(f.toTarget);
+      this.controls.enabled = true;
+      this.controls.update();
+    }
+  }
+
+  /** Cut the descent short and settle, rather than snapping. */
+  _abortFly() {
+    const f = this._fly;
+    if (!f || f.t >= f.dur - 0.05) return;
+    const remaining = 0.7;
+    f.fromTarget = f.cur.clone();
+    f.fromSph = new THREE.Spherical().setFromVector3(
+      this.camera.position.clone().sub(f.cur));
+    f.fog[0] = { near: this.scene.fog.near, far: this.scene.fog.far };
+    f.swing = 0;
+    f.dur = remaining;
+    f.t = 0;
+    f.t0 = performance.now();
+  }
+
   // ------------------------------------------------------------------ loop
 
   _resize() {
@@ -928,9 +1246,29 @@ export class Scene {
         .add(new THREE.Vector3(0, Math.sin(f.pitch) * 50, 0));
       this.camera.up.set(0, 1, 0);
       this.camera.lookAt(look);
+    } else if (this._fly) {
+      // OrbitControls damps toward its own idea of where the camera should be,
+      // so it must not run while the flight owns the transform.
+      this._stepFly();
     } else {
+      // Clamp the pan target to the study area, moving the camera by the same
+      // correction so reaching the edge cannot also swing the viewing angle.
       this.controls.update();
+      // Clamp AFTER update, not before. Damping means update() applies a
+      // residual pan delta of its own, so clamping first let the target drift a
+      // few metres past the limit on every frame it was pushed. The camera is
+      // carried by the same correction, so hitting the edge cannot also swing
+      // the viewing angle.
+      const t = this.controls.target, L = this._panLimit;
+      const dx = Math.min(L.x, Math.max(-L.x, t.x)) - t.x;
+      const dz = Math.min(L.z, Math.max(-L.z, t.z)) - t.z;
+      if (dx || dz) {
+        t.x += dx; t.z += dz;
+        this.camera.position.x += dx;
+        this.camera.position.z += dz;
+      }
     }
+    if (this.photorealOn && this.photoreal) this.photoreal.update();
     this.renderer.render(this.scene, this.camera);
   }
 }

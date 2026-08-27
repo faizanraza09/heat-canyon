@@ -14,6 +14,7 @@
  */
 
 import { RAMPS, css, gradient, norm } from './colors.js';
+import { findApiKey, resolveApiKey, storeApiKey } from './photoreal.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
@@ -78,16 +79,69 @@ export class UI {
     this.scenarioSite = 0;
     this.selected = null;
 
+    this._folds();
     this._brand();
     this._tabs();
     this._layers();
     this._hours();
     this._cam();
+    this._photoreal();
     this._whatif();
     this._ask();
     this.showList();
     this.setLayer('surface');
     this._hoverLoop();
+  }
+
+  /* ------------------------------------------------------- fold panels */
+
+  /** Let either side panel be folded away.
+   *
+   * Built here rather than in the markup so it cannot be lost to an edit of
+   * index.html, and so the reopen handle can be created as a sibling of the
+   * panel — a control inside a folded panel is a control you cannot reach.
+   * Escape folds both at once, which is the fastest way to just look at the
+   * city.
+   */
+  _folds() {
+    const mk = (panelId, handleId, label, cls) => {
+      const panel = $(panelId);
+      if (!panel || panel.querySelector('.fold')) return;
+
+      const fold = el('button', 'fold', label.close);
+      fold.title = 'Hide this panel';
+      fold.setAttribute('aria-label', 'Hide this panel');
+      panel.appendChild(fold);
+
+      const open = el('button', 'unfold', label.open);
+      open.id = handleId;
+      open.title = 'Show this panel';
+      open.hidden = true;
+      panel.parentNode.appendChild(open);
+
+      const set = (folded) => {
+        panel.classList.toggle('folded', folded);
+        open.hidden = !folded;
+        $('time').classList.toggle(cls, folded);
+        panel.setAttribute('aria-hidden', String(folded));
+      };
+      fold.onclick = () => set(true);
+      open.onclick = () => set(false);
+      return set;
+    };
+
+    const setLeft = mk('left', 'unfold-left', { close: '‹', open: '›' }, 'wide-left');
+    const setRight = mk('side', 'unfold-right', { close: '›', open: '‹' }, 'wide-right');
+
+    let bothHidden = false;
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const a = document.activeElement;
+      if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) return;
+      bothHidden = !bothHidden;
+      setLeft?.(bothHidden);
+      setRight?.(bothHidden);
+    });
   }
 
   /* ------------------------------------------------------------- brand */
@@ -97,6 +151,113 @@ export class UI {
     $('brand-sub').innerHTML =
       `Midtown Manhattan · ${m.aoi.area_km2} km²<br>`
       + `${f0(m.counts.buildings_scored)} buildings · 2 July 2026 heat wave`;
+  }
+
+  /* --------------------------------------------------------- photoreal */
+
+  /* The layer is gated on a key the user supplies, for two reasons that both
+   * point the same way: a key committed here would be a key strangers spend,
+   * and billing is per session, so the honest default is to issue no request
+   * at all until someone asks for one. */
+  _photoreal() {
+    const toggle = $('pr-toggle');
+    const keyBox = $('pr-key');
+    const look = $('pr-look');
+    const status = $('pr-status');
+    const input = $('pr-key-input');
+    if (!toggle) return;
+
+    const say = (msg, cls) => {
+      status.textContent = msg || '';
+      status.className = `prstatus${cls ? ` ${cls}` : ''}`;
+    };
+
+    this.scene.onPhotorealStatus = (state, detail) => {
+      if (state === 'loading') say('streaming tiles…');
+      else if (state === 'ready') say('');
+      else if (state === 'error') say(detail || 'failed', 'bad');
+    };
+
+    // Google requires the per-tile credits to be aggregated and shown, and the
+    // viewer to be able to tell which part of the picture is theirs. The strip
+    // labels both sides rather than running one undifferentiated line.
+    this.scene.onAttribution = (list) => {
+      const strip = $('credits');
+      const g = $('credits-google');
+      if (!strip || !g) return;
+      if (!list || !list.length) { strip.hidden = true; g.textContent = ''; return; }
+      g.textContent = list.join(' · ');
+      strip.hidden = false;
+    };
+
+    // A key from .env arrives asynchronously; until it does, treat the layer as
+    // key-less. Nothing is requested either way, so there is no race to lose.
+    let envKey = '';
+    resolveApiKey().then((k) => {
+      envKey = k || '';
+      if (envKey) say('Key loaded from the server environment.');
+    });
+    const anyKey = () => findApiKey() || envKey;
+
+    const setOn = (on) => {
+      const ok = this.scene.setPhotoreal(on, anyKey());
+      const live = on && ok;
+      toggle.setAttribute('aria-pressed', String(live));
+      look.hidden = !live;
+      if (on && !ok) { keyBox.hidden = false; input?.focus(); }
+      return live;
+    };
+
+    toggle.onclick = () => {
+      const on = toggle.getAttribute('aria-pressed') !== 'true';
+      if (on && !anyKey()) {
+        keyBox.hidden = false;
+        say('Paste a Google Maps API key to switch this on.');
+        input?.focus();
+        return;
+      }
+      setOn(on);
+    };
+
+    $('pr-key-save').onclick = () => {
+      const v = (input.value || '').trim();
+      if (!v) { say('That key looks empty.', 'bad'); return; }
+      storeApiKey(v);
+      input.value = '';
+      keyBox.hidden = true;
+      // A key change means a different session, so drop the old tileset first.
+      this.scene.photoreal?.dispose();
+      setOn(true);
+    };
+    $('pr-key-clear').onclick = () => {
+      storeApiKey('');
+      this.scene.photoreal?.dispose();
+      setOn(false);
+      keyBox.hidden = false;
+      say('Key forgotten.');
+    };
+
+    const slider = (id, out, fmt, apply) => {
+      const r = $(id), o = $(out);
+      const run = () => {
+        const v = parseFloat(r.value);
+        o.textContent = fmt(v);
+        apply(v);
+      };
+      r.oninput = run;
+      run();
+    };
+    slider('pr-desat', 'pr-desat-out', (v) => `${Math.round(100 - v)}%`,
+      (v) => this.scene.photoreal?.setLook({ desaturate: v / 100 }));
+    slider('pr-data', 'pr-data-out', (v) => `${Math.round(v)}%`,
+      (v) => this.scene.photoreal?.setLook({ dataWash: v / 100 }));
+    slider('pr-wash', 'pr-wash-out', (v) => `${Math.round(v)}%`,
+      (v) => this.scene.photoreal?.setLook({ fieldWash: v / 100 }));
+    $('pr-solids').onchange = (e) => this.scene.setShowSolids(e.target.checked);
+    slider('pr-nudge', 'pr-nudge-out', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} m`,
+      (v) => this.scene.photoreal?.setNudge(v));
+
+    if (findApiKey()) say('Key found in this browser.');
   }
 
   /* -------------------------------------------------------------- tabs */
@@ -229,7 +390,7 @@ export class UI {
       n.hidden = mode !== 'street';
       this.scene.setMode(mode);
       hint.textContent = mode === 'street'
-        ? describe() : 'Drag to turn · scroll to zoom · right-drag to pan';
+        ? describe() : 'Drag to move · scroll to zoom · right-drag to tilt and turn';
     };
     o.onclick = () => set('orbit');
     s.onclick = () => set('street');

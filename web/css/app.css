@@ -337,6 +337,47 @@ html, body {
    fly-over mode because of it. This has to outrank that reset. */
 [hidden] { display: none !important; }
 
+/* --------------------------------------------------------- panel collapse
+
+   The panels cover a great deal of a 3D view whose whole point is being looked
+   at, so either can be folded away. Collapsing slides the panel off its own
+   edge rather than hiding it, which keeps the reopen handle exactly where the
+   panel was and avoids the layout jump that display:none would cause.        */
+
+#left, #side { transition: transform .22s ease, opacity .22s ease; }
+#left.folded  { transform: translateX(calc(-100% - var(--s4) - 4px)); opacity: 0; }
+#side.folded  { transform: translateX(calc(100% + var(--s4) + 4px)); opacity: 0; }
+#left.folded, #side.folded { pointer-events: none; }
+
+.fold {
+  all: unset; cursor: pointer; position: absolute; top: var(--s3);
+  width: 22px; height: 22px; border-radius: 6px;
+  display: grid; place-items: center; z-index: 2;
+  color: var(--text-3); font-family: var(--mono); font-size: 13px; line-height: 1;
+  border: 1px solid var(--line); background: rgba(255,255,255,.03);
+  transition: color .15s, border-color .15s;
+}
+.fold:hover { color: var(--text); border-color: var(--line-strong); }
+#left .fold { right: var(--s3); }
+#side .fold { left: var(--s3); }
+
+/* The reopen handles live outside the panels so they survive the fold. */
+.unfold {
+  all: unset; cursor: pointer; position: absolute; top: var(--s4); z-index: 21;
+  padding: var(--s2) 7px; border-radius: var(--r1);
+  font-family: var(--mono); font-size: 12px; color: var(--text-2);
+  border: 1px solid var(--line); background: var(--panel);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--shadow); transition: color .15s, border-color .15s;
+}
+.unfold:hover { color: var(--text); border-color: var(--accent); }
+#unfold-left  { left: var(--s4); }
+#unfold-right { right: var(--s4); }
+
+/* With a panel folded the time bar reclaims the space it was leaving for it. */
+#time.wide-left  { left: calc(var(--s4) + 46px); }
+#time.wide-right { right: calc(var(--s4) + 46px); }
+
 .mono { font-family: var(--mono); }
 .dim  { color: var(--text-3); }
 .small { font-size: 11px; }
@@ -352,3 +393,74 @@ html, body {
   #side { width: 310px; }
   #time { left: calc(280px + var(--s4) * 2); right: calc(310px + var(--s4) * 2); }
 }
+
+/* ------------------------------------------------- photoreal context layer */
+
+#photoreal {
+  margin-top: var(--s5);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
+#photoreal .prhead { display: flex; }
+#pr-toggle {
+  all: unset; cursor: pointer; padding: var(--s2) var(--s3); border-radius: var(--r1);
+  font-size: 11.5px; color: var(--text-2); border: 1px solid var(--line);
+  transition: all .15s; width: 100%; text-align: center;
+}
+#pr-toggle:hover { color: var(--text); border-color: var(--line-strong); }
+#pr-toggle[aria-pressed="true"] {
+  background: var(--accent-dim); color: var(--text); border-color: rgba(78,168,222,.4);
+}
+#pr-key { margin-top: var(--s3); }
+#pr-key label {
+  display: block; font-family: var(--mono); font-size: 10px;
+  color: var(--text-3); margin-bottom: var(--s1); text-transform: uppercase;
+  letter-spacing: .04em;
+}
+#pr-key-input {
+  all: unset; box-sizing: border-box; width: 100%;
+  padding: var(--s2); border: 1px solid var(--line); border-radius: var(--r1);
+  font-family: var(--mono); font-size: 11px; color: var(--text);
+  background: rgba(0,0,0,.25);
+}
+#pr-key-input:focus { border-color: rgba(78,168,222,.5); }
+.prbtns { display: flex; gap: var(--s1); margin-top: var(--s2); }
+.prbtns button {
+  all: unset; cursor: pointer; flex: 1; text-align: center;
+  padding: var(--s2) 0; border-radius: var(--r1); font-size: 11px;
+  color: var(--text-2); border: 1px solid var(--line); transition: all .15s;
+}
+.prbtns button:hover { color: var(--text); border-color: var(--line-strong); }
+#pr-look { margin-top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
+#pr-look label {
+  font-family: var(--mono); font-size: 10px; color: var(--text-3);
+  display: flex; flex-direction: column; gap: var(--s1);
+}
+#pr-look output { float: right; color: var(--text-2); }
+#pr-look input[type="range"] { width: 100%; accent-color: var(--accent); }
+.prstatus {
+  margin: var(--s2) 0 0; font-family: var(--mono); font-size: 10px;
+  color: var(--text-3); min-height: 12px;
+}
+.prstatus.bad { color: var(--warn); }
+
+/* Google's terms require the aggregated per-tile credits to be visible and
+ * kept clearly distinct from anyone else's attribution, so the strip names
+ * both sides rather than running them together. */
+#credits {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 8px;
+  z-index: 40; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;
+  justify-content: center; max-width: min(900px, 92vw);
+  padding: 5px 10px; border-radius: var(--r1);
+  background: rgba(4,6,10,.72); border: 1px solid var(--line);
+  backdrop-filter: blur(6px);
+  font-family: var(--mono); font-size: 9.5px; color: var(--text-2);
+  pointer-events: none;
+}
+#credits .clabel { color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; }
+#credits .csep { color: var(--text-3); }
+#pr-look label.prcheck {
+  flex-direction: row; align-items: center; gap: var(--s2);
+  cursor: pointer; line-height: 1.35;
+}
+#pr-look label.prcheck input { accent-color: var(--accent); width: auto; flex: none; }
