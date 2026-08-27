@@ -16,6 +16,45 @@ The `fortyguard/` package wraps every endpoint the API exposes and handles the s
 
 ---
 
+## HeatCanyon — 3D street-canyon heat exposure (Manhattan)
+
+Beyond the endpoint walkthroughs below, this repo contains a full project built
+on the API: **[HeatCanyon](docs/HEATCANYON.md)**, which extends FortyGuard's 2 m
+air temperature into a three-dimensional exposure model of Midtown Manhattan.
+
+It reconstructs street-canyon geometry from NYC Open Data footprints and street
+widths, solves a coupled surface energy balance for 29,415 facade panels across
+eight hours of the July 2026 heat wave, ranks buildings by exposure against the
+city's Heat Vulnerability Index, and tests interventions by re-solving the
+physics rather than applying published coefficients.
+
+```bash
+python -m heatcanyon.cli build      # solve the model (offline, cached)
+python -m heatcanyon.cli validate   # 12 validation checks
+python -m heatcanyon.cli serve      # http://127.0.0.1:8000
+```
+
+**It runs with no API key.** The FortyGuard responses it used are committed under
+`data/manhattan/`, so the whole project reproduces offline for zero credits. The
+entire build cost 74,900 of 2,000,000 hackathon credits.
+
+Three API findings from that build are worth knowing if you are writing against
+these endpoints yourself:
+
+- **`start_time` on `/v1/heatmap` is local standard time (GMT−5), year-round, not
+  UTC.** New York is on EDT in July, so API hour *h* is wall-clock *h+1*.
+  Established with a control call and cross-checked against the independently
+  fetched daily maximum.
+- **Heatmap calls cost a flat 4,220 credits regardless of tile count**, so the
+  finest 60 m granularity costs the same as 100 m.
+- **`/v1/env_params` never returns `solar_irradiance`** despite listing it; the
+  `analysis` argument is accepted but ignored server-side.
+
+See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for the physics, the validation
+numbers, and an explicit account of what the model does *not* validate.
+
+---
+
 ## What you can do here
 
 ### Endpoint walkthroughs

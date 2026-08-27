@@ -261,3 +261,7 @@ data/manhattan/*
 data/nyc/*
 !data/nyc/*.json
 !data/nyc/*.geojson
+tests/screenshots/
+test-results/
+playwright-report/
+node_modules/
