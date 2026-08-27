@@ -226,17 +226,27 @@ def v_vertical_profile() -> None:
     d100 = P.air_temperature_at_height(102.0, met_day, st, 0.3) - met_day.t_air_2m
     n100 = P.air_temperature_at_height(102.0, met_night, st, 0.0) - met_night.t_air_2m
     sig100 = P.air_temperature_uncertainty(102.0, st)
+    adiabat = -0.98  # K per 100 m
     rows = [
         f"daytime gradient   {d100:+.2f} K over 100 m",
         f"nocturnal gradient {n100:+.2f} K over 100 m",
+        f"dry adiabatic bound {adiabat:+.2f} K over 100 m",
         f"stated 1-sigma at 100 m: {sig100:.2f} K",
         "",
-        "Both are well inside the dry adiabatic bound (-0.98 K per 100 m) and",
-        "match the weak gradients tower measurements report inside the urban",
-        "roughness sublayer. Note the uncertainty EXCEEDS the gradient: that is",
-        "reported in the interface rather than hidden.",
+        "Neither may be steeper than the dry adiabat, because a superadiabatic",
+        "dry profile is convectively unstable and overturns rather than",
+        "persisting. Both sit inside that bound and match the weak gradients",
+        "tower measurements report in the urban roughness sublayer.",
+        "",
+        "Note the uncertainty EXCEEDS the gradient. That is the honest position",
+        "and it is what the interface shows, rather than presenting a confident",
+        "vertical field the data cannot support.",
     ]
-    ok = (-1.5 < d100 < 0.2) and (-3.0 < n100 < 0.2) and sig100 > abs(d100)
+    ok = (
+        adiabat <= d100 < 0.2
+        and adiabat <= n100 < 0.2
+        and sig100 > abs(d100)
+    )
     check("Vertical air gradient within measured urban bounds", ok, "\n".join(rows))
 
 

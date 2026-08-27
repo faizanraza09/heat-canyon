@@ -30,6 +30,7 @@ export class Scene {
     this.layer = 'surface';
     this.selected = null;
     this.mode = 'orbit';
+    this.viewpointIndex = 0;
 
     this._initRenderer();
     this._initScene();
@@ -393,6 +394,11 @@ export class Scene {
       const p = at || this._findStreetPoint();
       this.fp.pos.set(p.x, 1.7, -p.y);
       this.fp.yaw = ((p.bearing || 0) * Math.PI) / 180;
+      // A pedestrian looking down a canyon naturally takes in the facades above
+      // as well as the pavement ahead, and a dead-level view of a 90 m wall
+      // reads as a flat wash. A slight upward tilt shows the vertical structure
+      // the model exists to resolve.
+      this.fp.pitch = 0.16;
       this.scene.fog.near = 40; this.scene.fog.far = 1100;
     } else {
       this.controls.enabled = true;
@@ -401,18 +407,63 @@ export class Scene {
     }
   }
 
-  /** Pick a canyon worth standing in: deep, and with a real name. */
+  /** Pick a canyon worth standing in, and a position that is actually in it.
+   *
+   * Two things went wrong in the first version and both are worth recording.
+   * It seated the eye on the street centreline sample point, but NYC's
+   * centreline is not always the middle of the space between the buildings, so
+   * the camera could end up inside a wall — a frame filled edge to edge with
+   * one flat facade. And it preferred the deepest canyon it could find, which
+   * in Midtown means a 20 m slot between towers: correct, and unreadable.
+   *
+   * So: prefer a canyon wide enough to see along, and offset the eye to the
+   * measured midpoint between the two walls using the exported distances.
+   */
   _findStreetPoint() {
-    const cs = this.data.canyons.filter((c) => c.canyon && c.name && c.hw > 1.5);
-    const c = cs.length ? cs[Math.floor(cs.length / 2)] : this.data.canyons[0];
-    return { x: c.x, y: c.y, bearing: c.bearing };
+    // Use the viewpoints the pipeline validated against the surface model.
+    // Deriving one here from canyon attributes alone put the eye inside a
+    // building twice, because the street centreline is not reliably the middle
+    // of the space between the facades and the browser has no way to check.
+    const vps = this.data.meta.viewpoints || [];
+    if (vps.length) {
+      const v = vps[this.viewpointIndex % vps.length];
+      return { x: v.x, y: v.y, bearing: v.bearing, name: v.name };
+    }
+    const pool = this.data.canyons.filter((c) => c.canyon && c.dl > 4 && c.dr > 4);
+    if (!pool.length) return { x: 0, y: 0, bearing: 0 };
+    return this._seatIn(pool.reduce((a, b) => (b.hw > a.hw ? b : a)));
+  }
+
+  /** Step to the next validated viewpoint, for the "next street" control. */
+  nextViewpoint() {
+    const vps = this.data.meta.viewpoints || [];
+    if (!vps.length) return null;
+    this.viewpointIndex = (this.viewpointIndex + 1) % vps.length;
+    const v = vps[this.viewpointIndex];
+    this.setMode('street', { x: v.x, y: v.y, bearing: v.bearing });
+    return v;
+  }
+
+  get currentViewpoint() {
+    const vps = this.data.meta.viewpoints || [];
+    return vps.length ? vps[this.viewpointIndex % vps.length] : null;
+  }
+
+  /** Eye position at the measured centre of a canyon cross-section. */
+  _seatIn(c) {
+    const ang = (c.bearing * Math.PI) / 180;
+    // Unit vector across the street, to the right of the axis direction.
+    const nx = Math.cos(ang), ny = -Math.sin(ang);
+    // Positive shift moves right; centre the eye between the two walls.
+    const shift = ((c.dr || 0) - (c.dl || 0)) / 2;
+    return { x: c.x + nx * shift, y: c.y + ny * shift, bearing: c.bearing };
   }
 
   /** Move the street camera to a specific canyon by index. */
   gotoCanyon(i) {
     const c = this.data.canyons[i];
     if (!c) return;
-    this.setMode('street', { x: c.x, y: c.y, bearing: c.bearing });
+    this.setMode('street', this._seatIn(c));
   }
 
   // --------------------------------------------------------------- picking
@@ -632,6 +683,8 @@ export class Scene {
     if (this.mode === 'street') {
       const f = this.fp, k = f.keys;
       const sp = f.speed * dt * (k.has('ShiftLeft') ? 3.2 : 1);
+      // Forward and right on the ground plane, from the yaw. World axes are
+      // x = east, z = -north, so a compass bearing maps to (sin, 0, -cos).
       const fwd = new THREE.Vector3(Math.sin(f.yaw), 0, -Math.cos(f.yaw));
       const rgt = new THREE.Vector3(Math.cos(f.yaw), 0, Math.sin(f.yaw));
       if (k.has('KeyW')) f.pos.addScaledVector(fwd, sp);
@@ -640,10 +693,25 @@ export class Scene {
       if (k.has('KeyA')) f.pos.addScaledVector(rgt, -sp);
       if (k.has('KeyE')) f.pos.y = Math.min(400, f.pos.y + sp);
       if (k.has('KeyQ')) f.pos.y = Math.max(1.7, f.pos.y - sp);
+      // Aim with lookAt rather than composing Euler rotations.
+      //
+      // This was a genuine bug and an instructive one. A yaw applied as
+      // rotateY(yaw) turns the camera's default -Z forward into
+      // (-sin yaw, 0, -cos yaw), while the movement vector above is
+      // (+sin yaw, 0, -cos yaw). The two are mirror images across the north
+      // axis, so the camera walked east while looking west — and since a
+      // validated viewpoint sits in the middle of a canyon, looking 90 degrees
+      // off-axis meant staring at the wall two metres away. The screenshot was
+      // a single flat rectangle of colour, which is exactly what it looked like.
+      //
+      // Deriving the look target from the same forward vector that drives
+      // movement makes the two impossible to disagree.
       this.camera.position.copy(f.pos);
-      this.camera.rotation.set(0, 0, 0);
-      this.camera.rotateY(f.yaw);
-      this.camera.rotateX(f.pitch);
+      const look = f.pos.clone()
+        .addScaledVector(fwd, Math.cos(f.pitch) * 50)
+        .add(new THREE.Vector3(0, Math.sin(f.pitch) * 50, 0));
+      this.camera.up.set(0, 1, 0);
+      this.camera.lookAt(look);
     } else {
       this.controls.update();
     }

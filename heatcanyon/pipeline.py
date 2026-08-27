@@ -171,9 +171,15 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
     svf_grid = G.svf_raster(dsm, n_azimuth=32, max_radius_m=250.0)
     lambda_p = dsm.built_fraction
     h_bar = dsm.mean_building_height
-    d_disp, z0 = G.roughness_length(h_bar, lambda_p)
     canyons = G.extract_canyons(lines, dsm, svf_grid, proj)
     facades = G.extract_facades(buildings, proj, min_length_m=6.0, max_panel_m=40.0)
+    # Frontal area index, computed from the facade panels rather than reusing the
+    # plan area index. Macdonald's roughness length needs the frontal one, and
+    # the two are equal only for cubes.
+    ny_g, nx_g = dsm.shape
+    grid_area = (nx_g * dsm.res) * (ny_g * dsm.res)
+    lambda_f = G.frontal_area_index(facades, grid_area)
+    d_disp, z0 = G.roughness_length(h_bar, lambda_p, lambda_f)
     log(f"geometry: DSM {dsm.shape} @{dsm.res}m, {len(canyons):,} cross-sections, "
         f"{len(facades):,} facade panels, lambda_p={lambda_p:.3f}, H={h_bar:.0f}m, "
         f"d={d_disp:.0f}m, z0={z0:.2f}m")
@@ -344,7 +350,7 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
         therm=therm, air_prof=air_prof, sunlit_bits=sunlit_bits, mets=mets, suns=suns,
         lots=lots, hvi=hvi, trees=trees, hourly=hourly, f_exc=f_exc, f_per=f_per,
         f_daymax=f_daymax, f_daymin=f_daymin, exc=exc, per=per, env_params=env_params,
-        om=om, dsm=dsm, svf_grid=svf_grid, lambda_p=lambda_p, h_bar=h_bar,
+        om=om, dsm=dsm, svf_grid=svf_grid, lambda_p=lambda_p, lambda_f=lambda_f, h_bar=h_bar,
         d_disp=d_disp, z0=z0, log=log, t_start=t_start, N_BANDS=N_BANDS,
     )
 
@@ -534,6 +540,12 @@ def _finish(**kw) -> dict:
             "svf": round(c.svf, 3), "hw": round(c.aspect_ratio, 2),
             "asym": round(c.asymmetry, 2), "canyon": 1 if c.is_canyon else 0,
             "trees": round(st.tree_cover, 2),
+            # Measured distances to the wall on each side. Exported because the
+            # street-level camera needs them: placing the eye on the centreline
+            # sample point alone can put it inside a building where the
+            # centreline is off-centre, and these let the viewer be seated in
+            # the true middle of the canyon cross-section.
+            "dl": round(c.d_left, 1), "dr": round(c.d_right, 1),
         })
     (OUT / "canyons.json").write_text(json.dumps(c_out, separators=(",", ":")))
 
@@ -685,6 +697,8 @@ def _finish(**kw) -> dict:
         },
         "morphology": {
             "lambda_p": round(lambda_p, 3),
+            "lambda_f": round(kw["lambda_f"], 3),
+            "macdonald_clamped": bool(kw["lambda_f"] > 0.35 or kw["lambda_p"] > 0.35),
             "mean_building_height_m": round(h_bar, 1),
             "displacement_height_m": round(d_disp, 1),
             "roughness_length_m": round(z0, 2),
@@ -720,6 +734,7 @@ def _finish(**kw) -> dict:
             "t2m": om.get("temperature_2m"),
             "convention": "preceding-hour mean, local EDT",
         },
+        "viewpoints": street_viewpoints(canyons, dsm, proj),
         "provenance": _provenance(),
         "spend": json.loads((Path("data/manhattan/_ledger.json")).read_text())
                  if Path("data/manhattan/_ledger.json").exists() else {},
@@ -728,6 +743,113 @@ def _finish(**kw) -> dict:
 
     log(f"wrote {len(list(OUT.iterdir()))} files to {OUT} in {time.time()-t_start:.0f}s")
     return meta
+
+
+def street_viewpoints(
+    canyons: list[G.Canyon],
+    dsm: G.DSM,
+    proj: G.Projector,
+    limit: int = 6,
+) -> list[dict]:
+    """Validated street-level camera positions, chosen with the DSM in hand.
+
+    The browser cannot do this job. It has canyon attributes but no surface
+    model, so a viewpoint derived there from a centreline sample can land inside
+    a building — NYC's street centreline is not always the middle of the space
+    between the facades, and at 1.7 m the result is a frame filled edge to edge
+    with one flat wall. Both earlier attempts failed exactly that way.
+
+    Here every candidate is tested against the raster before being exported:
+
+    * the eye must stand in genuinely open ground, with clearance on all sides;
+    * the view along the street axis must stay clear for a good distance, so the
+      shot looks down a canyon rather than at the end of one;
+    * the canyon must be wide enough to read and deep enough to be worth seeing.
+
+    Each viewpoint records which direction along the axis was validated, so the
+    camera does not have to guess and then discover it is facing a wall.
+    """
+    out: list[dict] = []
+    seen_streets: set[str] = set()
+
+    cands = [
+        c for c in canyons
+        if c.is_canyon and c.name and 18.0 <= c.width_m <= 48.0
+        and c.aspect_ratio >= 1.0 and c.d_left > 4.0 and c.d_right > 4.0
+    ]
+    # Deepest first: those are the canyons the model has the most to say about.
+    cands.sort(key=lambda c: -c.aspect_ratio)
+
+    for c in cands:
+        if c.name in seen_streets:
+            continue
+        ang = math.radians(c.bearing)
+        ax, ay = math.sin(ang), math.cos(ang)      # along the street axis
+        nx, ny = ay, -ax                           # across it, to the right
+
+        # Seat the eye midway between the measured walls.
+        shift = (c.d_right - c.d_left) / 2.0
+        ex, ey = c.x + nx * shift, c.y + ny * shift
+
+        if not _clear_at(dsm, ex, ey, radius_m=3.5):
+            continue
+
+        # Check both directions along the axis and keep the clearer one.
+        best_dir, best_run = None, 0.0
+        for sgn in (1.0, -1.0):
+            run = _clear_run(dsm, ex, ey, ax * sgn, ay * sgn, max_m=180.0)
+            if run > best_run:
+                best_dir, best_run = sgn, run
+        if best_dir is None or best_run < 60.0:
+            continue
+
+        bearing = c.bearing if best_dir > 0 else (c.bearing + 180.0) % 360.0
+        lon, lat = proj.to_lonlat(ex, ey)
+        out.append({
+            "name": c.name,
+            "x": round(ex, 1), "y": round(ey, 1),
+            "bearing": round(bearing, 1),
+            "clear_m": round(best_run, 1),
+            "width_m": round(c.width_m, 1),
+            "hw": round(c.aspect_ratio, 2),
+            "svf": round(c.svf, 3),
+            "asym": round(c.asymmetry, 2),
+            "h_left": round(c.h_left, 1), "h_right": round(c.h_right, 1),
+            "lon": round(lon, 6), "lat": round(lat, 6),
+            "canyon": c.street_id,
+        })
+        seen_streets.add(c.name)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _clear_at(dsm: G.DSM, x: float, y: float, radius_m: float = 3.5) -> bool:
+    """True when no building occupies a disc around (x, y)."""
+    steps = max(1, int(radius_m / dsm.res))
+    ny, nx = dsm.shape
+    for di in range(-steps, steps + 1):
+        for dj in range(-steps, steps + 1):
+            i, j = dsm.xy_to_ij(x + dj * dsm.res, y + di * dsm.res)
+            if not (0 <= i < ny and 0 <= j < nx):
+                return False
+            if dsm.height[i, j] > 1.0:
+                return False
+    return True
+
+
+def _clear_run(dsm: G.DSM, x: float, y: float, dx: float, dy: float, max_m: float) -> float:
+    """Distance the view stays clear of buildings along a direction, in metres."""
+    steps = max(1, int(max_m / dsm.res))
+    ny, nx = dsm.shape
+    for s in range(1, steps + 1):
+        r = s * dsm.res
+        i, j = dsm.xy_to_ij(x + dx * r, y + dy * r)
+        if not (0 <= i < ny and 0 <= j < nx):
+            return r
+        if dsm.height[i, j] > 1.0:
+            return r
+    return max_m
 
 
 def tile_payload_from_field(tf: TileField, proj: G.Projector) -> list[list[float]]:

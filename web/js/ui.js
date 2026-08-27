@@ -229,14 +229,28 @@ export class UI {
 
   _cam() {
     const o = $('cam-orbit'), s = $('cam-street');
+    const hint = $('cam-hint');
+    const describe = () => {
+      const v = this.scene.currentViewpoint;
+      if (!v) return 'W A S D to walk · drag to look · Q E for height';
+      return `${v.name} · H/W ${f1(v.hw)} · SVF ${f2(v.svf)} — `
+           + 'W A S D to walk · drag to look';
+    };
     const set = (mode) => {
       o.setAttribute('aria-pressed', String(mode === 'orbit'));
       s.setAttribute('aria-pressed', String(mode === 'street'));
-      $('cam-hint').textContent = mode === 'street'
-        ? 'W A S D to walk · drag to look · Q E for height · Shift to run'
-        : 'drag to orbit · scroll to zoom';
       this.scene.setMode(mode);
+      hint.textContent = mode === 'street' ? describe() : 'drag to orbit · scroll to zoom';
+      next.style.display = mode === 'street' ? '' : 'none';
     };
+    // Step through the validated viewpoints. There are only a handful, each one
+    // checked against the surface model for clearance, so this is the reliable
+    // way to see several canyons without walking into a wall.
+    const next = el('button', null, 'next street');
+    next.style.display = 'none';
+    next.onclick = () => { this.scene.nextViewpoint(); hint.textContent = describe(); };
+    s.after(next);
+
     o.onclick = () => set('orbit');
     s.onclick = () => set('street');
   }

@@ -675,15 +675,80 @@ def svf_wall_point(z: float, h_opposite: float, w: float) -> float:
     return 0.5 * (1.0 - math.sin(alpha))
 
 
-def roughness_length(h_mean: float, lambda_p: float) -> tuple[float, float]:
+def frontal_area_index(
+    facades: list["Facade"], area_m2: float, n_directions: int = 16
+) -> float:
+    """Direction-averaged frontal area index lambda_f.
+
+        lambda_f(theta) = sum( wall area projected normal to theta ) / A_total
+
+    Averaged over ``n_directions`` equally spaced wind directions, because the
+    engine carries one scalar morphology per study area rather than a wind rose.
+
+    This exists because lambda_f is genuinely a different quantity from the plan
+    area index lambda_p, and Macdonald's roughness-length equation needs the
+    frontal one. They coincide only for cubes. For a district of slender towers
+    lambda_f is much the larger, and substituting lambda_p there under-estimates
+    z0; for low sprawling sheds the error runs the other way. Since every facade
+    panel's orientation and area is already known, there is no need to
+    approximate it at all.
+    """
+    if area_m2 <= 0 or not facades:
+        return 0.0
+    total = 0.0
+    for k in range(n_directions):
+        theta = 2.0 * math.pi * k / n_directions
+        wx, wy = math.sin(theta), math.cos(theta)
+        s = 0.0
+        for f in facades:
+            az = math.radians(f.azimuth)
+            nx, ny = math.sin(az), math.cos(az)
+            # Only walls facing into the wind present frontal area.
+            proj = nx * wx + ny * wy
+            if proj > 0.0:
+                s += f.area * proj
+        total += s / area_m2
+    return total / n_directions
+
+
+def roughness_length(
+    h_mean: float, lambda_p: float, lambda_f: float | None = None
+) -> tuple[float, float]:
     """Displacement height d and roughness length z0 from building morphology.
 
-    Macdonald et al. (1998), the standard morphometric parameterisation:
+    Macdonald, Griffiths & Hall (1998), the standard morphometric
+    parameterisation:
 
         d  = H * [ 1 + A^(-lambda_p) * (lambda_p - 1) ]
-        z0 = H * (1 - d/H) * exp{ -[ 0.5 * beta * Cd / kappa^2 * (1 - d/H) * lambda_p ]^(-0.5) }
+        z0 = H * (1 - d/H)
+             * exp{ -[ 0.5 * beta * Cd / kappa^2 * (1 - d/H) * lambda_f ]^(-0.5) }
 
     with A = 4.43, Cd = 1.2, beta = 1.0, kappa = 0.4 for staggered arrays.
+
+    Note which index goes where. The displacement height uses the **plan** area
+    index lambda_p; the roughness length uses the **frontal** area index
+    lambda_f. An earlier version of this function passed lambda_p to both, which
+    is a real error rather than a simplification -- the two are equal only for
+    cubic obstacles, and Midtown is emphatically not cubic. Where lambda_f is
+    not supplied it falls back to lambda_p and the caller should treat the
+    result as approximate; ``frontal_area_index`` computes it properly from the
+    facade panels.
+
+    Macdonald's method is validated up to an area index of roughly 0.35. Beyond
+    that the array enters skimming flow, where the real z0 peaks and then
+    declines with further densification while this formula keeps rising. The
+    index used in the z0 term is therefore clamped at 0.35 and the displacement
+    height is allowed to continue (it stays well behaved).
+
+    Worth being plain about what that clamp means for this study area: Midtown
+    has lambda_p = 0.45 and a measured lambda_f of about 1.1, so it sits well
+    beyond the validated range in both indices and the clamp is active. The
+    resulting z0 of roughly 4 m is consistent with published values for dense
+    high-rise fabric, but it is a saturated estimate rather than a
+    parameterisation evaluated inside its domain, and z0 only enters this engine
+    through the log-law profile above roof level -- the part already carrying the
+    widest uncertainty band.
+
     Returns (d, z0) in metres. These set the log-law profile the vertical air
     temperature extrapolation uses above roof level.
     """
@@ -691,8 +756,12 @@ def roughness_length(h_mean: float, lambda_p: float) -> tuple[float, float]:
         return (0.0, 0.03)
     A, Cd, beta, kappa = 4.43, 1.2, 1.0, 0.4
     lp = min(max(lambda_p, 0.01), 0.85)
+    lf = lambda_f if (lambda_f and lambda_f > 0) else lp
+    # Skimming-flow validity limit on the roughness term.
+    lf = min(max(lf, 0.01), 0.35)
+
     d_over_h = 1.0 + (A ** (-lp)) * (lp - 1.0)
     d_over_h = min(max(d_over_h, 0.0), 0.95)
-    inner = 0.5 * beta * Cd / (kappa**2) * (1.0 - d_over_h) * lp
+    inner = 0.5 * beta * Cd / (kappa**2) * (1.0 - d_over_h) * lf
     z0 = h_mean * (1.0 - d_over_h) * math.exp(-(inner ** -0.5)) if inner > 0 else 0.03
     return (h_mean * d_over_h, max(z0, 0.01))

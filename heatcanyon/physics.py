@@ -150,8 +150,14 @@ def canyon_wind(wind_10m: float, aspect_ratio: float) -> float:
 
         u_canyon = u_above * exp(-0.386 * H/W)
 
-    is the form used in the Town Energy Balance scheme (Masson 2000, after
-    Rotach), and it matters a great deal here: convection is the main way a hot
+    is an exponential attenuation of the standard form used across canyon
+    models. The attribution matters: it is *not* in Masson (2000), which uses a
+    prognostic drag and stable-boundary-layer scheme rather than any closed
+    exp(-a*H/W) law, so citing TEB for this coefficient would be wrong. Treat
+    0.386 as a calibrated attenuation constant consistent with observed canyon
+    sheltering, not as a quantity traceable to a single paper.
+
+    It matters a great deal here regardless: convection is the main way a hot
     facade sheds heat, so halving the wind roughly doubles the surface-to-air
     temperature difference. A floor of 0.3 m/s keeps the convective coefficient
     finite in the deepest canyons where the formula would otherwise stall.
@@ -160,17 +166,33 @@ def canyon_wind(wind_10m: float, aspect_ratio: float) -> float:
 
 
 def convective_coefficient(wind: float) -> float:
-    """Exterior convective heat transfer coefficient, W/(m^2 K).
+    """Exterior *convective* heat transfer coefficient, W/(m^2 K).
 
-    McAdams' classic correlation for a flat plate in parallel flow,
+        h_c = 2.0 + 3.8 * u
 
-        h_c = 5.7 + 3.8 * u
+    Note the intercept. The widely quoted McAdams form is h = 5.7 + 3.8u, and
+    that is what this function used to return -- which was a real bug, because
+    5.7 is a *combined* surface conductance: convection plus a linearised
+    radiative coefficient. Around a 290 K surface the radiative part alone is
+    4*eps*sigma*T^3 ~ 5 W/(m^2 K), which is most of the 5.7.
 
-    which is the form embedded in ASHRAE's simplified exterior film
-    coefficients. At u = 0 it retains 5.7 for free convection rather than
-    collapsing to zero.
+    Since ``surface_temperature`` already carries an explicit longwave term
+    eps*sigma*(T_s^4 - T_env^4) -- the term the whole sky-view-factor
+    calculation exists to weight -- using the combined coefficient counted
+    radiation roughly twice. At 1 m/s that inflated the turbulent flux by about
+    50%, which damps the diurnal surface swing and pulls facade temperatures
+    towards air temperature: plausible-looking answers for the wrong reason.
+
+    The intercept is therefore reduced to a genuinely convective free-convection
+    value of about 2 W/(m^2 K) for a vertical surface in still air, and the
+    longwave term stays explicit.
+
+    Two documented simplifications: there is no orientation dependence (real
+    windward and leeward facades differ by up to a factor of two) and no
+    buoyancy term for a sunlit wall driving its own free convection. ``wind``
+    must be the *canyon* wind, not the above-roof value.
     """
-    return 5.7 + 3.8 * max(0.0, wind)
+    return 2.0 + 3.8 * max(0.0, wind)
 
 
 # -------------------------------------------------- vertical air profile
@@ -283,10 +305,20 @@ def air_temperature_at_height(
     **Canyon interior, z <= H.** The recirculating vortex keeps the canyon
     comparatively well mixed, so the gradient is weak. It is not zero: by day
     the sunlit surfaces heat the air near them and the canyon top exchanges with
-    a cooler boundary layer, giving a slight decrease with height; at night the
-    fabric releases stored heat into a stably stratified canyon and the
-    *bottom* is warmer, so the gradient steepens and keeps its sign. The
-    interior gradient is scaled by (1 - SVF) because an enclosed canyon
+    a cooler boundary layer, giving a slight decrease with height. At night the
+    fabric releases the heat it stored during the day, so the canyon *bottom*
+    stays the warmest part and temperature again falls with height.
+
+    That night-time structure is a canyon heat island with a weak lapse, and it
+    is worth naming carefully: it is *not* an inversion. An inversion means
+    temperature rising with height, which is what forms in the stable layer
+    *above* roof level over open ground. The real nocturnal picture over a city
+    is two-layer -- a warm, weakly lapsing canyon volume underneath, and a
+    stably stratified layer above it -- and calling the canyon part an inversion
+    (as an earlier version of this docstring did) inverts the physics it is
+    trying to describe.
+
+    The interior gradient is scaled by (1 - SVF) because an enclosed canyon
     decouples from the air above far more effectively than an open one.
 
     **Roughness sublayer, H < z < 2H.** Individual buildings still imprint on
@@ -312,12 +344,27 @@ def air_temperature_at_height(
 
     # ---- profile above the roughness sublayer, evaluated at the blend top
     def most(z_eval: float, z_from: float, t_from: float) -> float:
+        """Actual air temperature at z_eval, given the value at z_from.
+
+        Monin-Obukhov similarity is written in *potential* temperature, and the
+        earlier version of this function returned the potential-temperature
+        difference directly as if it were a temperature difference. That omitted
+        the dry-adiabatic conversion
+
+            T(z) = theta(z) - Gamma_d * z,   Gamma_d = g/cp = 0.0098 K/m
+
+        which is negligible over the few metres inside a canyon but is 0.98 K
+        per 100 m of facade -- larger than most of the effects this engine
+        exists to resolve, and enough on its own to explain a suspiciously weak
+        modelled daytime gradient.
+        """
         za = max(z_eval - st.d, 0.5)
         zb = max(z_from - st.d, 0.5)
         zeta_a, zeta_b = za / L, zb / L
-        return t_from + (theta_star / KAPPA) * (
+        d_theta = (theta_star / KAPPA) * (
             math.log(za / zb) - psi_h(zeta_a) + psi_h(zeta_b)
         )
+        return t_from + d_theta - LAPSE_DRY * (z_eval - z_from)
 
     # ---- canyon interior gradient
     # Daytime: cooler aloft inside the canyon. Night: warmer at the bottom.
@@ -325,7 +372,14 @@ def air_temperature_at_height(
     if daytime:
         grad = -0.010 * (0.4 + 0.6 * enclosure)   # K/m, mild decrease upward
     else:
-        grad = -0.022 * (0.3 + 0.7 * enclosure)   # K/m, stronger nocturnal inversion
+        grad = -0.014 * (0.3 + 0.7 * enclosure)   # K/m, canyon heat island lapse
+    # Hard physical bound: dry air cannot sustain a lapse rate steeper than the
+    # dry adiabat, because that state is convectively unstable and overturns.
+    # The unclamped nocturnal coefficient could reach -0.020 K/m in a deeply
+    # enclosed canyon, which is superadiabatic and therefore not a state the
+    # atmosphere holds. Clamping here rather than only reporting it means the
+    # model cannot emit an impossible profile in the first place.
+    grad = max(grad, -0.95 * LAPSE_DRY)
     t_canopy_top = met.t_air_2m + grad * (h_canopy - z_ref)
 
     if z <= h_canopy:
@@ -490,10 +544,23 @@ def wet_bulb_globe_temperature(t_air: float, t_mrt: float, rh: float, wind: floa
         WBGT = 0.7*T_nwb + 0.2*T_globe + 0.1*T_air
 
     Black-globe temperature is approximated from the mean radiant temperature,
-    and natural wet-bulb from Stull's (2011) closed-form fit, which is accurate
-    to about 0.3 K over the range that matters here. WBGT is what OSHA and
-    military heat guidance are written against, so it converts the model output
-    into thresholds that already carry policy.
+    and the wet-bulb term from Stull's (2011) closed-form fit, whose
+    coefficients are transcribed exactly and which is accurate to about 0.3 K
+    mean absolute error over -20..50 C and 5-99% relative humidity at sea-level
+    pressure.
+
+    One documented approximation, because it biases the result in a known
+    direction: Stull's fit gives the *psychrometric* (shielded) wet-bulb
+    temperature, whereas outdoor WBGT is defined on the *natural* wet-bulb
+    temperature, which is higher because the wet wick is exposed to sun and to
+    low ventilation. Using the psychrometric value therefore under-reports
+    outdoor WBGT, by roughly 1.4-2.1 K in hot, calm, sunny conditions. The WBGT
+    figures this engine reports should be read as conservative -- if anything
+    the real exposure is worse, which is the safe direction for a heat-risk
+    tool but must not be mistaken for precision.
+
+    WBGT is what OSHA and military heat guidance are written against, so it
+    converts the model output into thresholds that already carry policy.
     """
     tw = (
         t_air * math.atan(0.151977 * (rh + 8.313659) ** 0.5)

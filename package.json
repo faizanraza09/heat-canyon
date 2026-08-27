@@ -1,0 +1,27 @@
+{
+  "name": "temperature-api-quickstart",
+  "version": "1.0.0",
+  "description": "A Python + Jupyter sandbox for the [FortyGuard tOS Enterprise API](https://api.fortyguard.com). Drop in your API key and run a notebook — you'll get a heatmap, a heat-intelligence PDF, or an environmental-parameter time series in minutes.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FortyGuard-Tech/temperature-api-quickstart.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/FortyGuard-Tech/temperature-api-quickstart/issues"
+  },
+  "homepage": "https://github.com/FortyGuard-Tech/temperature-api-quickstart#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

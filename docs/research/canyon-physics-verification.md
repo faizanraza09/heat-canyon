@@ -348,118 +348,6 @@ complementary wall factors. Consistent with the above.
 
 ---
 
-## 5. Macdonald, Griffiths & Hall (1998) morphometric roughness
-
-### Implemented
-
-```
-d/H  = 1 + A^(-λ_p) * (λ_p - 1),                                   A = 4.43
-z0/H = (1 - d/H) * exp{ -[ 0.5 * β * Cd / κ² * (1 - d/H) * λ_p ]^(-0.5) }
-       Cd = 1.2,  β = 1.0,  κ = 0.4
-```
-
-### Verdict: **WRONG.** There is a real bug.
-
-**The `z0` equation must use the FRONTAL area index `λ_f`, not the plan area index `λ_p`.**
-Your `d/H` equation is correct and does use `λ_p`; the `z0/H` equation uses a different
-morphometric parameter and you have substituted the wrong one.
-
-### Canonical citation
-
-**Macdonald, R.W., Griffiths, R.F. & Hall, D.J. (1998).** *An improved method for the
-estimation of surface roughness of obstacle arrays.* Atmospheric Environment
-**32**(11): 1857–1864. DOI: 10.1016/S1352-2310(97)00403-2 —
-https://doi.org/10.1016/S1352-2310(97)00403-2
-(Bibliographic details confirmed via Crossref. The article itself is paywalled — closed
-access per Unpaywall — so the equations below are quoted as reproduced in the open-access
-evaluation paper cited next, which is the standard secondary reference for them.)
-
-**Verified against:** Kent, C.W., Grimmond, S., Barlow, J., Gatey, D., Kotthaus, S.,
-Lindberg, F. & Halios, C.H. (2017). *Evaluation of Urban Local-Scale Aerodynamic
-Parameters: Implications for the Vertical Profile of Wind Speed and for Source Areas.*
-Boundary-Layer Meteorology **164**: 183–213. DOI: 10.1007/s10546-017-0248-z —
-open access, full text at https://pmc.ncbi.nlm.nih.gov/articles/6979542/
-(their Eqs. 9 and 10).
-
-### Correct published form
-
-```
-Displacement height  (uses PLAN area index λ_p):
-
-    z_d / z_H = 1 + α^(−λ_p) · (λ_p − 1)
-
-
-Roughness length  (uses FRONTAL area index λ_f):
-
-    z_0 / z_H = (1 − z_d/z_H) · exp{ −[ 0.5 · β · (C_Db / κ²) · (1 − z_d/z_H) · λ_f ]^(−0.5) }
-```
-
-So yes — **`β` does multiply inside the bracket, exactly where you have it**, and it is
-inside the quantity that is then raised to the `−0.5` power. That part of your
-implementation is right. The `0.5 · β · C_D / κ²` grouping is right. The `(1 − d/H)`
-prefactor and the `(1 − d/H)` inside the bracket are both right. **The single error is the
-final factor: `λ_f`, not `λ_p`.**
-
-### Standard coefficient values (confirmed)
-
-| Symbol | Staggered array | Square array | Note |
-|---|---|---|---|
-| `α` (your `A`) | **4.43** | 3.59 | appears only in `z_d` |
-| `C_Db` | **1.2** | 1.2 | obstacle drag coefficient |
-| `β` | **1.0** | 0.55 | drag correction factor |
-| `κ` | **0.40** | 0.40 | von Kármán |
-
-Your `A = 4.43`, `C_d = 1.2`, `β = 1.0`, `κ = 0.4` is the **staggered-array** parameter set,
-which is the conventional default for real urban areas (buildings are not aligned in
-regular rows). That choice is defensible — just document it, and note that a genuinely
-gridded street layout (Manhattan, Barcelona Eixample, Chinese superblocks) is closer to the
-square-array set `α = 3.59, β = 0.55`, which gives a materially smaller `z_0`.
-
-### Why this matters — magnitude of the bug
-
-`λ_p` (plan area index) = building footprint area / total plan area.
-`λ_f` (frontal area index) = building frontal area projected into the wind / total plan area,
-and it is **wind-direction dependent**.
-
-They coincide only for the special case of **cubes** (`λ_f = λ_p` when height = width and the
-wind is normal to a face). For any real morphology they differ, often by a lot:
-
-- **Tall slender towers** (small footprint, large height): `λ_f ≫ λ_p`. Using `λ_p`
-  **under-estimates** `z_0` — because the bracket is smaller, its `−0.5` power is larger, the
-  exponential is smaller. A CBD of point towers is the worst case.
-- **Low sprawling sheds / warehouses** (large footprint, low height): `λ_f < λ_p`. Using
-  `λ_p` **over-estimates** `z_0`.
-- Typical mid-rise European perimeter blocks: `λ_f` and `λ_p` are within ~30% of each other,
-  so the bug is mild there and may well be why it has not shown up in testing.
-
-Because `z_0` sits inside a logarithm in the wind profile, a factor-of-2 error in `z_0`
-moves the modelled wind speed at a given height by roughly `ln(2)/ln(z/z_0)` ≈ 8–12% for
-typical `z/z_0`. That then propagates into `h_c` (item 4) and the canyon wind (item 3), so
-it is not a cosmetic error, but it is also not catastrophic — it is a systematic bias that
-grows with the aspect ratio of the buildings themselves.
-
-### Fix
-
-Compute and pass `λ_f` separately:
-
-```
-λ_f(θ) = Σ ( building frontal area projected normal to wind direction θ ) / A_total
-λ_p    = Σ ( building footprint area ) / A_total
-```
-
-Keep `λ_p` in the `z_d` equation. If the engine only has a single scalar morphology input
-and genuinely cannot compute `λ_f`, then the honest fallback is `λ_f ≈ λ_p · (H/L)` where
-`L` is a characteristic horizontal building dimension — and that approximation must be
-documented as such, because silently reusing `λ_p` reads as if the source formula said `λ_p`.
-
-Also worth adding: Macdonald's method is validated for roughly `λ_p ≲ 0.35`. Above that the
-array enters the "skimming flow" regime where `z_0` peaks and then *declines* with further
-densification; Macdonald's `z_0` keeps rising, so it over-predicts for very dense fabric.
-Clamp or flag `λ_p > 0.35`.
-
-
----
-
 ## 3. Canyon wind speed
 
 ### Implemented
@@ -637,6 +525,118 @@ is a live bug and it is larger in magnitude than the item 5 `λ_f` bug at low wi
   wall drives its own free convection). Both are acceptable simplifications for a
   neighbourhood-scale engine; both should be in the docstring so nobody mistakes the number
   for a facade-resolved value.
+
+
+---
+
+## 5. Macdonald, Griffiths & Hall (1998) morphometric roughness
+
+### Implemented
+
+```
+d/H  = 1 + A^(-λ_p) * (λ_p - 1),                                   A = 4.43
+z0/H = (1 - d/H) * exp{ -[ 0.5 * β * Cd / κ² * (1 - d/H) * λ_p ]^(-0.5) }
+       Cd = 1.2,  β = 1.0,  κ = 0.4
+```
+
+### Verdict: **WRONG.** There is a real bug.
+
+**The `z0` equation must use the FRONTAL area index `λ_f`, not the plan area index `λ_p`.**
+Your `d/H` equation is correct and does use `λ_p`; the `z0/H` equation uses a different
+morphometric parameter and you have substituted the wrong one.
+
+### Canonical citation
+
+**Macdonald, R.W., Griffiths, R.F. & Hall, D.J. (1998).** *An improved method for the
+estimation of surface roughness of obstacle arrays.* Atmospheric Environment
+**32**(11): 1857–1864. DOI: 10.1016/S1352-2310(97)00403-2 —
+https://doi.org/10.1016/S1352-2310(97)00403-2
+(Bibliographic details confirmed via Crossref. The article itself is paywalled — closed
+access per Unpaywall — so the equations below are quoted as reproduced in the open-access
+evaluation paper cited next, which is the standard secondary reference for them.)
+
+**Verified against:** Kent, C.W., Grimmond, S., Barlow, J., Gatey, D., Kotthaus, S.,
+Lindberg, F. & Halios, C.H. (2017). *Evaluation of Urban Local-Scale Aerodynamic
+Parameters: Implications for the Vertical Profile of Wind Speed and for Source Areas.*
+Boundary-Layer Meteorology **164**: 183–213. DOI: 10.1007/s10546-017-0248-z —
+open access, full text at https://pmc.ncbi.nlm.nih.gov/articles/6979542/
+(their Eqs. 9 and 10).
+
+### Correct published form
+
+```
+Displacement height  (uses PLAN area index λ_p):
+
+    z_d / z_H = 1 + α^(−λ_p) · (λ_p − 1)
+
+
+Roughness length  (uses FRONTAL area index λ_f):
+
+    z_0 / z_H = (1 − z_d/z_H) · exp{ −[ 0.5 · β · (C_Db / κ²) · (1 − z_d/z_H) · λ_f ]^(−0.5) }
+```
+
+So yes — **`β` does multiply inside the bracket, exactly where you have it**, and it is
+inside the quantity that is then raised to the `−0.5` power. That part of your
+implementation is right. The `0.5 · β · C_D / κ²` grouping is right. The `(1 − d/H)`
+prefactor and the `(1 − d/H)` inside the bracket are both right. **The single error is the
+final factor: `λ_f`, not `λ_p`.**
+
+### Standard coefficient values (confirmed)
+
+| Symbol | Staggered array | Square array | Note |
+|---|---|---|---|
+| `α` (your `A`) | **4.43** | 3.59 | appears only in `z_d` |
+| `C_Db` | **1.2** | 1.2 | obstacle drag coefficient |
+| `β` | **1.0** | 0.55 | drag correction factor |
+| `κ` | **0.40** | 0.40 | von Kármán |
+
+Your `A = 4.43`, `C_d = 1.2`, `β = 1.0`, `κ = 0.4` is the **staggered-array** parameter set,
+which is the conventional default for real urban areas (buildings are not aligned in
+regular rows). That choice is defensible — just document it, and note that a genuinely
+gridded street layout (Manhattan, Barcelona Eixample, Chinese superblocks) is closer to the
+square-array set `α = 3.59, β = 0.55`, which gives a materially smaller `z_0`.
+
+### Why this matters — magnitude of the bug
+
+`λ_p` (plan area index) = building footprint area / total plan area.
+`λ_f` (frontal area index) = building frontal area projected into the wind / total plan area,
+and it is **wind-direction dependent**.
+
+They coincide only for the special case of **cubes** (`λ_f = λ_p` when height = width and the
+wind is normal to a face). For any real morphology they differ, often by a lot:
+
+- **Tall slender towers** (small footprint, large height): `λ_f ≫ λ_p`. Using `λ_p`
+  **under-estimates** `z_0` — because the bracket is smaller, its `−0.5` power is larger, the
+  exponential is smaller. A CBD of point towers is the worst case.
+- **Low sprawling sheds / warehouses** (large footprint, low height): `λ_f < λ_p`. Using
+  `λ_p` **over-estimates** `z_0`.
+- Typical mid-rise European perimeter blocks: `λ_f` and `λ_p` are within ~30% of each other,
+  so the bug is mild there and may well be why it has not shown up in testing.
+
+Because `z_0` sits inside a logarithm in the wind profile, a factor-of-2 error in `z_0`
+moves the modelled wind speed at a given height by roughly `ln(2)/ln(z/z_0)` ≈ 8–12% for
+typical `z/z_0`. That then propagates into `h_c` (item 4) and the canyon wind (item 3), so
+it is not a cosmetic error, but it is also not catastrophic — it is a systematic bias that
+grows with the aspect ratio of the buildings themselves.
+
+### Fix
+
+Compute and pass `λ_f` separately:
+
+```
+λ_f(θ) = Σ ( building frontal area projected normal to wind direction θ ) / A_total
+λ_p    = Σ ( building footprint area ) / A_total
+```
+
+Keep `λ_p` in the `z_d` equation. If the engine only has a single scalar morphology input
+and genuinely cannot compute `λ_f`, then the honest fallback is `λ_f ≈ λ_p · (H/L)` where
+`L` is a characteristic horizontal building dimension — and that approximation must be
+documented as such, because silently reusing `λ_p` reads as if the source formula said `λ_p`.
+
+Also worth adding: Macdonald's method is validated for roughly `λ_p ≲ 0.35`. Above that the
+array enters the "skimming flow" regime where `z_0` peaks and then *declines* with further
+densification; Macdonald's `z_0` keeps rising, so it over-predicts for very dense fabric.
+Clamp or flag `λ_p > 0.35`.
 
 
 ---
@@ -898,3 +898,719 @@ d(theta) over 10 -> 100 m
 gradient almost exactly, and is missing the −0.98 K per 100 m adiabatic term.** See item 8 —
 this is the single most likely explanation for that number, and it is a one-line fix.
 
+
+---
+
+## 8. Measured vertical air temperature gradients in real urban canyons
+
+This is the section you said matters most for credibility, so it is the longest, and it
+separates **what I verified by reading the papers** from **what I am reporting from the
+literature without having re-read it**. Please respect that boundary — the tagged numbers are
+the ones that would embarrass you if quoted wrong.
+
+### Your claims, assessed
+
+| Your claim | Verdict |
+|---|---|
+| Daytime gradient ≈ **−0.6 K per 100 m** (weak decrease) | **PROBABLY WRONG as stated** — this looks like a potential-temperature gradient, not an air-temperature gradient. Expected: −1.0 to −1.7 K/100 m. |
+| Stronger **nocturnal inversion** | **DIRECTIONALLY RIGHT above roof level, but the magnitude is usually SMALLER over a city than people expect** — the urban signature is a *weak* inversion, not a strong one. |
+| **Canyon bottom warmer** at night | **SITE-DEPENDENT, and it contradicts "inversion" as worded** — see the terminology note below. |
+| Air varies **1–3 K** across the canyon cross-section | **VERIFIED.** ~2 K measured. |
+| Surfaces vary **15–25 K** | **PLAUSIBLE and supported, but re-phrase it** — the defensible claim is about sunlit-vs-shaded instantaneous contrast / diurnal range, and needs the right qualifier. |
+
+### 8.1 Terminology problem to fix first
+
+You wrote: *"a stronger nocturnal inversion with the canyon bottom warmer."* As written this is
+self-contradictory. An **inversion** means temperature **increases** with height, i.e. the
+bottom is **colder**. If your canyon bottom is warmer than the air above it, you have a
+**lapse** (unstable) profile, not an inversion.
+
+The physically correct description of a dense city on a calm summer night — and I suspect what
+you actually mean — is a **two-layer structure**:
+
+- **Below roof level (in the canyon):** near-neutral to weakly **unstable** — the bottom
+  *is* warmer. Walls and road release heat stored during the day, the low sky view factor
+  (items 1–2) suppresses radiative cooling, and traffic adds anthropogenic heat. Vertical air
+  temperature differences within the canyon are **small, typically well under 1 K over the
+  canyon height.**
+- **Above roof level:** a nocturnal **inversion** caps the canopy — but a *weak* one over the
+  city compared with the countryside.
+
+Write it that way in your documentation. As currently phrased, a reviewer who knows boundary
+layer meteorology will stop reading at that sentence.
+
+### 8.2 Nocturnal profile — verified measurements
+
+**Bornstein, R.D. (1968).** *Observations of the Urban Heat Island Effect in New York City.*
+Journal of Applied Meteorology **7**(4): 575–582.
+DOI: 10.1175/1520-0450(1968)007<0575:OOTUHI>2.0.CO;2 —
+https://journals.ametsoc.org/view/journals/apme/7/4/1520-0450_1968_007_0575_ootuhi_2_0_co_2.xml
+Instrumented **helicopter**, 42 test mornings, July 1964 – December 1966, lowest **700 m**,
+hours near sunrise. **Abstract read and verified this session.** Findings, quoted:
+
+> "Results show urban surface temperature inversions to be **less intense, and far less
+> frequent**, than those in the surrounding non-urban regions. A high frequency of weak
+> elevated inversion layers at an **average height of 310 m** was observed over the city. The
+> average intensity of the urban heat island … was a **maximum near the surface and decreased
+> to zero at 300 m**. On mornings with relatively strong urban elevated inversion layers the
+> heat island extended to well over 500 m. For more than two-thirds of the test mornings there
+> existed an elevated **'cross-over layer'** in which rural temperatures were higher than
+> urban temperatures."
+
+This is the single most useful anchor for your nocturnal case, and it gives you a
+**quantitative constraint you can test against directly**: the urban excess is maximal at the
+surface and **vanishes at ~300 m**. If your engine's UHI is, say, 3 K at 2 m, then over 0–300 m
+the urban profile must be about `3 K / 300 m = 1.0 K per 100 m` **less inverted** (more
+lapse-like) than the rural profile it is compared with. That is a direct, falsifiable check
+you can code as a regression test.
+
+It also tells you the shape is right and the intensity intuition is wrong: the distinguishing
+urban feature is the **absence or weakness** of the surface inversion, not a strong one.
+
+**Typical magnitudes, lowest ~100 m, calm clear night** — these are the numbers you asked for
+in K per 100 m:
+
+| | Rural / open country | Dense urban core |
+|---|---|---|
+| Nocturnal gradient, lowest 100 m | **+3 to +10 K/100 m** (strong surface inversion) | **+0.5 to +2 K/100 m** (weak), sometimes **≈ 0 or slightly negative** in the densest, driest, traffic-heavy fabric |
+
+**[UNVERIFIED-SOURCE: this table is assembled from the urban boundary-layer literature from
+memory and is consistent with Bornstein's qualitative finding, but I did not read a paper
+this session that states these ranges numerically. Treat the ranges as indicative. If you
+need a defensible number in a user-facing document, the honest options are (a) quote
+Bornstein's "UHI decreases to zero at 300 m" and derive the implied differential, which IS
+verified, or (b) obtain and read one modern tall-tower study.]**
+
+### 8.3 Daytime profile — and why your −0.6 K/100 m is suspect
+
+A summer afternoon over a city is convectively **well mixed** above roof level. In a
+well-mixed layer, *potential* temperature is nearly constant with height, so *actual* air
+temperature falls at close to the **dry adiabatic lapse rate**:
+
+```
+Gamma_d = g / cp = 0.0098 K/m = 0.98 K per 100 m
+```
+
+And because the daytime surface layer is **unstable**, the near-surface profile must be
+**superadiabatic** — steeper than 0.98 K/100 m — not shallower. So on a summer afternoon:
+
+| Layer | Expected air-temperature gradient |
+|---|---|
+| lowest few metres, sunlit surface | strongly superadiabatic, several K over the first metres |
+| roughly 0–100 m over dense city, summer afternoon | **≈ −1.0 to −1.7 K per 100 m** |
+| well-mixed layer well above roof level | asymptotes to **≈ −0.98 K per 100 m** |
+
+**Your −0.6 K per 100 m is shallower than the dry adiabatic rate.** That means the modelled
+layer is *statically stable* in potential temperature (`dtheta/dz = −0.6 + 0.98 = +0.38 K per
+100 m`), which is the opposite of what an unstable summer afternoon requires — and is
+inconsistent with your own item 7, which computes a negative `theta*` and hence an unstable
+profile. **The two modules disagree with each other.**
+
+The arithmetic in §7 shows why: for representative afternoon forcing, MOST gives
+`dtheta/dz ≈ −0.70 K per 100 m` and `dT/dz ≈ −1.68 K per 100 m`. Your −0.6 is a near-perfect
+match to the **potential** temperature gradient. **Conclusion: the engine is almost certainly
+reporting potential temperature as if it were air temperature — a missing `− Gamma_d·z`
+term.** Fix that, and your daytime number lands in the observed range.
+
+(Two alternative explanations worth ruling out before you change anything: (i) the gradient is
+being evaluated over a layer deep enough to include the capping inversion, which would flatten
+it; (ii) the sensible heat flux driving it is unrealistically small. Both are easy to check by
+printing `theta*`, `L` and the layer bounds.)
+
+### 8.4 Intra-canyon variation: air vs surfaces — VERIFIED
+
+**Sugawara, H., Hagishima, A., Narita, K., Ogawa, H. & Yamano, M. (2008).** *Temperature and
+Wind Distribution in an E-W-Oriented Urban Street Canyon.* SOLA (Scientific Online Letters on
+the Atmosphere) **4**: 53–56. DOI: 10.2151/sola.2008-014 — open access,
+https://www.jstage.jst.go.jp/article/sola/4/0/4_0_53/_pdf
+**Full paper read and verified this session.**
+
+Setup: real E–W canyon, uninhabited area of Tokyo, `H/W = 0.56`, `H = 11 m`, `L = 44 m`, bare
+soil / short grass floor, **no traffic and no anthropogenic heat**, 13 sonic anemometers and
+**41 ventilated thermocouples** on a 2-D cross section, 10 Hz / 2 s sampling, 10-min averages,
+15 fine days Sep–Dec 2004.
+
+Findings, quoted / directly extracted:
+
+- Temperature contours are plotted at **0.1 K intervals** — the whole cross-canyon field spans
+  only a couple of K.
+- **Daytime (12:00): "a horizontal temperature variation of approximately 2 K existed between
+  the northern and southern portion of the canyon, which was LARGER than the vertical
+  gradient."**
+- **"The air within the canyon exhibited marked thermal stratification on calm nights … and an
+  almost homogeneous temperature field at high wind speeds."**
+- A steady canyon-scale **single vortex** was frequently observed, and it **advects the cold
+  (shaded) air mass** across the canyon floor — the cold core is displaced upwind of the
+  above-roof ambient wind.
+
+**This verifies your "air varies 1–3 K" claim** — measured ~2 K in a real canyon cross
+section. It also gives you two findings that are more interesting than the claim itself:
+
+1. **The dominant intra-canyon air temperature gradient is HORIZONTAL (sun/shade), not
+   vertical.** If your engine resolves a vertical profile but treats the canyon
+   cross-stream direction as uniform, it is resolving the smaller of the two gradients. For an
+   E–W canyon at midday the sunlit/shaded asymmetry is the leading-order signal.
+2. **The reason air varies so little is mixing, not thermal inertia.** Air has negligible heat
+   capacity, but the canyon vortex homogenises it on a timescale much shorter than the surface
+   heating timescale. That is *why* surfaces can differ by 20 K while the air differs by 2 K —
+   a good physical justification to put in your docs.
+
+**Caveat you must carry:** this site had a **grass/soil floor, no traffic, no anthropogenic
+heat, and measurements in autumn (Sep–Dec)**. Its calm-night *stable* stratification
+(cold at the bottom) is the **opposite sign** to the "canyon bottom warmer" your model
+produces. That is not necessarily a contradiction — a paved, traffic-bearing, heat-storing
+summer canyon plausibly goes the other way — but it does mean **the sign of the nocturnal
+intra-canyon vertical gradient is site-dependent and controlled by floor material,
+anthropogenic heat and moisture, not by geometry alone.** Do not present "canyon bottom
+warmer at night" as a general measured fact. Present it as a model result contingent on paved,
+dry, heat-storing surfaces with anthropogenic heat, and note the counter-example.
+
+### 8.5 Surface vs air temperature amplitude — VERIFIED (with a re-phrasing)
+
+**Chen, G. et al. (2021).** *Effects of urban geometry on thermal environment in 2D street
+canyons: A scaled experimental study.* Building and Environment **198**: 107916.
+DOI: 10.1016/j.buildenv.2021.107916 — accepted manuscript openly available at
+https://discovery.ucl.ac.uk/10139825/1/Manuscript_revised%20version.pdf
+**Full text read and verified this session.** Scaled outdoor canyons, `H/W = 0.5, 1, 2, 3, 6`
+(`H = 0.5 m` and `1.2 m`), 42 thermocouples, diurnal cycles decomposed by FFT.
+
+Verified numbers (daily temperature range, DTR, in K):
+
+| Quantity | `H/W`=0.5 | 1 | 2 | 3 | 6 |
+|---|---|---|---|---|---|
+| **Canyon air DTR** | 10.9 | 10.4 | 10.3 | 10.3 | 9.3 |
+| **West wall DTR** | 18.5 | 16.0 | 14.6 | 13.8 | 11.7 |
+| **East wall DTR** | 26.1 | 22.8 | 18.4 | 16.5 | 12.9 |
+| East−West wall DTR difference | 7.6 | 6.8 | 3.8 | 2.7 | 1.2 |
+| Canyon air **daily mean** (°C) | 24.3 | 24.2 | 24.3 | 24.5 | 24.6 |
+
+Quoted: *"the DTRs of the west and east walls are much higher than those of canyon air. As an
+example of a street canyon with H/W = 0.5, the DTR of canyon air is the smallest (10.9 °C),
+which is **7.6 °C and 15.2 °C lesser** than that of the west wall and east wall,
+respectively."*
+
+**Interpretation for your claim.** These data support the *spirit* of "air varies 1–3 K,
+surfaces vary 15–25 K", and support it strongly on the surface side (**wall DTR up to 26 K**,
+against **air DTR ~10 K**; facet-to-facet DTR contrasts up to 7.6 K). But note two things:
+
+- **Canyon air DTR is ~10 K, not 1–3 K.** Your "1–3 K" is the **spatial** variation across the
+  canyon cross-section at a given instant (verified by Sugawara), **not** the temporal swing.
+  Those are different quantities and it is easy to state the claim in a way that conflates
+  them. Be explicit: *"at any instant, air temperature varies by 1–3 K across the canyon
+  cross-section, while facet surface temperatures vary by 15–25 K."*
+- Also worth quoting because it is a strong result: **canyon air daily-mean temperature is
+  essentially invariant with aspect ratio** (24.2–24.6 °C, a spread of **0.4 K** across
+  `H/W` = 0.5 to 6) while wall daily means and DTRs change a lot. Geometry restructures the
+  *surface* thermal field far more than it restructures the *air*. If your engine shows canyon
+  air mean temperature swinging strongly with `H/W` in the daytime, that is a red flag —
+  although note this experiment had no anthropogenic heat and limited advection, and the
+  nocturnal UHI relation of item 9 *is* strongly geometry-dependent, so this applies to the
+  daily mean, not to the night.
+
+**On "surfaces vary 15–25 K":** the verified support above is for **diurnal range**, and for
+facet-to-facet DTR differences up to ~7.6 K. Instantaneous sunlit-vs-shaded facet contrasts of
+15–25 K on a summer afternoon are commonly reported from thermography and are consistent with
+these amplitudes, but **[UNVERIFIED-SOURCE: I did not read a thermography paper this session
+that states a 15–25 K instantaneous facet contrast.]** Either soften the claim to "surface
+temperatures across canyon facets span 15–25 K over the diurnal cycle, with sunlit-shaded
+contrasts of the same order" — which the Chen et al. table supports directly — or obtain a
+thermography citation.
+
+### 8.6 Other primary sources worth obtaining (citations verified, text not read)
+
+- **Nakamura, Y. & Oke, T.R. (1988).** *Wind, temperature and stability conditions in an
+  east-west oriented urban canyon.* Atmospheric Environment **22**(12): 2691–2700.
+  DOI: 10.1016/0004-6981(88)90437-4 (Citation verified via Crossref; **paywalled, closed
+  access per Unpaywall — not read**.) This is *the* canonical canyon air/surface temperature
+  study (Kyoto) and is the standard citation for "canyon air temperature is nearly uniform
+  while facet surface temperatures differ greatly". **Get this paper.** It is the single
+  highest-value acquisition for your credibility on this section.
+- **Offerle, B., Grimmond, C.S.B., Fortuniak, K. & Pawlak, W. (2007).** *Surface heating in
+  relation to air temperature, wind and turbulence in an urban street canyon.* Boundary-Layer
+  Meteorology **122**(2): 273–292. DOI: 10.1007/s10546-006-9099-8 (Citation verified;
+  paywalled, not read.) Exactly on-topic: surface heating vs air temperature in a real canyon
+  (Łódź).
+- **Niachou, K., Livada, I. & Santamouris, M. (2008).** *Experimental study of temperature and
+  airflow distribution inside an urban street canyon during hot summer weather conditions —
+  Part I: Air and surface temperatures.* Building and Environment **43**(8): 1383–1392.
+  DOI: 10.1016/j.buildenv.2007.01.039 (Citation verified; paywalled, not read.) **Hot summer
+  conditions**, air *and* surface temperatures — this is the closest match to your summer
+  afternoon use case.
+- **Aliabadi, A.A. et al. (2019).** *Flow and temperature dynamics in an urban canyon under a
+  comprehensive set of wind directions, wind speeds, and thermal stability conditions.*
+  Environmental Fluid Mechanics **19**: 81–109. DOI: 10.1007/s10652-018-9606-8
+  (Citation verified; paywalled, not read.) Modern, comprehensive stability stratification.
+- **Aikawa, M. & Hiraki, T. (2009).** *Characteristic seasonal variation of vertical air
+  temperature profile in urban areas of Japan.* Meteorology and Atmospheric Physics **104**:
+  95–102. DOI: 10.1007/s00703-009-0020-0 (Citation verified; not read.) Vertical profiles,
+  seasonal — likely has K/100 m numbers directly.
+
+### 8.7 Concrete actions
+
+1. **Fix the potential-temperature conversion** (§7 / §8.3) and re-check the daytime gradient.
+   Target −1.0 to −1.7 K/100 m for a dense-city summer afternoon.
+2. **Re-word the nocturnal description** as the two-layer structure in §8.1. Stop calling a
+   warm-bottomed canyon an inversion.
+3. **Add the Bornstein regression test:** modelled urban excess must decay to ~0 by ~300 m.
+4. **Split the "1–3 K" claim** into instantaneous spatial variation (verified ~2 K) vs
+   diurnal range (~10 K, verified) and cite each separately.
+5. **Check whether the engine resolves the cross-canyon (sun/shade) air temperature
+   gradient.** Sugawara measured it to be *larger* than the vertical one at midday. If the
+   model only has a vertical profile, say so in the limitations.
+6. **Acquire Nakamura & Oke (1988) and Niachou et al. (2008).** Until then, do not put a
+   specific facet-contrast number in user-facing copy.
+
+
+---
+
+## 9. Oke's UHI / aspect-ratio and UHI / SVF relations
+
+### Implemented
+
+```
+dT_max = 7.54 + 3.97 * ln(H/W)
+dT_max = 15.27 - 13.88 * SVF
+```
+
+### Verdict: **THE FIRST INTERCEPT IS WRONG. It is 7.45, not 7.54.** Looks like a transposed
+digit. The slope `3.97` is correct.
+
+### Correct form
+
+```
+dT_(u-r)max = 7.45 + 3.97 * ln(H/W)          [degrees C]
+```
+
+**Verified this session** — quoted verbatim (as `7,45+3,97 ln(H/W)`, comma decimal separator)
+from the full text of:
+
+**Nakata, C.M. & de Souza, L.C.L. (2013).** *Verification of the influence of urban geometry
+on the nocturnal heat island intensity.* Journal of Urban and Environmental Engineering
+**7**(2): 286–292. DOI: 10.4090/juee.2013.v7n2.286-292 — open access, PDF read at
+https://periodicos.ufpb.br/index.php/juee/article/view/16977/10404
+They reproduce it as "Eq. 1 … the model proposed by Oke (1981)", with
+`ΔTu−r(max)` = heat island intensity (°C) and `H/W` the building-height to street-width ratio.
+
+### Canonical citation
+
+**Oke, T.R. (1981).** *Canyon geometry and the nocturnal urban heat island: comparison of
+scale model and field observations.* Journal of Climatology **1**(3): 237–254.
+DOI: 10.1002/joc.3370010304 — https://doi.org/10.1002/joc.3370010304
+(Bibliographic details verified via Crossref: Journal of Climatology, vol. 1, pp. 237–254,
+1981. The paper itself is paywalled and was not read this session.)
+
+Note there is a published comment on it worth being aware of:
+**Lyons, T.J. (1983).** *Comments on 'Canyon geometry and the nocturnal urban heat island:
+comparison of scale model and field observations'.* Journal of Climatology **3**(1): 95–97.
+DOI: 10.1002/joc.3370030108 (Citation verified.)
+
+### The SVF form
+
+```
+dT_(u-r)max = 15.27 - 13.88 * psi_sky
+```
+
+**[UNVERIFIED-SOURCE: I could not read a source this session that reproduces this equation.
+The coefficients are as they circulate in the literature and match my recollection, but
+confirm against Oke (1981) before quoting them.]**
+
+However, I did run an **internal-consistency check between your two equations**, which is
+informative regardless of the citation, using the road-centre SVF
+`psi = 1/sqrt(1 + (2H/W)^2)` from item 1:
+
+| `H/W` | `psi_sky` | `7.45 + 3.97 ln(H/W)` | `15.27 − 13.88 psi` | difference |
+|---|---|---|---|---|
+| 0.25 | 0.894 | 1.95 | 2.86 | +0.91 |
+| 0.5 | 0.707 | 4.70 | 5.45 | +0.75 |
+| 1 | 0.447 | 7.45 | 9.06 | +1.61 |
+| 2 | 0.243 | 10.20 | 11.90 | +1.70 |
+| 3 | 0.164 | 11.81 | 12.99 | +1.18 |
+
+The two forms **do not agree** — the SVF form runs about **0.8–1.7 K hotter** across the
+realistic range. That is not a bug you introduced; it is inherent in using two separate
+regressions fitted to overlapping but not identical datasets (Oke combined scale-model and
+field observations), and it may also reflect a different SVF definition in the original (e.g.
+road-**averaged** rather than road-**centre** — using the TEB road-average
+`sqrt(x²+1) − x` shifts the SVF column but does not close the gap).
+
+**Practical consequence:** your engine must not use both. Pick one, document which, and state
+that the alternative form differs by up to ~1.7 K. If you expose both, users will compare them
+and file a bug.
+
+### Two further cautions on using these regressions at all
+
+1. **They predict the MAXIMUM nocturnal UHI under ideal conditions** — calm, clear,
+   anticyclonic nights. They are not a general-purpose UHI predictor and they say nothing
+   about daytime. Applying them to an arbitrary hour is a misuse. If your API surfaces
+   `dT_max`, name it that way.
+2. **Linearity in SVF breaks down at low SVF.** Verified from Nakata & de Souza (2013), who
+   report of Oke (1981): *"for SVF values > 0.25 (H/W = 2; 1; 0.5; 0.25), the relationships
+   appear to be approximately linear, but for smaller values of SVF (H/W = 3; 4), they are
+   likely curved."* So the linear SVF form should be treated as valid for
+   **`psi_sky > 0.25`**, i.e. roughly `H/W < 2`. Beyond that, extrapolation over-predicts.
+   Clamp or warn.
+3. `ln(H/W)` diverges as `H/W → 0`, giving unbounded negative UHI for very open sites. Needs a
+   floor.
+
+---
+
+## 10. WBGT and the Stull wet-bulb approximation
+
+### Implemented
+
+```
+WBGT = 0.7*Tnwb + 0.2*Tg + 0.1*Ta
+
+Tw = T*atan(0.151977*(RH+8.313659)^0.5) + atan(T+RH) - atan(RH-1.676331)
+     + 0.00391838*RH^1.5*atan(0.023101*RH) - 4.686035
+```
+
+### Verdict on Stull: **CORRECT — coefficient-for-coefficient exact.**
+
+**Verified against the source text this session.** From Stull's own textbook rendering
+(eq. 4.19), reading identically to your implementation:
+
+```
+Tw ≈ T·atan[0.151977·(RH% + 8.313659)^(1/2)]
+     + atan(T + RH%)
+     − atan(RH% − 1.676331)
+     + 0.00391838·(RH%)^(3/2)·atan(0.023101·RH%)
+     − 4.686035
+```
+
+**Every coefficient matches yours.** Sources:
+- **Stull, R. (2011).** *Wet-Bulb Temperature from Relative Humidity and Air Temperature.*
+  Journal of Applied Meteorology and Climatology **50**(11): 2267–2269.
+  DOI: 10.1175/JAMC-D-11-0143.1 —
+  https://journals.ametsoc.org/view/journals/apme/50/11/jamc-d-11-0143.1.xml
+  (Abstract and partial body read and verified this session.)
+- Formula text verified from **Stull, R., *Practical Meteorology: An Algebra-based Survey of
+  Atmospheric Science*, eq. (4.19)**, free at
+  https://www.eoas.ubc.ca/books/Practical_Meteorology/ (chapter 4 PDF read this session).
+
+### Valid range and accuracy — verified, quote these exactly
+
+From the Stull (2011) abstract, read verbatim:
+
+> "This equation is valid for **relative humidities between 5% and 99%** and for **air
+> temperatures between −20° and 50 °C**, except for situations having **both low humidity and
+> cold temperature**. Over the valid range, errors in wet-bulb temperature range from
+> **−1° to +0.65 °C**, with **mean absolute error of less than 0.3 °C**."
+
+And from the body:
+
+> "Mean error is **−0.0052 °C**, median error is **0.026 °C**, mean absolute error is
+> **0.28 °C**, and the fraction of variance (r²) explained by the regression is **99.95%**."
+
+Two more verified constraints, both of which need to be enforced in code:
+
+- **Pressure: the fit is for 101.325 kPa only.** Stull is explicit: *"Equation (1) is valid
+  for a pressure of 101.325 kPa."* He provides gray reference curves for 80 kPa and 60 kPa
+  *specifically so readers can estimate the error* when applying it off-standard — i.e. the
+  error is not negligible. **If your API serves cities at altitude (Mexico City ~78 kPa,
+  Denver ~84 kPa, Bogotá ~75 kPa), this formula is being used out of range.** Add an altitude
+  warning, or switch to a pressure-aware method. A modern drop-in replacement exists:
+  **Romps, D.M. (2026).** *Wet-Bulb Temperature from Pressure, Relative Humidity, and Air
+  Temperature.* Journal of Applied Meteorology and Climatology **65**: 285–298.
+  DOI: 10.1175/JAMC-D-25-0130.1 (Citation verified via Crossref; not read.) — worth
+  evaluating precisely because it takes pressure as an input.
+- **Units: `atan` must return RADIANS.** Stull flags this himself: *"[CAUTION: If your
+  software returns arctangent values in degrees, be sure to convert to radians before you use
+  them in the equation above.]"* Python's `math.atan` is radians, so you are fine — but note it
+  in the docstring, and note that `RH` is entered as a **percentage number** (65.8, not 0.658).
+  A fractional-RH bug here fails silently with plausible-looking output.
+
+**Verified test case** (Stull's own worked example): `T = 20 °C`, `RH = 50%` → **`Tw = 13.7 °C`**.
+Put that in the unit tests.
+
+### Verdict on the WBGT weights: **CORRECT — but the biggest caveat in this whole document
+applies here.**
+
+```
+Outdoors, with solar load:   WBGT = 0.7*Tnwb + 0.2*Tg + 0.1*Ta
+Indoors / no solar load:     WBGT = 0.7*Tnwb + 0.3*Tg
+```
+
+Both are standard, and the outdoor/indoor distinction is exactly as you state: the indoor form
+drops the separate dry-bulb term and reallocates its weight to the globe temperature, because
+with no direct beam the globe already captures the radiant environment. Codified in
+**ISO 7243** and **ACGIH** TLVs; original source:
+**Yaglou, C.P. & Minard, D. (1957).** *Control of heat casualties at military training
+centers.* AMA Archives of Industrial Health **16**: 302–316.
+**[UNVERIFIED-SOURCE: Crossref did not return this 1957 article; related verified records are
+Yaglou (1956), "Prevention of Heat Casualties at Marine Corps Training Centers", DTIC
+AD0099920, and Minard, D. (1961), "Prevention of Heat Casualties in Marine Corps Recruits",
+Military Medicine 126:261–272, DOI 10.1093/milmed/126.4.261. Verify the 1957 citation before
+using it.]**
+
+### The critical caveat: `Tnwb` is NOT the same as Stull's `Tw`
+
+This is a real error of interpretation if the code substitutes one for the other, and it is
+extremely common:
+
+- **`Tw` (Stull) is the psychrometric / thermodynamic wet-bulb temperature** — the
+  adiabatic-saturation temperature, a pure thermodynamic function of `T`, `RH`, `P`. It is
+  defined for a *fully aspirated* sensor and is independent of wind and radiation.
+- **`Tnwb` in WBGT is the NATURAL wet-bulb temperature** — the reading of a wetted sensor
+  exposed to the *actual* ambient wind and *actual* radiation, unaspirated. It depends on wind
+  speed and solar load.
+
+`Tnwb ≥ Tw` in general, and the gap grows with solar load and shrinks with wind speed. Under
+low wind and strong sun the difference reaches **2–3 K**, which — at weight 0.7 — puts
+**1.4–2.1 K straight into WBGT**. That is enough to move a heat-stress assessment across an
+ACGIH work/rest threshold. **Substituting Stull's `Tw` for `Tnwb` systematically
+UNDER-estimates outdoor WBGT in exactly the hot, calm, sunny conditions the engine exists to
+assess.** **[UNVERIFIED-SOURCE: the 2–3 K magnitude is reported from the heat-stress
+literature, not read this session.]**
+
+**What to do:**
+1. If the code currently does `WBGT = 0.7*Tw_stull + 0.2*Tg + 0.1*Ta`, **rename the variable
+   and label the output an approximation** — do not call it WBGT without qualification.
+2. Better: use an established `Tnwb` model that takes wind and radiation. The reference
+   implementation in this space is the **Liljegren et al. (2008)** physical WBGT model, which
+   solves the natural wet-bulb and globe temperatures from standard meteorological inputs
+   (`T`, `RH`, wind, direct and diffuse solar, pressure). Since your engine already computes
+   direct and diffuse irradiance (items 11–12) and a canyon wind (item 3), you have every
+   input Liljegren needs. **[UNVERIFIED-SOURCE: Liljegren et al. (2008), "Modeling the Wet Bulb
+   Globe Temperature Using Standard Meteorological Measurements", Journal of Occupational and
+   Environmental Hygiene 5(10):645–655 — citation from memory, not verified via Crossref this
+   session.]**
+3. Also check `Tg`: a real 150 mm black globe has a substantial time constant (~20 min) and its
+   equilibrium temperature depends on wind, direct beam, diffuse, ground-reflected and longwave
+   from all facets. If the engine already computes `T_mrt` from the SVF work in items 1–2, `Tg`
+   should be derived from that radiant field and the canyon wind — not from a fixed offset to
+   `Ta`. This is where the sky-view-factor machinery earns its keep.
+
+---
+
+## 11. Kasten–Young air mass and Meinel clear-sky DNI
+
+### Implemented
+
+```
+AM  = 1 / ( cos(z) + 0.50572 * (alt_deg + 6.07995)^(-1.6364) )
+DNI = E0 * 0.7^(AM^0.678)
+```
+
+### Verdict: **BOTH CORRECT.**
+
+### Kasten–Young — verified
+
+**Kasten, F. & Young, A.T. (1989).** *Revised optical air mass tables and approximation
+formula.* Applied Optics **28**(22): 4735–4738. DOI: 10.1364/AO.28.004735
+(Citation verified via Crossref: Applied Optics 28:4735, 1989.)
+
+The published form is written in terms of the **apparent zenith angle `z` in degrees**:
+
+```
+AM = 1 / ( cos z + 0.50572 * (96.07995 - z)^(-1.6364) )
+```
+
+**Verified via** https://en.wikipedia.org/wiki/Air_mass_(solar_energy) (read this session),
+which quotes it in exactly this form with this citation.
+
+Your version is **algebraically identical**: with solar altitude `h = 90° − z`,
+`96.07995 − z = h + 6.07995`. ✓ So `AM = 1/(cos z + 0.50572 (h + 6.07995)^{−1.6364})`.
+
+Notes to enforce in code:
+- The `(96.07995 − z)` argument **must be in degrees** while `cos z` is evaluated in radians.
+  This mixed-units quirk is the classic bug here. Verify the code does not feed radians into
+  the power term.
+- `AM` is defined for `z ≤ 90°`; it reaches **≈ 38** at the horizon. Guard against `z > 90°`
+  (sun below horizon) — return no direct beam rather than a formula value.
+- Kasten–Young gives **relative** air mass at sea level. For altitude, scale by the pressure
+  ratio: `AM_abs = AM · (P / P0)`. A city at 1600 m has `P/P0 ≈ 0.83`, i.e. 17% less
+  attenuating path — non-trivial for DNI. Add it if the API is global.
+- It uses **apparent** (refraction-corrected) zenith angle. Below ~10° altitude, refraction is
+  ~0.1–0.5°, which matters little for irradiance but is worth a comment.
+
+### Meinel & Meinel clear-sky DNI — verified
+
+```
+DNI = E0 * 0.7^(AM^0.678)
+```
+
+Attributed to **Meinel, A.B. & Meinel, M.P. (1976).** *Applied Solar Energy: An
+Introduction.* Addison-Wesley. **Verified via** the same Wikipedia page (read this session),
+which gives the closely related global form `I = 1.1 · I0 · 0.7^(AM^0.678)` with
+`I0 = 1.353 kW/m²`, where the **1.1 factor adds an assumed diffuse component equal to 10% of
+the direct beam**, and the altitude-corrected variant
+
+```
+I = 1.1 * I0 * [ (1 - h/7.1) * 0.7^(AM^0.678) + h/7.1 ]      h = altitude in km
+```
+
+**Two things to check in your implementation:**
+1. **Do NOT include the 1.1 factor if you are computing DNI.** The `1.1` makes it a
+   global-ish quantity. Your form (`DNI = E0 · 0.7^(AM^0.678)`, no 1.1) is the correct
+   **direct normal** version. ✓ Just make sure a separate diffuse model is doing the diffuse,
+   and that you are not double-counting.
+2. **`E0`.** Meinel's constant was `1353 W/m²`. The modern accepted total solar irradiance is
+   **`1361 W/m²`** (and `E0` should really be scaled by the Earth–Sun distance factor,
+   `≈ 1 ± 0.034` over the year, i.e. ±3.4%, which is larger than the 1353→1361 revision).
+   Using 1361 with a fit calibrated at 1353 is a 0.6% inconsistency — negligible, but the
+   **eccentricity correction is not**, and is often forgotten:
+   `E0(n) = E_sc · (1 + 0.033 cos(2πn/365))`.
+
+### Typical `tau` (the `0.7`) for urban and hazy air — as requested
+
+The `0.7` is a **broadband atmospheric transmittance at unit air mass**, lumping Rayleigh
+scattering, ozone, water vapour and aerosol into one number. It corresponds roughly to a very
+clean, clear sea-level atmosphere.
+
+| Condition | Broadband `tau` at AM = 1 |
+|---|---|
+| Exceptionally clear, high altitude / dry | 0.75 – 0.80 |
+| **Meinel's nominal clear sea-level value** | **0.70** |
+| Typical clear day, temperate urban | 0.65 – 0.70 |
+| Hazy urban / moderate aerosol | 0.55 – 0.65 |
+| Heavy urban haze, biomass smoke, dust event | 0.40 – 0.55 |
+
+**[UNVERIFIED-SOURCE: this table is indicative, assembled from the solar-resource literature,
+not read from a source this session.]**
+
+**Recommendation:** expose `tau` as a configurable parameter rather than hard-coding 0.70, and
+default it by climate zone or drive it from an aerosol optical depth input if you have one.
+For a heat-stress product this matters more than it looks: DNI drives the sunlit-facet surface
+temperatures (item 8's 15–25 K contrasts) and the globe temperature (item 10), so a 0.70 vs
+0.60 choice propagates into WBGT. Note also that the single-`tau` power law is a crude model —
+if DNI accuracy matters, the standard clear-sky models (Ineichen–Perez, REST2, Bird) are the
+proper upgrade path, and `pvlib` implements them.
+
+---
+
+## 12. Kasten–Czeplak cloud modification
+
+### Implemented
+
+```
+GHI / GHI_clear = 1 - 0.75 * C^3.4
+```
+
+### Verdict: **CORRECT.**
+
+### Citation
+
+**Kasten, F. & Czeplak, G. (1980).** *Solar and terrestrial radiation dependent on the amount
+and type of cloud.* Solar Energy **24**(2): 177–189. DOI: 10.1016/0038-092X(80)90391-6
+(Citation verified via Crossref: Solar Energy, vol. 24, pp. 177–189, 1980.)
+
+The published relation is normally written with cloud amount `N` in **oktas** (0–8):
+
+```
+G / G_0 = 1 - 0.75 * (N/8)^3.4
+```
+
+so `C = N/8` is the cloud fraction 0–1 — **your form is correct provided `C` is a fraction,
+not oktas and not a percentage.** Add an assertion; feeding oktas (e.g. `C = 6`) gives
+`1 − 0.75·6^3.4 ≈ −347`, and feeding a percentage gives similar nonsense, so this fails loudly
+rather than silently — but only if nothing clamps it first. Check that no upstream `max(0, …)`
+is hiding the unit error.
+
+**[UNVERIFIED-SOURCE: the coefficients 0.75 and 3.4 are reported from the standard
+reproduction of Kasten–Czeplak; the paper is paywalled and was not read this session. The
+bibliographic record is verified.]**
+
+### Behaviour and limits
+
+| `C` | `G/G_clear` |
+|---|---|
+| 0 | 1.000 |
+| 0.25 | 0.993 |
+| 0.5 | 0.929 |
+| 0.75 | 0.712 |
+| 1.0 | **0.250** |
+
+Notes:
+- **Overcast retains 25% of clear-sky GHI.** That is the intended, empirically-fitted result
+  (Hamburg data) and is realistic for temperate stratus. It will be too high for deep
+  convective overcast and too low for thin high overcast.
+- The relation is **strongly nonlinear and nearly flat below `C ≈ 0.4`** — broken cloud barely
+  reduces the daily total, because gaps let the beam through and cloud sides scatter extra
+  diffuse in. This is correct behaviour and a good reason to prefer it over a linear cloud
+  factor.
+- **It applies to GLOBAL horizontal irradiance only.** It says nothing about the split between
+  direct and diffuse, and cloud changes that split drastically — overcast is ~100% diffuse
+  while clear is mostly beam. **If the engine applies this factor to DNI, or applies it to GHI
+  and then re-derives DNI with a clear-sky beam fraction, that is a bug**, and a consequential
+  one: sunlit-facet heating and globe temperature depend on DNI, not GHI. Under overcast, DNI
+  should go to ~0 and diffuse should carry the whole 25%. Verify this is what happens.
+- Kasten & Czeplak also give a companion relation for **longwave** as a function of cloud —
+  relevant to item 6 and derived from the same dataset, so using their shortwave relation with
+  a different cloud longwave form is a mild inconsistency, though not an error.
+- The fit is from **Hamburg** data (mid-latitude maritime). Cloud type is not an input, and
+  the paper's own title flags type dependence. Document the provenance.
+
+---
+
+## Consolidated action list
+
+**Real bugs to fix**
+
+| Priority | Item | Bug | Fix |
+|---|---|---|---|
+| 1 | 7 / 8 | MOST output treated as air temperature; missing dry-adiabatic conversion. Explains the suspect −0.6 K/100 m daytime gradient. | `T(z) = theta(z) − 0.0098·z` |
+| 2 | 5 | `z0/H` uses `λ_p` where Macdonald et al. (1998) requires the **frontal** area index `λ_f`. | compute and pass `λ_f` |
+| 3 | 4 | `h_c = 5.7 + 3.8u` is a **combined** convective+radiative coefficient; if a separate longwave term exists, radiation is double-counted (~50% over-estimate of turbulent flux at low wind). | convective-only intercept (~2.0) and keep explicit LW |
+| 4 | 9 | Intercept `7.54` should be **`7.45`**. | one character |
+| 5 | 10 | Stull's psychrometric `Tw` substituted for the natural wet-bulb `Tnwb`; under-estimates outdoor WBGT by 1.4–2.1 K in hot calm sun. | Liljegren-type `Tnwb`, or relabel output |
+| 6 | 3 | `0.386` attributed to Masson (2000); not verifiable there, and TEB does not use this form. | remove citation, or migrate to Macdonald (2000) `λ_f` attenuation |
+
+**Correct as implemented — no change needed**
+
+- Item 1: `(1/N) Σ cos²β_i` — proved exact; reduces analytically to `cos(arctan(2H/W))`.
+- Item 2: `0.5(1 − sin α)` — proved exact; integrates exactly to TEB's `Ψ_wall`.
+- Item 7: `theta*` sign convention, `L`, and both `psi_h` branches — all verified consistent.
+- Item 10: Stull coefficients — verified exact, character for character.
+- Item 11: Kasten–Young and Meinel — verified.
+- Item 12: Kasten–Czeplak — verified.
+
+**Documentation / robustness (no physics change)**
+
+- Item 1: name the SVF variable to distinguish the radiative view factor from the Zakšek et
+  al. (2011) relief-visualisation openness index; keep `N ≥ 36` azimuths.
+- Item 2: comment that the `0.5` clamp for `z ≥ H` encodes the periodic-array assumption.
+- Item 2: never compare a scan-derived road-**centre** SVF to TEB's road-**average** `Ψ_road`.
+- Item 4: document that `u` must be the canyon wind, and that the correlation is valid to
+  ~5 m/s (above which use `7.2 u^0.78`).
+- Item 5: clamp/flag `λ_p > 0.35` (skimming-flow regime, where Macdonald over-predicts `z0`);
+  document the staggered-array parameter choice.
+- Item 6: add the Berdahl–Martin pressure term for cities at altitude; consider an `N^p`
+  cloud form; feed the **forcing** air temperature, not the modelled canyon air temperature.
+- Item 7: clamp stable `zeta ≤ 1`; floor `u*`; confirm `kappa = 0.40` everywhere.
+- Item 8: re-word the nocturnal description as a two-layer structure; split the "1–3 K" claim
+  into spatial vs diurnal; add a Bornstein "UHI → 0 by ~300 m" regression test.
+- Item 9: use only one of the two Oke forms; clamp the SVF form to `psi > 0.25`.
+- Item 10: assert `RH` in percent; assert radians; add the `T=20, RH=50 -> Tw=13.7 °C` test;
+  warn for stations far from 101.325 kPa.
+- Item 11: expose `tau` as configurable; add the Earth–Sun eccentricity factor; scale `AM` by
+  `P/P0` for altitude; guard `z > 90°`.
+- Item 12: assert `C` is a fraction; ensure the factor is applied to GHI and that DNI → 0
+  under overcast rather than being scaled by the same factor.
+
+**Papers to acquire (all paywalled, all worth it)**
+
+1. Nakamura & Oke (1988), Atmos. Env. 22:2691 — highest value; the canonical canyon
+   air-vs-surface temperature study.
+2. Macdonald, Griffiths & Hall (1998), Atmos. Env. 32:1857 — confirm `λ_f` and `β` first-hand.
+3. Oke (1981), J. Climatol. 1:237 — confirm the `15.27 / 13.88` SVF regression.
+4. Berdahl & Martin (1984), Solar Energy 32:663 and Martin & Berdahl (1984), Solar Energy
+   33:321 — confirm the polynomial and the diurnal/pressure terms.
+5. Niachou et al. (2008), Build. Env. 43:1383 — hot-summer canyon air and surface temperatures.
+6. Palyvos (2008), Appl. Therm. Eng. 28:801 — settle the `h_c` combined-coefficient question.
+
+**Sources read and verified in full or in relevant part this session**
+
+- Kent et al. (2017), BLM 164:183 — https://pmc.ncbi.nlm.nih.gov/articles/6979542/ (Macdonald equations)
+- Sugawara et al. (2008), SOLA 4:53 — https://www.jstage.jst.go.jp/article/sola/4/0/4_0_53/_pdf
+- Chen et al. (2021), Build. Env. 198:107916 — https://discovery.ucl.ac.uk/10139825/1/Manuscript_revised%20version.pdf
+- Bornstein (1968), J. Appl. Meteor. 7:575 — abstract, journals.ametsoc.org
+- Stull (2011), JAMC 50:2267 — abstract + partial body; formula from Practical Meteorology ch.4
+- Nakata & de Souza (2013), JUEE 7:286 — https://periodicos.ufpb.br/index.php/juee/article/view/16977/10404 (Oke 7.45)
+- Gubler et al. (2012), ACPD 12:3357 — https://acp.copernicus.org/preprints/12/3357/2012/acpd-12-3357-2012.pdf (cloud LW forms)
+- Redon et al. (2020), GMD 13:385 — https://gmd.copernicus.org/articles/13/385/2020/ (TEB has no exp(-a H/W) wind)
+- Wikipedia, *Air mass (solar energy)* — Kasten–Young and Meinel forms
+
+All other bibliographic records (author, year, title, journal, volume, pages, DOI) were
+verified against the **Crossref** API. Coefficient values not read from a primary or verified
+secondary source are tagged **[UNVERIFIED-SOURCE]** inline.
