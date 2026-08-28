@@ -265,3 +265,8 @@ tests/screenshots/
 test-results/
 playwright-report/
 node_modules/
+
+# Cached Natural Earth / GISTEMP downloads for the opening film's globe.
+# The built assets under web/data/ are committed; these raw sources are not.
+data/globe/*
+!data/globe/.gitkeep

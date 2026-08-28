@@ -76,6 +76,49 @@ test('STREET: scroll wheel should do something useful', async ({ page }) => {
   expect(moved, 'scroll should move the walker, not be inert').toBeGreaterThan(0.5);
 });
 
+test('STREET: E and Q move up and down', async ({ page }) => {
+  await openApp(page);
+  await page.click('#cam-street');
+  await page.waitForTimeout(500);
+  const y0 = await page.evaluate(() => window.HC.scene.fp.pos.y);
+  await page.keyboard.down('KeyE');
+  await page.waitForTimeout(600);
+  await page.keyboard.up('KeyE');
+  const y1 = await page.evaluate(() => window.HC.scene.fp.pos.y);
+  await page.keyboard.down('KeyQ');
+  await page.waitForTimeout(300);
+  await page.keyboard.up('KeyQ');
+  const y2 = await page.evaluate(() => window.HC.scene.fp.pos.y);
+  expect(y1, 'E should move the camera up').toBeGreaterThan(y0 + 1);
+  expect(y2, 'Q should move the camera back down').toBeLessThan(y1 - 1);
+});
+
+test('returning from the street establishes a coherent fly-over view', async ({ page }) => {
+  await openApp(page);
+  await page.click('#cam-street');
+  await page.waitForTimeout(500);
+  await page.click('#cam-orbit');
+  await page.waitForTimeout(300);
+  const v = await page.evaluate(() => {
+    const s = window.HC.scene;
+    const toTarget = s.controls.target.clone().sub(s.camera.position).normalize();
+    const look = new s.camera.position.constructor();
+    s.camera.getWorldDirection(look);
+    return {
+      mode: s.mode,
+      enabled: s.controls.enabled,
+      height: s.camera.position.y - s.controls.target.y,
+      distance: s.camera.position.distanceTo(s.controls.target),
+      alignment: look.dot(toTarget),
+    };
+  });
+  expect(v.mode).toBe('orbit');
+  expect(v.enabled).toBe(true);
+  expect(v.height, 'fly-over should lift clear of the street').toBeGreaterThan(250);
+  expect(v.distance, 'fly-over needs a useful city-scale distance').toBeGreaterThan(600);
+  expect(v.alignment, 'camera and orbit pivot must agree').toBeGreaterThan(0.999);
+});
+
 test('KEYS must not steer the camera while typing in the analyst box', async ({ page }) => {
   await openApp(page);
   await page.click('#cam-street');

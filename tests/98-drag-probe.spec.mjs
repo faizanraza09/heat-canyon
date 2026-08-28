@@ -36,7 +36,7 @@ async function drag(page, dx, dy, button = 'left') {
   }
   await page.mouse.up({ button });
   await settle(page);
-  await page.waitForTimeout(650);   // let damping settle
+  await page.waitForTimeout(50);
 }
 
 test('drag right slides the view right', async ({ page }) => {
@@ -57,17 +57,28 @@ test('drag right slides the view right', async ({ page }) => {
   expect(Math.abs(b.dist - a.dist), 'panning must not change zoom').toBeLessThan(a.dist * 0.06);
 });
 
+test('drag left moves the camera right so the map follows the hand', async ({ page }) => {
+  await openApp(page);
+  const a = await state(page);
+  await drag(page, -260, 0);
+  const b = await state(page);
+
+  const move = [b.target[0] - a.target[0], 0, b.target[2] - a.target[2]];
+  const along = move[0] * a.right[0] + move[2] * a.right[2];
+  console.log('drag left: target', a.target, '->', b.target, ' along-right =', along.toFixed(1));
+  expect(Math.hypot(move[0], move[2]), 'the view must move at all').toBeGreaterThan(20);
+  expect(along, 'dragging left should move the camera/view centre right').toBeGreaterThan(0);
+});
+
 test('drag down slides the ground down', async ({ page }) => {
   await openApp(page);
   const a = await state(page);
   await drag(page, 0, 240);
   const b = await state(page);
 
-  // Ground-plane panning keeps the grabbed ground point under the cursor. To
-  // make that point appear LOWER on screen the camera has to travel forward
-  // over the ground, so the target moves AWAY along the view direction. That is
-  // the same thing every web map does, and an earlier version of this test
-  // asserted the opposite sign on a hunch rather than working it through.
+  // To make the ground appear LOWER on screen the camera travels forward over
+  // it, so the target moves AWAY along the view direction. That is the same
+  // grab-the-map convention as the horizontal gesture.
   const fwd = await page.evaluate(() => {
     const v = new (window.HC.scene.camera.position.constructor)();
     window.HC.scene.camera.getWorldDirection(v);
@@ -80,6 +91,41 @@ test('drag down slides the ground down', async ({ page }) => {
   expect(Math.hypot(...move), 'the view must move at all').toBeGreaterThan(20);
   expect(along, 'dragging down should carry the view forward over the ground').toBeGreaterThan(0);
   expect(Math.abs(b.dist - a.dist), 'panning must not change zoom').toBeLessThan(a.dist * 0.06);
+});
+
+test('drag up slides the ground up', async ({ page }) => {
+  await openApp(page);
+  const a = await state(page);
+  const fwd = await page.evaluate(() => {
+    const v = new (window.HC.scene.camera.position.constructor)();
+    window.HC.scene.camera.getWorldDirection(v);
+    const l = Math.hypot(v.x, v.z);
+    return [v.x / l, v.z / l];
+  });
+  await drag(page, 0, -220);
+  const b = await state(page);
+
+  const move = [b.target[0] - a.target[0], b.target[2] - a.target[2]];
+  const along = move[0] * fwd[0] + move[1] * fwd[1];
+  console.log('drag up: target', a.target, '->', b.target, ' along-view =', along.toFixed(1));
+  expect(Math.hypot(...move), 'vertical dragging must move the view').toBeGreaterThan(20);
+  expect(along, 'dragging up should carry the view backward so the ground follows up').toBeLessThan(0);
+});
+
+test('pan stops on mouseup instead of drifting', async ({ page }) => {
+  await openApp(page);
+  await page.mouse.move(880, 480);
+  await page.mouse.down();
+  await page.mouse.move(1060, 560, { steps: 10 });
+  await page.mouse.up();
+  const released = await state(page);
+  await page.waitForTimeout(500);
+  const later = await state(page);
+  const drift = Math.hypot(
+    later.target[0] - released.target[0],
+    later.target[2] - released.target[2]
+  );
+  expect(drift, 'the camera should stop with the pointer').toBeLessThan(0.5);
 });
 
 test('left-drag pans, it does not orbit', async ({ page }) => {
@@ -114,14 +160,40 @@ test('right-drag still rotates, and keeps its distance', async ({ page }) => {
   expect(Math.abs(b.dist - a.dist), 'rotating must not change zoom').toBeLessThan(a.dist * 0.06);
 });
 
+test('the first pan cancels a camera flight and is not swallowed', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => window.HC.scene.flyIn({ seconds: 10 }));
+  await page.waitForTimeout(150);
+  await drag(page, 180, 0);
+  const v = await page.evaluate(() => {
+    const s = window.HC.scene;
+    return {
+      flying: !!s._fly,
+      enabled: s.controls.enabled,
+      targetTravel: Math.hypot(s.controls.target.x, s.controls.target.z),
+      fog: [s.scene.fog.near, s.scene.fog.far],
+    };
+  });
+  expect(v.flying, 'direct input should own the camera immediately').toBe(false);
+  expect(v.enabled).toBe(true);
+  expect(v.targetTravel, 'the cancelling drag itself should pan').toBeGreaterThan(20);
+  expect(v.fog).toEqual([1400, 4800]);
+});
+
 test('panning cannot wander off the study area', async ({ page }) => {
   await openApp(page);
-  for (let i = 0; i < 14; i++) await drag(page, 400, 0);
+  await drag(page, 6000, 0);
   const b = await state(page);
   const lim = await page.evaluate(() => window.HC.scene._panLimit);
-  console.log('after 14 hard drags, target', b.target, ' limit', lim);
+  console.log('after a hard edge drag, target', b.target, ' limit', lim);
   expect(Math.abs(b.target[0])).toBeLessThanOrEqual(lim.x + 1);
   expect(Math.abs(b.target[2])).toBeLessThanOrEqual(lim.z + 1);
+
+  await drag(page, -80, 0);
+  const c = await state(page);
+  const reversed = (c.target[0] - b.target[0]) * b.right[0]
+    + (c.target[2] - b.target[2]) * b.right[2];
+  expect(reversed, 'reversing at the boundary should respond immediately').toBeGreaterThan(5);
 });
 
 /* --------------------------------------------------------------- folding */

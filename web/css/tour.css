@@ -1,0 +1,176 @@
+/* The guided tour's furniture.
+ *
+ * Same language as the panels — near-black card, one accent, monospace for
+ * anything that is a label rather than prose — because the tour is pointing at
+ * the instrument and should not look like it was bolted on from a different
+ * product.
+ *
+ * The dim is a 9999px box-shadow on #tour-spot rather than a scrim with a
+ * cut-out, so the highlight can glide from one control to the next in a single
+ * transition. #tour-scrim sits above it purely to swallow clicks; it is
+ * transparent except on the centred steps, where there is no spotlight to paint
+ * the dim.
+ */
+
+#tour {
+  position: fixed; inset: 0; z-index: 250;
+  transition: opacity .4s ease;
+  --tour-dim: rgba(4, 6, 10, 0.66);
+}
+#tour[data-dim="full"]  { --tour-dim: rgba(4, 6, 10, 0.82); }
+#tour[data-dim="light"] { --tour-dim: rgba(4, 6, 10, 0.34); }
+#tour.over { opacity: 0; pointer-events: none; }
+
+#tour-scrim {
+  position: absolute; inset: 0;
+  background: transparent;
+  transition: background .35s ease;
+}
+/* With no spotlight — the centred steps, and the one about the model itself —
+   the scrim is what dims the screen. */
+#tour.nospot #tour-scrim { background: var(--tour-dim); }
+
+#tour-spot {
+  position: fixed; pointer-events: none;
+  border-radius: var(--r3);
+  box-shadow:
+    0 0 0 9999px var(--tour-dim),
+    0 0 0 1px rgba(78, 168, 222, 0.55),
+    0 0 26px 2px rgba(78, 168, 222, 0.22);
+  transition:
+    left .42s cubic-bezier(.2, .7, .2, 1), top .42s cubic-bezier(.2, .7, .2, 1),
+    width .42s cubic-bezier(.2, .7, .2, 1), height .42s cubic-bezier(.2, .7, .2, 1),
+    box-shadow .35s ease;
+}
+#tour-spot[hidden] { display: none; }
+
+/* ------------------------------------------------------------------- card */
+
+#tour-card {
+  position: fixed; width: 340px; max-width: calc(100vw - 32px);
+  background: var(--panel-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r3);
+  box-shadow: var(--shadow);
+  padding: var(--s4) var(--s4) var(--s3);
+  opacity: 0; transform: translateY(6px);
+  transition: opacity .3s ease, transform .3s cubic-bezier(.2, .7, .2, 1),
+              left .34s cubic-bezier(.2, .7, .2, 1), top .34s cubic-bezier(.2, .7, .2, 1);
+}
+#tour-card.in { opacity: 1; transform: none; }
+
+#tour-kicker {
+  margin: 0 0 var(--s2); font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--accent);
+}
+#tour-kicker[hidden] { display: none; }
+
+#tour-title {
+  margin: 0 0 var(--s2); font-size: 15px; font-weight: 600;
+  letter-spacing: .01em; color: var(--text);
+}
+
+#tour-body {
+  font-size: 12.5px; line-height: 1.6; color: var(--text-2);
+}
+#tour-body b { color: var(--text); font-weight: 500; }
+#tour-body kbd {
+  font-family: var(--mono); font-size: 10px; color: var(--text);
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--line-strong); border-radius: 4px;
+  padding: 1px 5px; margin: 0 1px;
+}
+
+/* The arrow. A rotated square poking out of the card edge, positioned in JS on
+   the target's centre line rather than the card's, so on a clamped card it
+   still points at the control. */
+#tour-arrow {
+  position: absolute; width: 10px; height: 10px;
+  background: var(--panel-solid);
+  border-left: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  transform: rotate(45deg);
+}
+#tour-arrow[data-side="right"]  { transform: rotate(45deg);  margin-top: -5px; }
+#tour-arrow[data-side="left"]   { transform: rotate(225deg); margin-top: -5px; }
+#tour-arrow[data-side="bottom"] { transform: rotate(135deg); margin-left: -5px; }
+#tour-arrow[data-side="top"]    { transform: rotate(-45deg); margin-left: -5px; }
+#tour-arrow[hidden] { display: none; }
+
+/* -------------------------------------------------------------- footer */
+
+/* Dots on their own line above the buttons. One row for all of it fitted until
+   the step count went into double figures and the labels started wrapping to
+   two lines each; a 340px card does not have room for twelve dots and three
+   labels side by side. */
+#tour-foot {
+  display: flex; flex-direction: column; gap: var(--s3);
+  margin-top: var(--s4); padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}
+
+#tour-dots { display: flex; gap: 4px; align-items: center; }
+#tour-dots .dot {
+  all: unset; cursor: pointer; width: 5px; height: 5px; border-radius: 999px;
+  background: var(--line-strong); transition: all .2s ease;
+}
+#tour-dots .dot:hover { background: var(--text-3); }
+#tour-dots .dot.past { background: rgba(78, 168, 222, .45); }
+#tour-dots .dot.on {
+  background: var(--accent); width: 14px;
+}
+
+#tour-btns { display: flex; gap: var(--s1); align-items: center; justify-content: flex-end; }
+#tour-btns button {
+  all: unset; cursor: pointer; white-space: nowrap;
+  padding: 6px var(--s3); border-radius: var(--r1);
+  font-size: 11.5px; color: var(--bg);
+  background: var(--accent); border: 1px solid var(--accent);
+  transition: all .15s ease;
+}
+#tour-btns button:hover { filter: brightness(1.1); }
+#tour-btns button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#tour-btns button.ghost {
+  background: transparent; color: var(--text-3); border-color: transparent;
+}
+#tour-btns button.ghost:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
+#tour-btns button[hidden] { display: none; }
+
+/* While the tour is up the panels are lit but not live: every click belongs to
+   the tour until it hands over. */
+body.tour-running #left,
+body.tour-running #side,
+body.tour-running #time { pointer-events: none; }
+body.tour-running #hover { display: none !important; }
+
+/* ------------------------------------------------------------- masthead chips */
+
+/* Right of the masthead, but clear of the panel's own fold handle, which is a
+   22px square pinned at `top: 12px; right: 12px` — the single Film chip used to
+   sit underneath it. */
+.brandbtns {
+  position: absolute; top: 13px; right: 42px;
+  display: flex; gap: 5px; align-items: center;
+}
+.brandbtns button {
+  font: inherit; font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em;
+  text-transform: uppercase; cursor: pointer; padding: 4px 9px; border-radius: 999px;
+  background: transparent; color: var(--text-3);
+  border: 1px solid var(--line-strong); transition: all .18s ease;
+}
+.brandbtns button:hover { color: var(--text); border-color: var(--accent); }
+.brandbtns button[hidden] { display: none; }
+
+/* ------------------------------------------------------------------ small */
+
+@media (max-width: 900px) {
+  #tour-card { width: 300px; }
+}
+
+/* A tour is instructional, not cinematic: with reduced motion asked for, it
+   still runs, it just stops sliding. */
+@media (prefers-reduced-motion: reduce) {
+  #tour-spot, #tour-card, #tour-scrim { transition: none; }
+  #tour-card { opacity: 1; transform: none; }
+}

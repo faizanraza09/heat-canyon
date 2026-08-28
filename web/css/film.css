@@ -1,0 +1,253 @@
+/* The opening film's furniture: title card, captions, chapter marks, readouts.
+ *
+ * Kept in its own sheet because none of it survives the first ninety seconds.
+ * The application's own stylesheet should not have to carry a layer that is
+ * deleted from the DOM before the user touches anything.
+ *
+ * The one rule that matters here: after the cross-fade, this overlay is still
+ * present — the last three captions play over the live city — so everything in
+ * it must be transparent and click-through by default, with only the two
+ * controls taking pointer events back.
+ */
+
+#film {
+  position: fixed; inset: 0; z-index: 300;
+  color: #f2ece4;
+  transition: opacity .9s ease;
+  --film-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+}
+#film[hidden] { display: none; }
+#film.over { opacity: 0; pointer-events: none; }
+#film.playing { pointer-events: none; }
+#film.playing #film-controls { pointer-events: auto; }
+
+#film-gl {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+  background: #02030a;
+  transition: opacity .1s linear;   /* driven per-frame by the storyboard */
+}
+
+/* Vignette and grain. Both are doing the same job as the fog in the 3D scene:
+   giving a flat, unlit image somewhere to fall away to at the edges. */
+#film-vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 120% 85% at 50% 45%, transparent 42%, rgba(0,0,0,.72) 100%),
+    linear-gradient(to bottom, rgba(0,0,0,.35), transparent 22%, transparent 72%, rgba(0,0,0,.55));
+}
+#film-grain {
+  position: absolute; inset: -50%; pointer-events: none;
+  opacity: .05; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain 1.1s steps(4) infinite;
+}
+@keyframes grain {
+  0%   { transform: translate(0, 0); }
+  25%  { transform: translate(-3%, 2%); }
+  50%  { transform: translate(2%, -3%); }
+  75%  { transform: translate(-2%, -2%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* The warm wash that carries the cut from orbit into the city. */
+#film-flash {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: radial-gradient(circle at 50% 52%, #fff3e0 0%, #f7c98a 35%, #c66b2e 70%, #2a1206 100%);
+  mix-blend-mode: screen;
+}
+
+/* Letterbox. Retracts at the end, handing the full frame to the application. */
+.film-bar {
+  position: absolute; left: 0; right: 0; height: 0; background: #000;
+  pointer-events: none; z-index: 4;
+  transition: height 1.1s cubic-bezier(.2,.7,.2,1);
+}
+.film-bar.top { top: 0; }
+.film-bar.bottom { bottom: 0; }
+#film.playing .film-bar { height: 5.2vh; }
+#film.over .film-bar { height: 0; }
+
+/* ------------------------------------------------------------- title card */
+
+#film-title {
+  position: absolute; inset: 0; z-index: 6;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; text-align: center; padding: 24px;
+  background: radial-gradient(ellipse 90% 70% at 50% 50%, rgba(2,3,10,.55), rgba(2,3,10,.94));
+  transition: opacity .7s ease;
+}
+#film.playing #film-title { opacity: 0; pointer-events: none; }
+
+#film-title .kicker {
+  margin: 0; font-family: var(--mono); font-size: 11px; letter-spacing: .34em;
+  text-transform: uppercase; color: #8d97a8;
+}
+#film-title h1 {
+  margin: 0; font-family: var(--film-serif); font-weight: 400;
+  font-size: clamp(52px, 9vw, 128px); line-height: .92; letter-spacing: -.015em;
+  background: linear-gradient(180deg, #fff8ee 12%, #f0b46a 96%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+#film-title .strap {
+  margin: 0; max-width: 46ch; font-size: 14.5px; line-height: 1.65; color: #9aa3b2;
+}
+#film-title .cta { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+#film-title button {
+  font: inherit; font-size: 13px; cursor: pointer; border-radius: 999px;
+  padding: 11px 26px; transition: all .18s ease;
+  border: 1px solid #f0b46a; background: #f0b46a; color: #1a1005; font-weight: 600;
+  letter-spacing: .02em;
+}
+#film-title button:hover:not(:disabled) { background: #ffd39a; border-color: #ffd39a; }
+#film-title button:disabled { opacity: .35; cursor: default; }
+#film-title button.ghost {
+  background: transparent; color: #97a1b0; border-color: rgba(255,255,255,.16); font-weight: 500;
+}
+#film-title button.ghost:hover { color: #e6e9ee; border-color: rgba(255,255,255,.4); }
+
+#film-title .progress {
+  width: 260px; height: 2px; background: rgba(255,255,255,.10); overflow: hidden; margin-top: 6px;
+}
+#film-title .progress i {
+  display: block; height: 100%; width: 0; background: #f0b46a; transition: width .3s ease;
+}
+#film-title .load {
+  margin: 0; font-family: var(--mono); font-size: 11px; color: #6b7484; min-height: 14px;
+}
+
+/* -------------------------------------------------------------------- HUD */
+
+#film-hud { position: absolute; inset: 0; z-index: 5; }
+#film-hud[hidden] { display: none; }
+
+#film-chaptercard {
+  position: absolute; top: calc(5.2vh + 26px); left: 34px;
+  display: flex; align-items: baseline; gap: 14px;
+  opacity: 0; transform: translateY(6px);
+}
+#film-chaptercard.in { animation: chapter 5.5s ease forwards; }
+@keyframes chapter {
+  0%   { opacity: 0; transform: translateY(8px); }
+  12%  { opacity: 1; transform: translateY(0); }
+  78%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: .0; transform: translateY(0); }
+}
+#film-chapno {
+  font-family: var(--film-serif); font-size: 40px; line-height: 1; color: #f0b46a;
+}
+#film-chapter {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: .30em;
+  text-transform: uppercase; color: #cdd3dc;
+  padding-bottom: 3px; border-bottom: 1px solid rgba(240,180,106,.4);
+}
+
+#film-readout {
+  position: absolute; left: 34px; bottom: calc(5.2vh + 26px);
+  opacity: 0; transition: opacity .8s ease;
+  font-family: var(--mono);
+}
+#film-readout.in { opacity: .82; }
+#film-readout-label {
+  margin: 0 0 6px; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: #7f8898;
+}
+#film-readout-value { margin: 6px 0 0; font-size: 12.5px; color: #dfe4ea; letter-spacing: .06em; }
+#film-spark { display: block; width: 340px; height: 62px; }
+#film-spark[hidden] { display: none; }
+
+#film-marker {
+  position: absolute; top: 0; left: 0; opacity: 0;
+  will-change: transform; transition: opacity .5s ease;
+  display: flex; align-items: center; gap: 9px;
+  /* Clear of the outermost expanding ring, so the label never sits inside it. */
+  padding-left: 62px;
+}
+#film-marker i {
+  position: absolute; left: 0; top: 50%; width: 9px; height: 9px; margin-top: -4.5px;
+  border: 1px solid #ffb257; border-radius: 50%;
+  box-shadow: 0 0 12px rgba(255,178,87,.8);
+}
+#film-marker b {
+  font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .26em;
+  color: #fff2dd; text-shadow: 0 1px 10px rgba(0,0,0,.9);
+}
+#film-marker span {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; color: #ffb257; opacity: .85;
+}
+
+#film-caption {
+  position: absolute; left: 50%; bottom: calc(5.2vh + 46px); transform: translateX(-50%);
+  margin: 0; width: min(60ch, 78vw); text-align: center;
+  font-size: clamp(16px, 1.45vw, 22px); line-height: 1.58; letter-spacing: .002em;
+  color: #f4efe7; text-shadow: 0 2px 26px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.8);
+  opacity: 0; transition: opacity .55s ease;
+}
+#film-caption.in { opacity: 1; }
+
+#film-controls {
+  position: absolute; top: calc(5.2vh + 22px); right: 30px;
+  display: flex; gap: 8px;
+}
+#film-controls button {
+  font: inherit; font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em;
+  text-transform: uppercase; cursor: pointer; padding: 7px 14px; border-radius: 999px;
+  background: rgba(10,14,22,.55); color: #97a1b0;
+  border: 1px solid rgba(255,255,255,.14);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  transition: all .18s ease;
+}
+#film-controls button:hover { color: #f4efe7; border-color: rgba(255,255,255,.42); }
+#film-controls button[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+
+#film-credit {
+  position: absolute; right: 30px; bottom: calc(5.2vh + 26px); margin: 0;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em;
+  text-transform: uppercase; color: #6b7484; text-align: right; max-width: 46ch;
+  line-height: 1.7;
+}
+
+/* Once the cut has landed, the captions lift clear of where the time scrubber
+   will be. The readouts stay for now — the panels are still down, and the
+   figures being quoted are worth having on screen while they are quoted. */
+#film.overcity #film-caption { bottom: calc(5.2vh + 132px); }
+#film.overcity #film-marker { opacity: 0 !important; }
+
+/* On the closing line the interface assembles, and everything of the film's
+   that wants a corner gets out of its way. */
+#film.closing #film-readout,
+#film.closing #film-credit,
+#film.closing #film-chaptercard { opacity: 0 !important; }
+#film.closing #film-controls {
+  top: auto; bottom: calc(5.2vh + 22px); right: auto;
+  left: 50%; transform: translateX(-50%);
+}
+#film.closing #film-sound { display: none; }
+
+/* --------------------------------------------------- the application below
+
+   The panels are held back while the film runs and come up in sequence behind
+   the closing captions, so the interface assembles itself rather than
+   appearing all at once the instant the overlay leaves.                     */
+
+#left, #side, #time { transition: opacity 1.1s ease, transform 1.1s cubic-bezier(.2,.7,.2,1); }
+body.film-running #left,
+body.film-running #side,
+body.film-running #time,
+body.film-running #hover { opacity: 0; pointer-events: none; }
+body.film-running #left { transform: translateX(-14px); }
+body.film-running #side { transform: translateX(14px); }
+body.film-running #time { transform: translateY(16px); }
+#left  { transition-delay: 0s; }
+#side  { transition-delay: .16s; }
+#time  { transition-delay: .32s; }
+
+/* The replay control, tucked into the masthead. It shares its row and its
+   styling with the tour chip beside it, so both live in `.brandbtns` in
+   tour.css rather than being positioned twice from two sheets. */
+#left .brand { position: relative; }
+
+@media (max-width: 900px) {
+  #film-readout, #film-credit { display: none; }
+  #film-caption { width: 86vw; bottom: calc(5.2vh + 30px); }
+}

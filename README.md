@@ -22,16 +22,32 @@ Beyond the endpoint walkthroughs below, this repo contains a full project built
 on the API: **[HeatCanyon](docs/HEATCANYON.md)**, which extends FortyGuard's 2 m
 air temperature into a three-dimensional exposure model of Midtown Manhattan.
 
-It reconstructs street-canyon geometry from NYC Open Data footprints and street
-widths, solves a coupled surface energy balance for 29,415 facade panels across
-eight hours of the July 2026 heat wave, ranks buildings by exposure against the
-city's Heat Vulnerability Index, and tests interventions by re-solving the
-physics rather than applying published coefficients.
+It reconstructs street-canyon geometry from NYC Open Data footprints, street
+widths and 2017 airborne LiDAR, solves a coupled surface energy balance for
+29,415 facade panels across eight hours of the July 2026 heat wave, ranks
+buildings by exposure against the city's Heat Vulnerability Index, and tests
+interventions by re-solving the physics rather than applying published
+coefficients. Google's Photorealistic 3D Tiles can be switched on underneath the
+data as recognisable context — off by default, and free at demo scale.
+
+The web app opens with a short film: a globe carrying the real NASA GISTEMP
+warming record, the world's largest cities lighting up, and a dive that lands on
+Midtown and cross-fades into the live model. Every figure it narrates is read out
+of `meta.json`, `ranked.json` and the GISTEMP series at run time, so the
+voice-over updates itself when the pipeline does. Add `?intro=0` to skip it, or
+click *Skip to the map*; it is suppressed automatically under
+`prefers-reduced-motion`.
+
+When the film hands over, a guided tour walks through the controls — one
+spotlight and one card per panel, each step first putting the interface into the
+state it is describing. It runs once per browser and is replayed from the *Tour*
+chip in the masthead; `?intro=0` suppresses it too, and `?tour=1` forces it.
 
 ```bash
 python -m heatcanyon.cli build      # solve the model (offline, cached)
 python -m heatcanyon.cli validate   # 12 validation checks
 python -m heatcanyon.cli serve      # http://127.0.0.1:8000
+python scripts/make_globe_assets.py # rebuild the opening film's globe assets
 ```
 
 **It runs with no API key.** The FortyGuard responses it used are committed under

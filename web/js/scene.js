@@ -19,12 +19,9 @@
  */
 
 import * as THREE from 'three';
-// MapControls, not OrbitControls. Same class underneath, but with the mouse
-// bindings people already have in their hands from every web map: left-drag
-// pans, right-drag rotates, wheel zooms. Plain OrbitControls made a left-drag
-// *orbit*, so pulling the mouse left swung the whole city around its centre
-// rather than sliding it left, which is disorienting unless you are already
-// thinking in polar coordinates.
+// MapControls supplies right-drag orbit, wheel zoom and touch navigation. The
+// desktop left-drag pan is implemented below: its distance-based approximation
+// made the city slip away from the pointer at oblique camera angles.
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { RAMPS, norm } from './colors.js';
 import { Photoreal, findApiKey } from './photoreal.js';
@@ -38,6 +35,7 @@ import { Photoreal, findApiKey } from './photoreal.js';
  * visible as a gap: the photogrammetry facade and the footprint edge already
  * disagree by more than this. */
 const FACADE_OUTWARD_M = 0.7;
+const PAN_SPEED = 0.72;
 
 const CONTRAST = (() => {
   const t = new Float32Array(256);
@@ -64,6 +62,7 @@ export class Scene {
     this.viewpointIndex = 0;
     this.photorealOn = false;
     this.showSolids = false;
+    this._groundY = null;
 
     /* The NAVD88 elevation that this scene's y = 0 stands for.
      *
@@ -544,17 +543,26 @@ export class Scene {
     this.camera.position.set(-1500, 1250, 1750);
 
     this.controls = new MapControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
+    // Camera input should stop when the hand stops. Damped pan deltas kept
+    // running into the study-area clamp after mouseup, which made reversing at
+    // an edge feel sticky and made short adjustments overshoot.
+    this.controls.enableDamping = false;
     // Stop well short of the horizon. Panning runs along the ground plane, and
     // as the camera approaches grazing incidence that plane intersection races
     // toward infinity, turning a small drag into an enormous jump.
     this.controls.maxPolarAngle = Math.PI / 2 - 0.14;
     this.controls.minDistance = 40;
     this.controls.maxDistance = 6000;
+    this.controls.panSpeed = PAN_SPEED;
+    this.controls.rotateSpeed = 0.65;
+    this.controls.zoomSpeed = 0.85;
     this.controls.screenSpacePanning = false;   // pan across the ground, not the screen
     this.controls.zoomToCursor = true;          // zoom toward what is under the pointer
+    // Left mouse is owned by _initGrabPan. Right mouse remains MapControls'
+    // orbit gesture, and the built-in one-finger touch pan is unchanged.
+    this.controls.mouseButtons.LEFT = null;
     this.controls.target.set(0, 20, 0);
+    this.controls.update();
     // Keep the view over the study area instead of drifting into empty space.
     this._panLimit = {
       x: this.data.meta.aoi.width_m / 2 + 900,
@@ -563,10 +571,14 @@ export class Scene {
 
     // Any deliberate input during the opening descent takes the camera back.
     // A cinematic that ignores the mouse is a cinematic that feels broken.
-    const bail = () => this._abortFly();
-    this.renderer.domElement.addEventListener('pointerdown', bail);
-    this.renderer.domElement.addEventListener('wheel', bail, { passive: true });
+    const bail = () => this._abortFly(true);
+    // Capture is important: controls are disabled during a flight, so the
+    // cancelling input must re-enable them before their own listener sees it.
+    this.renderer.domElement.addEventListener('pointerdown', bail, { capture: true });
+    this.renderer.domElement.addEventListener('wheel', bail, { capture: true, passive: true });
     window.addEventListener('keydown', bail);
+
+    this._initGrabPan();
 
     // First-person street walker.
     this.fp = {
@@ -576,6 +588,99 @@ export class Scene {
       speed: 11,   // brisk walking pace; Shift for a jog
     };
     this._initFirstPerson();
+  }
+
+  /** Predictable desktop map pan in the camera's horizontal frame.
+   *
+   * A literal ray/ground intersection sounds ideal, but perspective makes an
+   * upward drag accelerate sharply as the pointer approaches the horizon. A
+   * fixed metres-per-pixel scale for the whole gesture makes left/right and
+   * up/down equally responsive. The scale still follows zoom level, as it does
+   * in a normal map, and movement ends exactly when the pointer does.
+   */
+  _initGrabPan() {
+    const el = this.renderer.domElement;
+    const right = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    const move = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    let drag = null;
+
+    el.addEventListener('pointerdown', (e) => {
+      // Touch retains MapControls' one-finger gesture; running both handlers
+      // for the same contact would double the movement.
+      if (e.pointerType === 'touch' || this.mode !== 'orbit'
+          || e.button !== 0 || !this.controls.enabled) return;
+      const r = el.getBoundingClientRect();
+      this.camera.updateMatrixWorld();
+      right.setFromMatrixColumn(this.camera.matrixWorld, 0);
+      right.y = 0;
+      if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+      right.normalize();
+      forward.crossVectors(up, right).normalize();
+      const distance = this.camera.position.distanceTo(this.controls.target);
+      const metresPerPx = 2 * Math.max(40, distance)
+        * Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5))
+        / Math.max(1, r.height) * PAN_SPEED;
+      drag = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, metresPerPx,
+        position: this.camera.position.clone(),
+        target: this.controls.target.clone(),
+        right: right.clone(), forward: forward.clone(),
+      };
+      el.setPointerCapture?.(e.pointerId);
+      el.classList.add('is-panning');
+      e.preventDefault();
+    });
+
+    el.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id || this.mode !== 'orbit') return;
+      // Dragging right moves the camera left, and vice versa: the city itself
+      // follows the hand, matching a normal 2D map. The same rule applies up
+      // and down, with down moving the view centre forward over the ground.
+      const dx = (e.clientX - drag.x) * drag.metresPerPx;
+      const dy = (e.clientY - drag.y) * drag.metresPerPx;
+      move.copy(drag.right).multiplyScalar(-dx)
+        .addScaledVector(drag.forward, dy);
+      this.camera.position.copy(drag.position).add(move);
+      this.controls.target.copy(drag.target).add(move);
+
+      const clamped = this._clampOrbitView();
+      // Do not accumulate invisible overscroll at the boundary. Rebasing the
+      // anchor there makes the first reverse pixel move the map immediately.
+      if (clamped) {
+        drag.x = e.clientX;
+        drag.y = e.clientY;
+        drag.position.copy(this.camera.position);
+        drag.target.copy(this.controls.target);
+      }
+      e.preventDefault();
+    });
+
+    const end = (e) => {
+      if (!drag || (e.pointerId !== undefined && e.pointerId !== drag.id)) return;
+      if (el.hasPointerCapture?.(drag.id)) el.releasePointerCapture(drag.id);
+      drag = null;
+      el.classList.remove('is-panning');
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    window.addEventListener('blur', () => {
+      drag = null;
+      el.classList.remove('is-panning');
+    });
+  }
+
+  /** Clamp a fly-over translation without changing its angle or zoom. */
+  _clampOrbitView() {
+    const t = this.controls.target, L = this._panLimit;
+    const dx = Math.min(L.x, Math.max(-L.x, t.x)) - t.x;
+    const dz = Math.min(L.z, Math.max(-L.z, t.z)) - t.z;
+    if (!dx && !dz) return false;
+    t.x += dx; t.z += dz;
+    this.camera.position.x += dx;
+    this.camera.position.z += dz;
+    return true;
   }
 
   _initFirstPerson() {
@@ -639,25 +744,40 @@ export class Scene {
   _tryMove(dir, dist) {
     const f = this.fp;
     const R = 1.4;                      // shoulder clearance, metres
-    const nx = f.pos.x + dir.x * dist;
-    const nz = f.pos.z + dir.z * dist;
     const blocked = (x, z) => this.data.heightAt(x, -z) > f.pos.y + 0.4;
 
-    // Try the full move, then each axis alone, so sliding along a wall works
-    // instead of stopping dead.
-    if (!blocked(nx + Math.sign(dir.x) * R, nz + Math.sign(dir.z) * R)
-        && !blocked(nx, nz)) {
-      f.pos.x = nx; f.pos.z = nz;
-      return;
+    // Catch-up frames and Shift-jogging can cover several metres. Sub-stepping
+    // stops a low frame rate from tunnelling through a narrow footprint.
+    const n = Math.max(1, Math.ceil(Math.abs(dist) / 2.5));
+    const step = dist / n;
+    const sx = Math.sign(dir.x * step);
+    const sz = Math.sign(dir.z * step);
+    for (let i = 0; i < n; i++) {
+      const nx = f.pos.x + dir.x * step;
+      const nz = f.pos.z + dir.z * step;
+
+      // Try the full move, then each axis alone, so sliding along a wall works
+      // instead of stopping dead.
+      if (!blocked(nx + sx * R, nz + sz * R)
+          && !blocked(nx, nz)) {
+        f.pos.x = nx; f.pos.z = nz;
+        continue;
+      }
+      if (!blocked(nx + sx * R, f.pos.z)) f.pos.x = nx;
+      if (!blocked(f.pos.x, nz + sz * R)) f.pos.z = nz;
     }
-    if (!blocked(nx + Math.sign(dir.x) * R, f.pos.z)) f.pos.x = nx;
-    if (!blocked(f.pos.x, nz + Math.sign(dir.z) * R)) f.pos.z = nz;
   }
 
   setMode(mode, at) {
+    const previous = this.mode;
     this.mode = mode;
+    this.canvas.classList.toggle('street-nav', mode === 'street');
+    // A pedestrian needs far more tile detail than a fly-over does.
+    this.photoreal?.setDetail(mode === 'street' ? 'street' : 'orbit');
+    this._groundY = null;
     if (mode === 'street') {
       this.controls.enabled = false;
+      this.fp.keys.clear();
       const p = at || this._findStreetPoint();
       this.fp.pos.set(p.x, 1.7, -p.y);
       this.fp.yaw = ((p.bearing || 0) * Math.PI) / 180;
@@ -670,7 +790,28 @@ export class Scene {
     } else {
       this.controls.enabled = true;
       this.scene.fog.near = 1400; this.scene.fog.far = 4800;
-      if (at) this.controls.target.set(at.x, Math.min(at.h || 40, 120), -at.y);
+      if (at) {
+        this.controls.target.set(
+          at.x,
+          Math.min(at.h || 40, 120) + this._elevOffsetAt(at.x, at.y),
+          -at.y);
+      } else if (previous === 'street') {
+        // Coming back up from the street with no target given. Leaving the
+        // camera where the walker stood puts it inside the building it was
+        // standing next to, and "Fly over" then shows a blurry wall two metres
+        // away — which reads as the renderer breaking rather than as a camera
+        // in the wrong place.
+        //
+        // Lifting to an oblique view over the same spot keeps the context the
+        // walk just built up, instead of snapping back to the default overview
+        // and losing where you were.
+        const cx = this.camera.position.x;
+        const cz = this.camera.position.z;
+        const off = this._elevOffsetAt(cx, -cz);
+        this.controls.target.set(cx, 45 + off, cz);
+        this.camera.position.set(cx - 620, 470 + off, cz + 700);
+      }
+      this.controls.update();
     }
   }
 
@@ -784,11 +925,22 @@ export class Scene {
    * the synthetic ground, backdrop and sky, because all three exist only to
    * substitute for a real world that is now present. Leaving the ground plane
    * in would drive a flat sheet through Google's terrain. */
-  setPhotoreal(on, apiKey) {
+  async setPhotoreal(on, apiKey) {
     const want = !!on;
     if (want) {
+      // Key check stays synchronous and first: the no-key path must not depend
+      // on a fetch, and nothing billable may be requested before it passes.
+      const key = apiKey || findApiKey();
+      if (!key) {
+        this.onPhotorealStatus?.('error', 'No Google Maps API key set.');
+        return false;
+      }
+      if (this.data.ensureMassing) {
+        this.onPhotorealStatus?.('loading', 'loading massing grids');
+        await this.data.ensureMassing();
+      }
       const pr = this._ensurePhotoreal();
-      if (!pr.enable(apiKey || findApiKey())) return false;
+      if (!pr.enable(key)) return false;
     } else if (this.photoreal) {
       this.photoreal.disable();
     }
@@ -798,8 +950,11 @@ export class Scene {
     if (this.ground) this.ground.visible = !want;
     if (this.backdrop) this.backdrop.visible = !want;
     if (this.sky) this.sky.visible = !want;
+    if (this.streets) this.streets.visible = !want;
     this._applySolids();
     if (want) this._recolour();
+    // Re-seat the eye so toggling while walking cannot leave it underground.
+    this._groundY = null;
     return true;
   }
 
@@ -820,6 +975,54 @@ export class Scene {
     const hide = this.photorealOn && !this.showSolids;
     if (this.facadeMesh) this.facadeMesh.visible = !hide;
     if (this.roofMesh) this.roofMesh.visible = !hide;
+  }
+
+  /** How far to lift the eye, measuring the real ground where possible.
+   *
+   * The raster offset is an estimate built on the footprint table's ground
+   * elevation plus one global geoid constant, and it is good to a few metres —
+   * which is not good enough, because a few metres is the difference between
+   * standing on a road and standing inside it. So when the photoreal mesh is
+   * loaded its own surface is probed directly and that wins.
+   *
+   * Probed a few times a second rather than every frame (a raycast against the
+   * loaded tiles is not free) and eased toward, because tiles refine while you
+   * walk: a hard snap to each newly-loaded LOD would make the eye bob. The
+   * raster remains the fallback for the moment before tiles arrive, and for the
+   * gaps between them.
+   */
+  _groundOffset(x, z, dt) {
+    const raster = this._elevOffsetAt(x, -z);
+    if (!this.photorealOn || !this.photoreal) return raster;
+
+    this._probeAcc = (this._probeAcc || 0) + (dt || 0);
+    if (this._groundY === null || this._groundY === undefined || this._probeAcc > 0.25) {
+      this._probeAcc = 0;
+      const hit = this.photoreal.groundAt(x, z);
+      // Sanity band: a hit far from the raster estimate is a roof or an
+      // overpass, not the road we are walking on.
+      if (hit !== null && Math.abs(hit - raster) < 30) {
+        this._groundTarget = hit;
+        if (this._groundY === null || this._groundY === undefined) this._groundY = hit;
+      } else if (this._groundY === null || this._groundY === undefined) {
+        this._groundTarget = raster;
+        this._groundY = raster;
+      }
+    }
+    if (this._groundTarget === undefined) this._groundTarget = raster;
+    const k = Math.min(1, (dt || 0) * 6);
+    this._groundY += (this._groundTarget - this._groundY) * k;
+    return this._groundY;
+  }
+
+  /** Metres the real ground sits above the flat datum at a world point.
+   *
+   * Zero unless the photoreal layer is on, because without real terrain in the
+   * frame the flat datum *is* the ground and shifting the eye would only break
+   * a view that was already correct. */
+  _elevOffsetAt(x, y) {
+    if (!this.photorealOn || !this.data.groundElevAt) return 0;
+    return this.data.groundElevAt(x, y) - this.datumM;
   }
 
   setShowSolids(on) {
@@ -1186,10 +1389,20 @@ export class Scene {
     }
   }
 
-  /** Cut the descent short and settle, rather than snapping. */
-  _abortFly() {
+  /** Stop the descent. Direct input cancels immediately so its first gesture
+   * is never swallowed; programmatic cancellation may retain the short settle. */
+  _abortFly(immediate = false) {
     const f = this._fly;
     if (!f || f.t >= f.dur - 0.05) return;
+    if (immediate) {
+      this._fly = null;
+      this.controls.target.copy(f.cur);
+      this.controls.enabled = true;
+      this.scene.fog.near = 1400;
+      this.scene.fog.far = 4800;
+      this.controls.update();
+      return;
+    }
     const remaining = 0.7;
     f.fromTarget = f.cur.clone();
     f.fromSph = new THREE.Spherical().setFromVector3(
@@ -1240,8 +1453,21 @@ export class Scene {
       //
       // Deriving the look target from the same forward vector that drives
       // movement makes the two impossible to disagree.
-      this.camera.position.copy(f.pos);
-      const look = f.pos.clone()
+      // fp.pos.y is height above *local ground*, which equals height above the
+      // datum only while the scene is flat. Once the photoreal layer brings real
+      // terrain, the eye has to be lifted onto it — otherwise the walker stands
+      // at the datum while Google's roadbed is ten or more metres higher, and
+      // the camera ends up inside the terrain mesh looking up through it. That
+      // rendered as a storm of pale shards and was the single worst artefact of
+      // the whole layer.
+      //
+      // Applied here rather than to fp.pos itself so collision, the Q/E climb
+      // and the roof-standing clamp all keep working in the one frame they were
+      // written for: height above the ground beneath your feet.
+      const eye = f.pos.clone();
+      eye.y += this._groundOffset(f.pos.x, f.pos.z, dt);
+      this.camera.position.copy(eye);
+      const look = eye.clone()
         .addScaledVector(fwd, Math.cos(f.pitch) * 50)
         .add(new THREE.Vector3(0, Math.sin(f.pitch) * 50, 0));
       this.camera.up.set(0, 1, 0);
@@ -1251,22 +1477,10 @@ export class Scene {
       // so it must not run while the flight owns the transform.
       this._stepFly();
     } else {
-      // Clamp the pan target to the study area, moving the camera by the same
-      // correction so reaching the edge cannot also swing the viewing angle.
       this.controls.update();
-      // Clamp AFTER update, not before. Damping means update() applies a
-      // residual pan delta of its own, so clamping first let the target drift a
-      // few metres past the limit on every frame it was pushed. The camera is
-      // carried by the same correction, so hitting the edge cannot also swing
-      // the viewing angle.
-      const t = this.controls.target, L = this._panLimit;
-      const dx = Math.min(L.x, Math.max(-L.x, t.x)) - t.x;
-      const dz = Math.min(L.z, Math.max(-L.z, t.z)) - t.z;
-      if (dx || dz) {
-        t.x += dx; t.z += dz;
-        this.camera.position.x += dx;
-        this.camera.position.z += dz;
-      }
+      // Touch pan and cursor zoom still pass through MapControls, so apply the
+      // same boundary invariant after its update.
+      this._clampOrbitView();
     }
     if (this.photorealOn && this.photoreal) this.photoreal.update();
     this.renderer.render(this.scene, this.camera);

@@ -199,8 +199,8 @@ export class UI {
     });
     const anyKey = () => findApiKey() || envKey;
 
-    const setOn = (on) => {
-      const ok = this.scene.setPhotoreal(on, anyKey());
+    const setOn = async (on) => {
+      const ok = await this.scene.setPhotoreal(on, anyKey());
       const live = on && ok;
       toggle.setAttribute('aria-pressed', String(live));
       look.hidden = !live;
@@ -272,7 +272,14 @@ export class UI {
       if (name === 'whatif') this._renderScenarios?.();
     };
     for (const b of btns) b.onclick = () => show(b.dataset.tab);
+    this._showTab = show;
     show('view');
+  }
+
+  /** Switch tabs from outside the panel. The guided tour uses this to put the
+   *  left rail on the tab whose card it is about to open. */
+  showTab(name) {
+    this._showTab?.(name);
   }
 
   /* ------------------------------------------------------------ layers */
@@ -381,8 +388,8 @@ export class UI {
       const v = this.scene.currentViewpoint;
       return v
         ? `${v.name} — walls ${f0(v.h_left)} m and ${f0(v.h_right)} m, ${f0(v.width_m)} m apart.
-           W A S D to walk · drag to look · scroll to move`
-        : 'W A S D to walk · drag to look · scroll to move';
+           W A S D walk · Q E down/up · drag to look · scroll to move`
+        : 'W A S D walk · Q E down/up · drag to look · scroll to move';
     };
     const set = (mode) => {
       o.setAttribute('aria-pressed', String(mode === 'orbit'));
@@ -390,7 +397,7 @@ export class UI {
       n.hidden = mode !== 'street';
       this.scene.setMode(mode);
       hint.textContent = mode === 'street'
-        ? describe() : 'Drag to move · scroll to zoom · right-drag to tilt and turn';
+        ? describe() : 'Drag any direction to pan · scroll to zoom · right-drag to tilt and turn';
     };
     o.onclick = () => set('orbit');
     s.onclick = () => set('street');

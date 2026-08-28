@@ -49,12 +49,31 @@ day would have wasted credits and proved nothing.
 | Layer | Source | Field that matters |
 |---|---|---|
 | Building footprints | NYC Open Data `5zhs-2jue` | `height_roof`, `ground_elevation` (**feet**) |
+| Roof profiles | USGS 3DEP `NY_NewYorkCity` (Entwine Point Tiles) | 2017 airborne LiDAR, ~0.73 m post spacing |
 | Street centrelines | NYC Open Data `inkn-q76z` | **`streetwidth`** (feet, curb to curb) |
 | Tax lots | NYC Open Data `64uk-42ks` (PLUTO 26v2) | `yearbuilt`, `numfloors`, `unitsres`, `landuse` |
 | Heat Vulnerability Index | NYC Open Data `4mhf-duep` | `hvi` 1–5 by 2020 ZCTA |
 | Street trees | NYC Open Data `uvpi-gqnh` | 2015 census, species and diameter |
 | Street-level sensors | NYC Open Data `qdq3-9eqn` | 84 Manhattan sensors, 2018/19, °F |
 | Radiation and wind | ERA5 via Open-Meteo archive | hourly GHI, DNI, wind — used to *validate* |
+
+### Measured — the opening film only (no key, no cost)
+
+The film that plays before the application makes claims about the planet, so it
+is sourced the same way everything else is. `scripts/make_globe_assets.py`
+downloads these once, caches them under `data/globe/`, and writes the three small
+artefacts the globe reads.
+
+| Layer | Source | What it gives |
+|---|---|---|
+| Global temperature record | NASA GISS Surface Temperature Analysis v4, `GLB.Ts+dSST.csv` | land–ocean global mean anomaly, 1880 → present, 1951–1980 baseline |
+| Continents | Natural Earth 1:50m land (public domain) | the land mask, rasterised to 4096 × 2048 |
+| Cities | Natural Earth 1:110m populated places (public domain) | the 160 largest by `pop_max` |
+
+The one claim the narration makes about the record — that the ten warmest years
+have all come since a given year — is **computed** in the build script from the
+downloaded series and written into `global_temp.json` as `warmest10_since`, not
+typed into the script. If NASA revises the record, the narration follows it.
 
 `streetwidth` deserves a note: it makes canyon aspect ratio a **measured**
 quantity rather than an estimate, which is unusual and is the single most
@@ -86,6 +105,73 @@ geometric quantity is derived from that raster by horizon scanning — the stand
 SOLWEIG approach. This matters in Midtown, where a 120 m tower sits directly
 against a 20 m walk-up and an idealised symmetric-canyon assumption would be
 wrong on most blocks.
+
+### Where the surface model comes from
+
+The footprint table alone supports only one lid per polygon at `height_roof` —
+LoD 1.5. Midtown is the worst place to accept that: the 1916 zoning resolution
+produced a neighbourhood of setback towers, and setbacks are precisely the
+mechanism by which sky reaches an upper facade band and sun reaches a canyon
+floor. A flat lid erases every one of them and biases the two quantities this
+project exists to compute.
+
+Two obvious fixes do not work. DOITT's *NYC 3-D Building Model* is itself
+LoD 1.5 by its own metadata — domes and pitched roofs unrendered, ~100 iconic
+buildings at LoD 2, 2014 vintage — so it trades one flat lid for another. And
+all three NYS elevation services are **bare-earth** DEMs; their maximum value
+across New York City is about 126 m, which is terrain with every building
+stripped out.
+
+So roof profiles come from the point cloud: USGS 3DEP's `NY_NewYorkCity`
+collection, published as Entwine Point Tiles. Only the octree nodes overlapping
+the AOI are fetched (~164 MB, cached to `data/lidar/`), giving **22.3 M returns
+on the 3 m grid and 99.1% cell coverage**. Classes 7, 9 and 18 (low noise,
+water, high noise) are discarded first — a single surviving flier puts a needle
+through a brownstone, and because the shadow tracer honours the tallest cell
+along a ray, one needle casts a long false shadow across the neighbourhood.
+
+### Reconciling the cloud with the table
+
+The cloud is from 2017 and Midtown has built since, so it cannot simply replace
+the table. Each source is authoritative for a different thing: the **table** for
+*how tall* a building is, because it is maintained; the **cloud** for *what
+shape* it is below that height, because it measured it.
+
+The gate is therefore asymmetric, because the two sources fail in opposite
+directions and a symmetric comparison cannot tell those failures apart — tried
+first, it rejected 51% of buildings, including several from 1900–1930 that
+plainly have not changed.
+
+- **Cloud far below the table** is real. The building did not exist in 2017:
+  One Vanderbilt reads 96 m against its true 427 m; a 2020 site reads 2 m of
+  bare ground. These keep the flat extrusion.
+- **Cloud above the table** is almost never real. Returns off a tower's flank
+  land, in plan, inside its low neighbour's footprint, and podium/tower
+  footprint pairs put a tower's returns inside the podium polygon. Rather than
+  diagnosing each case, the profile is clamped to the table height.
+- **Cloud below the table on a building that predates the flight** means the
+  *table* is wrong for that polygon — usually because `nyc.footprints` gives
+  every ring of a MultiPolygon the whole building's height, so a podium ring
+  claims the tower's height. Construction year separates this from new build,
+  and the measured height governs.
+
+A grayscale opening on the setback depth then removes isolated one-cell pits
+from scan shadowing, which would otherwise each leak sky into the SVF integral,
+while genuine setbacks — tens of metres across — survive untouched.
+
+**Result on this AOI:** 5,182 of 5,329 buildings took measured roof profiles,
+746 of them with real setbacks at a median depth of 16 m; 124 held flat as
+post-2017 construction; 15 were relevelled to the cloud; 23 had too few
+returns. Street sky view factor rose from a median of 0.342 to **0.363** and a
+10th percentile of 0.121 to **0.144** — setbacks opening the canyons. Every
+decision the gate made ships in `meta.json` under `surface_model`.
+
+One deliberate exception. Macdonald's **H is read from the flat roof heights**
+(75.1 m), not from the refined surface (62.8 m). A setback shoulder lowers the
+mean surface elevation without lowering any roof, so taking H from the refined
+model would feed an understated displacement height and roughness length into
+every wind profile downstream. The refinement belongs in sky view and
+shadowing, not in the bulk roughness scalars.
 
 ### Sky view factor
 
@@ -357,8 +443,32 @@ east while looking west.
 - **The vertical dimension is unvalidated.** Closing it needs measurements at
   height: an instrumented tower, a UAV profile, or facade-mounted sensors. That
   is the first roadmap item.
-- **Footprint geometry is ~2017 photogrammetry.** Towers completed since may be
-  missing or stale.
+- **Footprint geometry is ~2017 photogrammetry.** Heights come from the
+  maintained table so they stay current, but the 124 buildings completed since
+  the 2017 LiDAR flight are drawn as flat extrusions rather than measured
+  massing.
+- **The clean (non-photoreal) view still draws flat-lidded prisms.** The
+  refined surface model reaches the physics, and reaches the screen when the
+  photoreal layer is on (the field is projected onto Google's real geometry),
+  but the synthetic basemap's own buildings are still extrusions. Making them
+  stepped is affordable — greedy meshing the refined raster collapses 588,932
+  quads to 253,234, fewer than the existing facade mesh — but raster-derived
+  walls staircase, because Manhattan's grid runs ~29° off the raster axes. Only
+  66 of 5,329 buildings have concentric setbacks, so inset polygons do not
+  generalise either; the workable route is per-level contour extraction with
+  simplification to straighten the staircase.
+- **Facade panels are still footprint edges at full height.** The surface model
+  now has setbacks; the facade panel set does not. Refining panel tops from the
+  DSM would correctly stop a street wall at its setback shoulder, but it would
+  also remove the tower walls above — those are interior to the footprint, not
+  footprint edges, and they are the most exposed surfaces in the model. Doing
+  only the reduction would systematically under-count tall setback towers, so
+  the two halves have to land together: extract walls from the height raster and
+  snap their azimuths to the true footprint-edge bearings. That is the largest
+  remaining item.
+- **LiDAR canopy is not used.** The cloud sees tree crowns, which would sharpen
+  street-level shading, but folding them in changes validated physics and is
+  held for its own pass.
 - **Facade materials are inferred**, not surveyed.
 - **Roofs and roads could be cross-checked** against Landsat Collection 2 surface
   temperature at 100 m. Walls cannot be — no satellite sees a vertical surface.

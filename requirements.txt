@@ -7,4 +7,7 @@ matplotlib>=3.8.0
 folium>=0.15.0
 pillow>=10.0.0
 shapely>=2.0.0
+# Surface model from the 2017 airborne LiDAR (heatcanyon/lidar.py).
+pyproj>=3.6.0
+laspy[lazrs]>=2.5.0
 reportlab>=4.0.0

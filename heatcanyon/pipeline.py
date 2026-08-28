@@ -13,6 +13,9 @@ Outputs, all under ``web/data/``:
   thermal.bin      Int16 surface temperature per panel per band per hour
   air.bin          Int16 air temperature per band per hour, per canyon
   tiles.json       the FortyGuard 2 m field per hour, plus exceedance/persistence
+  massing_bid.bin  building index per 3 m cell, for projecting onto other geometry
+  massing_h.bin    refined surface height per 3 m cell, decimetres
+  ground_elev.bin  ground elevation per 3 m cell, decimetres (streets filled)
   canyons.json     canyon cross-sections with morphology
   ranked.json      the prioritised building list with full score decomposition
   scenarios.json   scenario deltas at representative canyons
@@ -33,6 +36,7 @@ from . import aoi as aoi_mod
 from . import exposure as EX
 from . import fg
 from . import geometry as G
+from . import lidar
 from . import nyc
 from . import physics as P
 from . import scenarios as SC
@@ -120,7 +124,8 @@ def _q16(values, scale: float = 100.0) -> bytes:
 # ------------------------------------------------------------------- driver
 
 
-def build(area_key: str = "midtown", verbose: bool = True) -> dict:
+def build(area_key: str = "midtown", verbose: bool = True,
+          use_lidar: bool = True) -> dict:
     t_start = time.time()
     area = aoi_mod.get(area_key)
     proj = G.Projector(area)
@@ -172,10 +177,30 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
     om = json.loads(Path("data/manhattan/_openmeteo_radiation_2026-07-02.json").read_text())["hourly"]
 
     # --------------------------------------------------------------- geometry
-    dsm = G.rasterize_dsm(buildings, proj, res=3.0)
+    # Two surface models, deliberately. The flat extrusion is what the footprint
+    # table supports on its own: one lid per polygon at ``height_roof``. The
+    # refined model replaces those lids with the roof profile the 2017 airborne
+    # LiDAR actually measured, so Midtown's setbacks are present instead of
+    # erased. See heatcanyon/lidar.py for why the cloud is the only free source
+    # that can do this and how the two are reconciled.
+    dsm_flat = G.rasterize_dsm(buildings, proj, res=3.0)
+
+    # Macdonald's H is the mean *roof* height of the array, and it has to be
+    # read off the flat model. Taken from the refined surface it would be the
+    # mean surface elevation instead — 62.8 m rather than 75.1 m here, because
+    # a setback shoulder lowers the average without lowering any roof — and
+    # that would feed an understated displacement height and roughness length
+    # into every wind profile downstream. The refinement belongs in sky view and
+    # shadowing, not in the bulk roughness scalars.
+    h_bar = dsm_flat.mean_building_height
+
+    dsm, lidar_report = dsm_flat, None
+    if use_lidar:
+        surf = lidar.surface_for(dsm_flat, proj, log=log)
+        dsm, lidar_report = lidar.refine_dsm(dsm_flat, surf, buildings, log=log)
+
     svf_grid = G.svf_raster(dsm, n_azimuth=32, max_radius_m=250.0)
     lambda_p = dsm.built_fraction
-    h_bar = dsm.mean_building_height
     canyons = G.extract_canyons(lines, dsm, svf_grid, proj)
     facades = G.extract_facades(buildings, proj, min_length_m=6.0, max_panel_m=40.0)
     # Frontal area index, computed from the facade panels rather than reusing the
@@ -185,7 +210,9 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
     grid_area = (nx_g * dsm.res) * (ny_g * dsm.res)
     lambda_f = G.frontal_area_index(facades, grid_area)
     d_disp, z0 = G.roughness_length(h_bar, lambda_p, lambda_f)
-    log(f"geometry: DSM {dsm.shape} @{dsm.res}m, {len(canyons):,} cross-sections, "
+    log(f"geometry: DSM {dsm.shape} @{dsm.res}m "
+        f"({'LiDAR roofs' if use_lidar else 'flat lids'}), "
+        f"{len(canyons):,} cross-sections, "
         f"{len(facades):,} facade panels, lambda_p={lambda_p:.3f}, H={h_bar:.0f}m, "
         f"d={d_disp:.0f}m, z0={z0:.2f}m")
 
@@ -368,6 +395,84 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
         "x0": round(dsm.x0, 2), "y0": round(dsm.y0, 2),
     }
 
+    # ------------------------------------------------ the projection grids
+    # Two rasters that let the browser answer, for any point in space, "which
+    # building is this, and how far up it am I?" — which is what allows the
+    # measured facade field to be painted onto a surface this project did not
+    # generate, namely Google's photogrammetry mesh.
+    #
+    # Without them the photoreal layer has to draw our own extruded prisms
+    # alongside Google's real geometry, and the two interpenetrate: the prism is
+    # the wrong shape, so it stabs through real roofs and leaves real walls
+    # poking out of flat colour. Painting the field onto the real surface instead
+    # removes the conflict at its source, because there is then only one set of
+    # geometry in the frame.
+    #
+    # uint16 throughout: 65535 marks "no building", and decimetres keep a 400 m
+    # tower inside the type with 0.1 m to spare.
+    base_of = np.zeros(len(buildings) + 1, dtype=np.float32)
+    for _i, _b in enumerate(buildings):
+        base_of[_i] = float(_b.get("base_m") or 0.0)
+    base_grid_m = base_of[np.where(dsm.building_id >= 0, dsm.building_id, len(buildings))]
+
+    bid_u16 = np.where(dsm.building_id >= 0, dsm.building_id, 65535).astype(np.uint16)
+    if int(dsm.building_id.max()) >= 65535:
+        raise RuntimeError("building count exceeds the uint16 sentinel")
+    (OUT / "massing_bid.bin").write_bytes(bid_u16.tobytes())
+    (OUT / "massing_h.bin").write_bytes(
+        np.clip(np.round(dsm.height * 10.0), 0, 65535).astype(np.uint16).tobytes()
+    )
+    # Ground elevation over the whole grid, streets included.
+    #
+    # Needed because the scene draws on a flat datum but the photoreal layer
+    # brings real terrain: without this the first-person walker stands at the
+    # datum while Google's road surface is ten metres higher, which puts the
+    # camera inside the terrain mesh looking up through it.
+    #
+    # Derived from the footprint table's ground_elevation rather than from the
+    # LiDAR's own class-2 ground, deliberately. Our facades are offset by
+    # exactly base_m, so taking the walker's offset from the same quantity means
+    # the two cannot disagree; a LiDAR ground would be independently correct and
+    # still leave the eye floating relative to our own walls.
+    #
+    # Buildings carry their own value; the streets between them are filled by
+    # nearest-neighbour dilation, which is the right model for Manhattan, where
+    # a roadbed sits at the elevation of the lots either side of it.
+    # A footprint row with no ground_elevation reads as 0 out of nyc.py, which is
+    # sea level and wrong everywhere in Midtown. Seeding it would dilate that
+    # zero across the surrounding streets and drop the walker 13 m through the
+    # road, so those cells are treated as unknown and inherit from neighbours.
+    _seed_ok = (dsm.building_id >= 0) & (base_grid_m > 0.5)
+    ground_elev = np.where(_seed_ok, base_grid_m, np.nan)
+    for _ in range(80):
+        holes = ~np.isfinite(ground_elev)
+        if not holes.any():
+            break
+        filled = ground_elev.copy()
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            shifted = np.roll(np.roll(ground_elev, dy, 0), dx, 1)
+            take = holes & np.isfinite(shifted)
+            filled[take] = shifted[take]
+            holes = holes & ~take
+        ground_elev = filled
+    # Median over *building* cells only. Taken over the whole grid it would be
+    # dominated by the streets, which seed as zero, and the handful of cells the
+    # dilation cannot reach would be filled with sea level.
+    _built_base = base_grid_m[_seed_ok]
+    base_median = float(np.median(_built_base)) if _built_base.size else 0.0
+    ground_elev = np.nan_to_num(ground_elev, nan=base_median)
+    (OUT / "ground_elev.bin").write_bytes(
+        np.clip(np.round(ground_elev * 10.0), 0, 65535).astype(np.uint16).tobytes()
+    )
+
+    massing_meta = {
+        "nx": int(dsm.shape[1]), "ny": int(dsm.shape[0]),
+        "res": dsm.res, "x0": round(dsm.x0, 2), "y0": round(dsm.y0, 2),
+        "height_scale": 0.1, "no_building": 65535,
+        "ground_scale": 0.1,
+        "datum_m": round(base_median, 2),
+    }
+
     # Wall sky view factor, one byte per band. A facade deep in a canyon sees
     # almost no sky, and rendering that as genuine darkening is what makes a
     # street read as a canyon rather than a corridor of lit boxes.
@@ -400,7 +505,8 @@ def build(area_key: str = "midtown", verbose: bool = True) -> dict:
         f_daymax=f_daymax, f_daymin=f_daymin, exc=exc, per=per, env_params=env_params,
         om=om, dsm=dsm, svf_grid=svf_grid, lambda_p=lambda_p, lambda_f=lambda_f, h_bar=h_bar,
         d_disp=d_disp, z0=z0, log=log, t_start=t_start, N_BANDS=N_BANDS,
-        grid_meta=grid_meta, shadow_meta=shadow_meta,
+        grid_meta=grid_meta, shadow_meta=shadow_meta, massing_meta=massing_meta,
+        lidar_report=lidar_report, use_lidar=use_lidar,
     )
 
 
@@ -749,6 +855,12 @@ def _finish(**kw) -> dict:
             "lambda_f": round(kw["lambda_f"], 3),
             "macdonald_clamped": bool(kw["lambda_f"] > 0.35 or kw["lambda_p"] > 0.35),
             "mean_building_height_m": round(h_bar, 1),
+            # Named explicitly because the two surface models disagree here by
+            # ~12 m and a reader needs to know which one fed the roughness.
+            "mean_building_height_basis": "flat roof heights (Macdonald H)",
+            "surface_model": ("2017 LiDAR roof profiles, gated against the "
+                              "footprint table" if kw.get("use_lidar")
+                              else "flat footprint extrusion"),
             "displacement_height_m": round(d_disp, 1),
             "roughness_length_m": round(z0, 2),
             "svf_street_median": round(float(np.median(street_svf)), 3),
@@ -759,6 +871,15 @@ def _finish(**kw) -> dict:
             "asymmetry_share_gt_half": round(
                 float(np.mean([c.asymmetry > 0.5 for c in cy])), 3) if cy else None,
         },
+        "surface_model": (
+            dict(kw["lidar_report"].as_dict(),
+                 source="USGS 3DEP NY_NewYorkCity (2017 airborne LiDAR, EPT)",
+                 grid_res_m=dsm.res,
+                 mean_surface_height_m=round(dsm.mean_building_height, 1),
+                 mean_roof_height_m=round(h_bar, 1))
+            if kw.get("lidar_report") is not None else
+            {"source": "flat footprint extrusion", "grid_res_m": dsm.res}
+        ),
         "env_series": {
             "hours_gmt5": list(range(24)),
             "apparent_temperature_c": env_params.get("apparent_temperature_celsius"),
@@ -785,6 +906,7 @@ def _finish(**kw) -> dict:
         },
         "height_grid": kw["grid_meta"],
         "shadow_grid": kw["shadow_meta"],
+        "massing_grid": kw["massing_meta"],
         "viewpoints": street_viewpoints(canyons, dsm, proj),
         "provenance": _provenance(),
         "spend": json.loads((Path("data/manhattan/_ledger.json")).read_text())
@@ -989,6 +1111,10 @@ def _provenance() -> list[dict]:
         {"source": "NYC Open Data 5zhs-2jue Building Footprints",
          "provides": "footprint geometry, height_roof and ground_elevation (feet)",
          "kind": "measured (photogrammetric, ~2017 vintage)", "cost": "free", "key_required": False},
+        {"source": "USGS 3DEP NY_NewYorkCity, Entwine Point Tiles",
+         "provides": "2017 airborne LiDAR; roof profiles and setbacks on the 3 m grid",
+         "kind": "measured (2017 vintage, 0.73 m post spacing)",
+         "cost": "free", "key_required": False},
         {"source": "NYC Open Data inkn-q76z Centerline",
          "provides": "street width (feet, curb to curb), lanes, name",
          "kind": "measured", "cost": "free", "key_required": False},

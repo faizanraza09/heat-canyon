@@ -26,6 +26,12 @@ async function bytes(name) {
   return new Uint8Array(await r.arrayBuffer());
 }
 
+async function uint16(name) {
+  const r = await fetch(`${BASE}/${name}`);
+  if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
+  return new Uint16Array(await r.arrayBuffer());
+}
+
 async function bits(name) {
   const r = await fetch(`${BASE}/${name}`);
   if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
@@ -64,6 +70,9 @@ export async function load(onProgress = () => {}) {
   out.air = await int16('air.bin');              tick('air profiles');
   out.airSigma = await int16('air_sigma.bin');   tick('uncertainty');
   out.sunlit = await bits('sunlit.bin');         tick('shadow masks');
+  // Only needed by the optional photoreal layer, but loaded up front: it is
+  // 3 MB against the 10 MB already in flight, and fetching it lazily on the
+  // first toggle would stall the very interaction it serves.
 
   // Index helpers ---------------------------------------------------------
   const nPan = out.facades.n;
@@ -81,6 +90,47 @@ export async function load(onProgress = () => {}) {
     const i = Math.floor((y - hg.y0) / hg.res);
     if (i < 0 || i >= hg.ny || j < 0 || j >= hg.nx) return 0;
     return out.heights[i * hg.nx + j];
+  };
+
+  /* The three rasters the photoreal layer needs, fetched on demand.
+   *
+   * 4.7 MB, and useless unless someone turns that layer on — which most
+   * visitors never will, since it is off by default and needs an API key. They
+   * were loaded up front at first and that was a mistake: it put 4.7 MB in
+   * front of the first frame for everyone and pushed a cold boot past the
+   * suite's 150 s ceiling. Deferring them costs a moment on the first toggle,
+   * which is a moment already spent waiting for tiles.
+   */
+  let massingPromise = null;
+  out.ensureMassing = () => {
+    if (!massingPromise) {
+      massingPromise = (async () => {
+        const [bid, h, ge] = await Promise.all([
+          uint16('massing_bid.bin'),
+          uint16('massing_h.bin'),
+          uint16('ground_elev.bin'),
+        ]);
+        out.massingBid = bid;
+        out.massingH = h;
+        out.groundElev = ge;
+      })();
+    }
+    return massingPromise;
+  };
+
+  /** Ground elevation, metres on the footprint table's datum, at a world point.
+   *
+   * Defined over the streets as well as the buildings, which is the point: the
+   * scene draws on a flat datum, so anything that has to meet real terrain —
+   * the photoreal layer's road surface, most of all — needs to know how far the
+   * real ground sits above that datum right here. */
+  const mg = out.meta.massing_grid;
+  out.groundElevAt = (x, y) => {
+    if (!mg || !out.groundElev) return 0;
+    const j = Math.floor((x - mg.x0) / mg.res);
+    const i = Math.floor((y - mg.y0) / mg.res);
+    if (i < 0 || i >= mg.ny || j < 0 || j >= mg.nx) return mg.datum_m || 0;
+    return out.groundElev[i * mg.nx + j] * (mg.ground_scale || 0.1);
   };
 
   /** Surface temperature of one band of one panel at one hour, degC. */

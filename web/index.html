@@ -5,21 +5,35 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%2307090d%27/%3E%3Crect x=%274%27 y=%2710%27 width=%277%27 height=%2718%27 fill=%27%23f6d746%27/%3E%3Crect x=%2713%27 y=%2716%27 width=%276%27 height=%2712%27 fill=%27%23bc3754%27/%3E%3Crect x=%2721%27 y=%275%27 width=%277%27 height=%2723%27 fill=%27%23f98e25%27/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="./css/app.css" />
+<link rel="stylesheet" href="./css/film.css" />
+<link rel="stylesheet" href="./css/tour.css" />
 
 <script type="importmap">
 {
   "imports": {
     "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+    "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/",
+    "3d-tiles-renderer": "https://unpkg.com/3d-tiles-renderer@0.5.2/build/index.js",
+    "3d-tiles-renderer/core/plugins": "https://unpkg.com/3d-tiles-renderer@0.5.2/build/index.core-plugins.js",
+    "3d-tiles-renderer/three/plugins": "https://unpkg.com/3d-tiles-renderer@0.5.2/build/index.three-plugins.js",
+    "3d-tiles-renderer/three": "https://unpkg.com/3d-tiles-renderer@0.5.2/build/index.three.js"
   }
 }
 </script>
 
 <div id="app">
   <canvas id="gl"></canvas>
+
+  <div id="credits" hidden>
+    <span class="clabel">Basemap</span>
+    <span id="credits-google"></span>
+    <span class="csep">·</span>
+    <span class="clabel">Heat data</span>
+    <span>HeatCanyon / FortyGuard / NYC Open Data / USGS 3DEP</span>
+  </div>
 
   <div id="boot">
     <h1>HeatCanyon</h1>
@@ -32,6 +46,10 @@
     <header class="brand">
       <h1>HeatCanyon</h1>
       <p id="brand-sub"></p>
+      <div class="brandbtns">
+        <button id="tour-replay" title="Walk through the controls again" hidden>Tour</button>
+        <button id="film-replay" title="Play the opening film again" hidden>Film</button>
+      </div>
     </header>
 
     <nav class="tabs" id="tabs">
@@ -54,6 +72,48 @@
           <button id="cam-next" hidden>Next street</button>
         </div>
         <p class="hint" id="cam-hint"></p>
+
+        <!-- Photoreal context. Off by default, and deliberately so: with the
+             toggle untouched no root tile request is ever issued, so the
+             session is free. -->
+        <section id="photoreal">
+          <div class="prhead">
+            <button id="pr-toggle" aria-pressed="false">Photoreal context</button>
+          </div>
+          <p class="hint" id="pr-hint">Google's 3D city mesh under the data — real
+            roads, kerbs and vehicles. Needs your own Maps API key.</p>
+          <div id="pr-key" hidden>
+            <label for="pr-key-input">Google Maps API key</label>
+            <input id="pr-key-input" type="password" autocomplete="off"
+                   spellcheck="false" placeholder="AIza…" />
+            <div class="prbtns">
+              <button id="pr-key-save">Use key</button>
+              <button id="pr-key-clear">Forget</button>
+            </div>
+            <p class="hint">Stored in this browser only, never sent anywhere but
+              Google. Enable the Map Tiles API and set a quota cap on root tile
+              requests.</p>
+          </div>
+          <div id="pr-look" hidden>
+            <label>Photo colour <output id="pr-desat-out"></output>
+              <input id="pr-desat" type="range" min="0" max="100" value="35" />
+            </label>
+            <label>Heat on buildings <output id="pr-data-out"></output>
+              <input id="pr-data" type="range" min="0" max="100" value="55" />
+            </label>
+            <label>Field on streets <output id="pr-wash-out"></output>
+              <input id="pr-wash" type="range" min="0" max="100" value="40" />
+            </label>
+            <label class="prcheck">
+              <input id="pr-solids" type="checkbox" />
+              Also draw our own blocks (for comparing alignment)
+            </label>
+            <label>Vertical align <output id="pr-nudge-out"></output>
+              <input id="pr-nudge" type="range" min="-20" max="20" step="0.5" value="0" />
+            </label>
+          </div>
+          <p class="prstatus" id="pr-status"></p>
+        </section>
       </section>
 
       <section id="tab-whatif" class="tabpane" hidden></section>
@@ -77,6 +137,54 @@
       <div class="hours" id="hours"></div>
     </div>
     <div class="meta" id="time-meta"></div>
+  </div>
+
+  <!-- OPENING FILM ----------------------------------------------------------
+       Driven by js/film.js. It lives in the markup rather than being injected
+       so the first paint is the title card itself, not a blank canvas waiting
+       for a module graph to resolve. Everything here is removed from the DOM
+       once the film ends.                                                    -->
+  <div id="film" hidden>
+    <canvas id="film-gl"></canvas>
+    <div id="film-vignette"></div>
+    <div id="film-grain"></div>
+    <div id="film-flash"></div>
+    <div class="film-bar top"></div>
+    <div class="film-bar bottom"></div>
+
+    <div id="film-title">
+      <p class="kicker">FortyGuard tOS · HeatCanyon</p>
+      <h1>The Canyon</h1>
+      <p class="strap" id="film-title-strap">
+        A street-level account of one afternoon in Manhattan.
+      </p>
+      <div class="cta">
+        <button id="film-begin" disabled>Preparing</button>
+        <button id="film-straight" class="ghost">Skip to the map</button>
+      </div>
+      <div class="progress"><i id="film-prog"></i></div>
+      <p class="load" id="film-load">loading</p>
+    </div>
+
+    <div id="film-hud" hidden>
+      <div id="film-chaptercard"><span id="film-chapno"></span><b id="film-chapter"></b></div>
+
+      <div id="film-readout">
+        <p id="film-readout-label"></p>
+        <canvas id="film-spark" width="680" height="124" hidden></canvas>
+        <p id="film-readout-value"></p>
+      </div>
+
+      <div id="film-marker"><i></i><b id="film-marker-name"></b><span id="film-marker-coords"></span></div>
+
+      <p id="film-caption"></p>
+
+      <div id="film-controls">
+        <button id="film-sound" aria-pressed="true">Sound</button>
+        <button id="film-skip">Skip</button>
+      </div>
+      <p id="film-credit"></p>
+    </div>
   </div>
 
   <div id="hover"></div>

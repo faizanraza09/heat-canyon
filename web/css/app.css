@@ -57,7 +57,9 @@ html, body {
 }
 
 #app { position: fixed; inset: 0; }
-#gl  { position: absolute; inset: 0; display: block; }
+#gl  { position: absolute; inset: 0; display: block; cursor: grab; }
+#gl.is-panning { cursor: grabbing; }
+#gl.street-nav { cursor: crosshair; }
 
 /* ---------------------------------------------------------------- loading */
 
