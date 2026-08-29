@@ -62,6 +62,7 @@ export class Scene {
     this.viewpointIndex = 0;
     this.photorealOn = false;
     this.showSolids = false;
+    this.forceCpuPhotoreal = false;
     this._groundY = null;
 
     /* The NAVD88 elevation that this scene's y = 0 stands for.
@@ -906,6 +907,7 @@ export class Scene {
       data: this.data,
       datumM: this.datumM,
       fieldTex: this.groundTex,
+      forceCpu: this.forceCpuPhotoreal,
       // The ground texture spans the AOI exactly, centred on the origin, and is
       // drawn north-up — the same rectangle _buildGround gives its plane.
       fieldRect: { x0: -w / 2, y0: -h / 2, w, h },
@@ -917,6 +919,20 @@ export class Scene {
       onLutReady: () => { this._recolour(); },
     });
     return this.photoreal;
+  }
+
+  /** Recreate the streamed tiles when their CPU/GPU performance profile changes.
+   * The profile determines decoder queues and LOD targets, so it cannot be
+   * safely changed on an already-streaming TilesRenderer. */
+  setPhotorealCpuMode(on) {
+    const next = Boolean(on);
+    if (next === this.forceCpuPhotoreal) return false;
+    this.forceCpuPhotoreal = next;
+    if (this.photoreal) {
+      this.photoreal.dispose();
+      this.photoreal = null;
+    }
+    return true;
   }
 
   /** Switch the photoreal context layer on or off.

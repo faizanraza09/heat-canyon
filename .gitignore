@@ -249,7 +249,9 @@ data/env_params/*
 
 # HeatCanyon build artifacts
 .venv/
-web/data/*.bin
+# The HeatCanyon browser bundle depends on its precomputed binary model fields.
+# They are deliberately versioned with the JSON assets in web/data so a fresh
+# clone can run `heatcanyon serve` without rebuilding the model.
 
 # HeatCanyon caches ARE shipped, deliberately: the FortyGuard responses cost
 # credits and the NYC Open Data pulls take minutes, so committing them makes the
