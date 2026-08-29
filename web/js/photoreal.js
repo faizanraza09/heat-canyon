@@ -76,6 +76,25 @@ const N_BUCKETS = 8;
  * one. */
 const ERROR_TARGET = { orbit: 12, street: 5 };
 
+/* Google Photorealistic Tiles are designed for a hardware WebGL renderer. A
+ * software renderer (SwiftShader, WARP, llvmpipe, etc.) can still show the
+ * layer, but asking it to decode, blend and rasterise the same dense tile set
+ * makes the browser spend its time on partial LODs. Those partial LODs are the
+ * faceted shards that look like broken geometry. Keep the real mesh, but use a
+ * bounded context-quality profile that a CPU can finish drawing. */
+const SOFTWARE_PROFILE = {
+  errorTarget: { orbit: 20, street: 12 },
+  downloadJobs: 3,
+  parseJobs: 1,
+  pixelRatio: 1,
+};
+const HARDWARE_PROFILE = {
+  errorTarget: ERROR_TARGET,
+  downloadJobs: 12,
+  parseJobs: 4,
+  pixelRatio: null,
+};
+
 const DRACO_PATH = 'https://unpkg.com/three@0.170.0/examples/jsm/libs/draco/gltf/';
 
 /** Where the API key comes from, in precedence order.
@@ -125,6 +144,16 @@ export function storeApiKey(key) {
   } catch (e) { /* private browsing; the key just will not persist */ }
 }
 
+function isSoftwareRenderer(renderer) {
+  const gl = renderer?.getContext?.();
+  if (!gl) return false;
+  const debug = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = debug
+    ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)
+    : gl.getParameter(gl.RENDERER);
+  return /swiftshader|software|llvmpipe|microsoft basic render|\bwarp\b/i.test(String(name));
+}
+
 export class Photoreal {
   /**
    * @param {object} o
@@ -140,6 +169,9 @@ export class Photoreal {
    */
   constructor(o) {
     this.o = o;
+    this.softwareRenderer = Boolean(o.forceCpu) || isSoftwareRenderer(o.renderer);
+    this.profile = this.softwareRenderer ? SOFTWARE_PROFILE : HARDWARE_PROFILE;
+    if (this.softwareRenderer) o.renderer.setPixelRatio(this.profile.pixelRatio);
     this.tiles = null;
     this.enabled = false;
     this.nudgeM = 0;
@@ -352,7 +384,12 @@ export class Photoreal {
     }
     this.enabled = true;
     this.root.visible = true;
-    this.o.onStatus?.('loading', 'requesting tiles');
+    this.o.onStatus?.(
+      'loading',
+      this.softwareRenderer
+        ? 'software WebGL: loading efficient context tiles'
+        : 'requesting tiles',
+    );
     return true;
   }
 
@@ -403,7 +440,9 @@ export class Photoreal {
     // so that was wrong: the shards are coarse-LOD photogrammetry of street
     // clutter, and they resolve as the tileset refines.
     tiles.registerPlugin(new TileCompressionPlugin());
-    tiles.registerPlugin(new TilesFadePlugin());
+    // Cross-fading draws parent and child tile geometry together. It is pleasant
+    // on a GPU, but doubles raster work while a software renderer is refining.
+    if (!this.softwareRenderer) tiles.registerPlugin(new TilesFadePlugin());
 
     // Put the AOI centre at the scene origin, at the elevation the flat datum
     // stands for, so our geometry and Google's terrain share a ground plane.
@@ -422,7 +461,7 @@ export class Photoreal {
      * else — billing is per session, so a more detailed session is the same
      * single billable event as a coarse one. Set after the plugin so it wins
      * over useRecommendedSettings. */
-    tiles.errorTarget = ERROR_TARGET.orbit;
+    tiles.errorTarget = this.profile.errorTarget.orbit;
 
     // Refinement is the binding constraint at street level, so let more of it
     // happen at once. The defaults are tuned for an overhead view where the
@@ -430,8 +469,8 @@ export class Photoreal {
     // frame is near and wants depth, and a shallow queue means the block you are
     // standing in stays an unrefined blob with no streets carved out of it —
     // which looks, from inside, like being sealed in a dark box.
-    if (tiles.downloadQueue) tiles.downloadQueue.maxJobs = 12;
-    if (tiles.parseQueue) tiles.parseQueue.maxJobs = 4;
+    if (tiles.downloadQueue) tiles.downloadQueue.maxJobs = this.profile.downloadJobs;
+    if (tiles.parseQueue) tiles.parseQueue.maxJobs = this.profile.parseJobs;
 
     tiles.setCamera(camera);
     tiles.setResolutionFromRenderer(camera, renderer);
@@ -692,7 +731,8 @@ export class Photoreal {
    * means never being right for either. */
   setDetail(mode) {
     if (!this.tiles) return;
-    this.tiles.errorTarget = ERROR_TARGET[mode] ?? ERROR_TARGET.orbit;
+    this.tiles.errorTarget = this.profile.errorTarget[mode]
+      ?? this.profile.errorTarget.orbit;
   }
 
   /** Vertical nudge, metres. Dials out the residual geoid/datum mismatch. */

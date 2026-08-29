@@ -165,6 +165,7 @@ export class UI {
     const look = $('pr-look');
     const status = $('pr-status');
     const input = $('pr-key-input');
+    const cpu = $('pr-cpu');
     if (!toggle) return;
 
     const say = (msg, cls) => {
@@ -173,7 +174,7 @@ export class UI {
     };
 
     this.scene.onPhotorealStatus = (state, detail) => {
-      if (state === 'loading') say('streaming tiles…');
+      if (state === 'loading') say(detail || 'streaming tiles…');
       else if (state === 'ready') say('');
       else if (state === 'error') say(detail || 'failed', 'bad');
     };
@@ -198,6 +199,22 @@ export class UI {
       if (envKey) say('Key loaded from the server environment.');
     });
     const anyKey = () => findApiKey() || envKey;
+
+    const savedCpuMode = () => {
+      try { return localStorage.getItem('heatcanyon.photoreal_cpu') === '1'; }
+      catch (e) { return false; }
+    };
+    if (cpu) {
+      cpu.checked = savedCpuMode();
+      this.scene.setPhotorealCpuMode(cpu.checked);
+      cpu.onchange = () => {
+        try { localStorage.setItem('heatcanyon.photoreal_cpu', cpu.checked ? '1' : '0'); }
+        catch (e) { /* preference applies for this page even if storage is unavailable */ }
+        const wasOn = toggle.getAttribute('aria-pressed') === 'true';
+        this.scene.setPhotorealCpuMode(cpu.checked);
+        if (wasOn) setOn(true);
+      };
+    }
 
     const setOn = async (on) => {
       const ok = await this.scene.setPhotoreal(on, anyKey());
