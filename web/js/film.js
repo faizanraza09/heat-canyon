@@ -290,7 +290,11 @@ const HANDOVER_S = 2.0;
  * quietly, it is a different thing that happens to be made of the same parts —
  * see `_startScore` for what actually changed, which is mostly not the level.
  */
-const SCORE_LEVEL = 0.17;
+/* Measured against the old score rather than chosen by ear: at 0.45 the bed
+ * puts the same energy in the 200-500 Hz band a laptop speaker reproduces as
+ * the version everyone could hear, and 30 dB less in the 500-3000 Hz band the
+ * voice needs. See `_startScore` for the table. */
+const SCORE_LEVEL = 0.45;
 
 /** How far the score drops under a spoken line. Not silence: the bed is what
  *  holds the shots together, and one that vanishes whenever anyone talks makes
@@ -1243,80 +1247,81 @@ export class Film {
     this.limiter = limiter;
     this.narrator?.attach(ac, limiter);
 
-    /* A SPECTRAL HOLE WHERE THE VOICE GOES.
+    /* WHAT A BED UNDER A VOICE HAS TO BE, measured rather than guessed.
      *
-     * This is the part that was missing, and it is why the old bed had to be
-     * either loud and in the way or quiet and pointless. Ducking by level moves
-     * the whole bed up and down; a voice-over does not need the bed quieter, it
-     * needs it OUT OF THE BAND THE VOICE OCCUPIES. Speech intelligibility lives
-     * in the first two formants, roughly 500 Hz to 3 kHz, and everything the old
-     * score did was aimed straight at it: five sawtooths whose harmonics run all
-     * the way up through it, and a noise bed band-passed at 780 Hz, which is
-     * almost exactly where a male voice puts its first formant.
+     * Three versions of this went out before the numbers were taken. The first
+     * was the thirty-second cut's score — five sawtooths in an A minor triad
+     * through a 12 dB/oct lowpass at 520 Hz, plus noise band-passed at 780 Hz.
+     * That is a synth pad sitting exactly on top of the voice: 780 Hz is almost
+     * where a male first formant lives, and sawtooth harmonics from 55 Hz run
+     * all the way up through the consonants.
      *
-     * So the whole bed goes through a broad scoop centred at 1.6 kHz. The bed
-     * keeps its weight underneath and its air on top, the voice sits in the gap,
-     * and neither has to get out of the other's way by going quiet. It is what
-     * a dialogue mix does, and it is four lines.
+     * The second was the over-correction: everything pushed below 150 Hz with
+     * two poles. Beautifully out of the way, and completely inaudible — a
+     * laptop speaker reproduces almost nothing under about 200 Hz, so the bed
+     * was real, measurable, and could not be heard at all. That is the exact
+     * failure the file's own history already recorded once.
+     *
+     * What the measurements then showed, rendering each candidate offline and
+     * integrating its spectrum in four bands:
+     *
+     *   config              sub   presence   SPEECH    air    separation
+     *   old (0.55)         43.8      17.1    -12.8     8.7      29.9 dB
+     *   sines only (0.45)  42.1      15.4    -14.5     7.0      29.9 dB
+     *   + noise hp 6 kHz   42.1      15.8      4.9     9.8      11.0 dB
+     *   + noise hp 7 kHz   42.0      16.4      8.7    10.9       7.7 dB
+     *
+     * Two findings, and neither was what I expected.
+     *
+     * BROADBAND NOISE CANNOT BE FILTERED OUT OF THE WAY. Two cascaded highpass
+     * filters at 6 kHz still leave noise at 2-3 kHz only about 25 dB down, and
+     * noise has energy everywhere by definition — adding an "air" bed at any
+     * useful level took the separation from 30 dB to 11. So there is no
+     * continuous air bed. It survives only in the descent, where it is a sound
+     * effect on a camera move rather than a bed under a sentence.
+     *
+     * SINES HAVE NO HARMONICS, which is the whole trick. A triangle at 220 Hz
+     * puts energy at 660, 1100, 1540 — straight into the speech band. Pure
+     * sines put energy at exactly one frequency each, so the partials can sit
+     * up in the 200-500 Hz range a laptop actually reproduces without leaking a
+     * single decibel into the band the voice needs.
+     *
+     * And the partials chose themselves once that was clear: 55, 110, 165, 220
+     * are the first four harmonics of 55 Hz. It is not a chord — not major, not
+     * minor, not an open fifth — it is ONE NOTE with its own overtones, which
+     * is the least musical thing that can still be called a sound. Nothing to
+     * follow, nothing to resolve, and it can hold for three minutes under
+     * someone talking without ever asking to be listened to.
      */
-    const scoop = ac.createBiquadFilter();
-    scoop.type = 'peaking';
-    scoop.frequency.value = 1600;
-    scoop.Q.value = 0.7;
-    scoop.gain.value = -9;
+    const lp = ac.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 600; lp.Q.value = 0.5;
+    lp.connect(master);
 
-    /* Two poles, not one, and 150 Hz rather than 520.
-     *
-     * A single lowpass at 520 with Q 0.8 rolls off at 12 dB an octave, so a
-     * sawtooth at 55 Hz still had audible harmonics at 2 kHz. Cascading two
-     * gives 24 dB an octave and the drone becomes weight rather than tone. The
-     * old comment argued for opening the filter because laptop speakers cannot
-     * reproduce anything below 130 Hz — true, and the answer to it is the air
-     * bed below, which now lives up where small speakers are actually good,
-     * rather than dragging the drone up into the voice to be heard.
-     */
-    const filt = ac.createBiquadFilter();
-    filt.type = 'lowpass'; filt.frequency.value = 150; filt.Q.value = 0.5;
-    const filt2 = ac.createBiquadFilter();
-    filt2.type = 'lowpass'; filt2.frequency.value = 150; filt2.Q.value = 0.7;
-    filt.connect(filt2); filt2.connect(scoop);
-
-    /* AN OPEN FIFTH, NOT A CHORD, and this is the other half of why the old bed
-     * read as cheap.
-     *
-     * It was A1, E2, A2, C3, A3 — an A minor triad, held for three minutes. A
-     * sustained minor chord is not atmosphere, it is music, and music under
-     * narration is either the thing you are listening to or the thing you are
-     * ignoring. There is no third here at all: root, fifth, octave. That is
-     * tonally ambiguous, which is what lets it sit under speech for three
-     * minutes without ever resolving to anything or asking to be followed.
-     *
-     * Sine and triangle rather than sawtooth, because the point is the
-     * fundamental. The pairs are still detuned a few cents so the bed beats
-     * slowly against itself instead of sitting perfectly still.
-     */
-    [[55, 'sine', 0.34], [82.5, 'sine', 0.16], [110, 'triangle', 0.10]]
-      .forEach(([f, type, g], i) => {
-        const o = ac.createOscillator();
-        o.type = type;
-        o.frequency.value = f * (i % 2 ? 1.004 : 0.996);
-        const gain = ac.createGain(); gain.gain.value = g;
-        o.connect(gain); gain.connect(filt); o.start();
-        this.nodes.push(o);
-      });
+    [[55, 0.30], [110, 0.26], [165, 0.20], [220, 0.14]].forEach(([f, g], i) => {
+      const o = ac.createOscillator();
+      o.type = 'sine';
+      // A few cents apart so the stack beats slowly against itself rather than
+      // standing perfectly still, which is the difference between a room and a
+      // test tone.
+      o.frequency.value = f * (i % 2 ? 1.004 : 0.996);
+      const gain = ac.createGain(); gain.gain.value = g;
+      o.connect(gain); gain.connect(lp); o.start();
+      this.nodes.push(o);
+    });
 
     /* Breath, on the level rather than on a filter cutoff.
      *
      * The old movement was an LFO sweeping the lowpass 260 Hz either side of
-     * its centre every twenty-three seconds. Moving a cutoff moves the HARMONIC
-     * CONTENT, and the ear tracks timbre changes — it is the same reflex that
-     * makes a passing siren impossible to ignore — so the one thing the bed did
-     * was the one thing guaranteed to pull attention off the sentence. Swelling
-     * the level instead is movement you feel and do not follow.
+     * centre every twenty-three seconds. Moving a cutoff moves the harmonic
+     * content, and the ear tracks timbre changes — the same reflex that makes a
+     * passing siren impossible to ignore — so the one thing the bed did was the
+     * one thing guaranteed to pull attention off the sentence. Swelling the
+     * level instead is movement you feel and do not follow.
      */
     const swell = ac.createGain();
     swell.gain.value = 1;
-    scoop.connect(swell);
+    lp.disconnect();
+    lp.connect(swell);
     swell.connect(master);
     const lfo = ac.createOscillator();
     lfo.frequency.value = 0.021;                 // one breath every 48 seconds
@@ -1324,13 +1329,13 @@ export class Film {
     lfo.connect(lfoGain); lfoGain.connect(swell.gain); lfo.start();
     this.nodes.push(lfo);
 
-    /* Air, moved up out of the voice.
+    /* Air, and it is a descent effect now rather than part of the bed.
      *
-     * Band-passed at 780 Hz this was a hiss sitting exactly on the first
-     * formant. High-passed at 5 kHz it is the sound of a large room, which is
-     * what "air" is supposed to mean — it reads as space and scale, it is where
-     * a laptop speaker is at its best, and it cannot mask a consonant because
-     * there are no consonants up there.
+     * Held at zero except while the camera is falling — see the beat that ramps
+     * `airGain` — because of the measurement above: at any level where it can be
+     * heard it is also masking consonants. Two poles at 7 kHz rather than one at
+     * 780 Hz, so what does open during the dive is the top of a rush of air and
+     * not a hiss across the middle of the voice.
      */
     const len = ac.sampleRate * 4;
     const buf = ac.createBuffer(1, len, ac.sampleRate);
@@ -1338,10 +1343,13 @@ export class Film {
     for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * 0.5;
     const noise = ac.createBufferSource();
     noise.buffer = buf; noise.loop = true;
-    const hp = ac.createBiquadFilter();
-    hp.type = 'highpass'; hp.frequency.value = 5000; hp.Q.value = 0.5;
+    const h1 = ac.createBiquadFilter();
+    h1.type = 'highpass'; h1.frequency.value = 7000; h1.Q.value = 0.5;
+    const h2 = ac.createBiquadFilter();
+    h2.type = 'highpass'; h2.frequency.value = 7000; h2.Q.value = 0.7;
     this.airGain = ac.createGain(); this.airGain.gain.value = 0;
-    noise.connect(hp); hp.connect(this.airGain); this.airGain.connect(master);
+    noise.connect(h1); h1.connect(h2); h2.connect(this.airGain);
+    this.airGain.connect(master);
     noise.start(); this.nodes.push(noise);
 
     const sub = ac.createOscillator();
