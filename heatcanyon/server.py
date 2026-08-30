@@ -580,10 +580,20 @@ if WEB.exists():
 
 
 def main(port: int | None = None) -> None:
+    """Run the server.
+
+    The host defaults to loopback and has to be asked for explicitly. A
+    development server that binds every interface is a development server
+    reachable from the rest of the network, and that is not a thing to acquire
+    by accident on a laptop — so the container sets ``HEATCANYON_HOST=0.0.0.0``
+    and nothing else does.
+    """
     import uvicorn
     port = int(port or os.getenv("PORT", "8000"))
-    print(f"HeatCanyon -> http://127.0.0.1:{port}")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    host = os.getenv("HEATCANYON_HOST", "127.0.0.1")
+    shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
+    print(f"HeatCanyon -> http://{shown}:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

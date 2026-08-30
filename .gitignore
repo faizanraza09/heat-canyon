@@ -323,3 +323,8 @@ data/globe/*
 # web/css/ and web/js/; the brief does not need to ship with it.
 Design Overhaul Request.zip
 *:Zone.Identifier
+
+# The tree scripts/deploy_hf.py assembles for the Space: the repository's source
+# plus the gitignored solved fields, minus everything the pipeline needs and the
+# server does not. Rebuilt from scratch on every deploy, so it is never a source.
+.deploy/

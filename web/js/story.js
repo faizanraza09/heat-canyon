@@ -340,32 +340,30 @@ export function buildStory(data, globe) {
      * of the opening move is spent before the camera comes in.
      */
     {
-      chapter: 'I', title: 'A year over Manhattan', seconds: 5,
+      chapter: 'I', title: 'A year over Manhattan', seconds: 4.5,
       stage: { alt: 29000, fov: 28, turn: 0.2, heat: 0.45, tilt: 0.13, counter: 0.5 },
     },
     {
-      chapter: 'I', seconds: 4.5,
-      text: 'A field lets go of the day’s heat after dark. A city holds on to it.',
+      chapter: 'I', seconds: 5.9,
+      text: 'A field lets go of the day’s heat after dark. A city holds it.',
       stage: { alt: 24000, fov: 28, turn: 0.46, heat: 1, cities: 1, bloom: 1,
                tilt: 0.1, counter: 1 },
     },
     {
-      chapter: 'I', seconds: 5.5,
+      chapter: 'I', seconds: 7.9,
       text: `This is one year over ${m.aoi.label}. `
         + `${(year.hours || 8760).toLocaleString('en-US')} hours. `
-        + `${Words(daysOver)} days over ${words(m.event.threshold_c)} degrees. `
-        + `${Words(tropical)} nights that never dropped below twenty-six.`,
+        + `${Words(daysOver)} days over ${words(m.event.threshold_c)} degrees.`,
       say: `This is one year over ${m.aoi.label}. Eight thousand seven hundred and sixty hours. `
-        + `${Words(daysOver)} days over ${words(m.event.threshold_c)} degrees. `
-        + `${Words(tropical)} nights that never dropped below twenty-six.`,
+        + `${Words(daysOver)} days over ${words(m.event.threshold_c)} degrees.`,
       altEase: 'out', turnEase: 'out',
       stage: { alt: 5200, fov: 30, turn: 1, heat: 1, cities: 0.6, bloom: 0.4,
                lock: 1, pin: 1, aim: 0, phi: 0.05, clouds: 0.6, tilt: 0 },
     },
     {
-      chapter: 'I', seconds: 5,
-      text: 'From up there it’s one number per city block, taken at head height. '
-        + 'It’s the number everyone plans with.',
+      chapter: 'I', seconds: 6.7,
+      text: 'From up there it’s one number per block, taken at head height. '
+        + 'Everyone plans with it.',
       stage: { alt: 3400, cities: 0.3, bloom: 0.15, clouds: 0.85 },
     },
 
@@ -383,18 +381,18 @@ export function buildStory(data, globe) {
      * `land` on the handoff settles it onto scene.js's own opening pose.
      */
     {
-      chapter: 'II', title: 'Going in', seconds: 7,
+      chapter: 'II', title: 'Going in', seconds: 7.0,
       altEase: 'in',
       stage: { alt: 40, fov: 38, phi: 0.16, dust: 0.7, cities: 0, bloom: 0,
                clouds: 1, lock: 1, pin: 1, aim: 0, tilt: 0 },
     },
     {
-      chapter: 'II', phase: 'handoff', seconds: 5,
+      chapter: 'II', phase: 'handoff', seconds: 6.3,
       text: `Down here it stops being blocks. It’s walls. `
         + `${m.counts.facade_panels.toLocaleString('en-US')} of them, `
         + `on ${m.counts.buildings.toLocaleString('en-US')} buildings.`,
       say: 'Down here it stops being blocks. It is walls. Twenty-nine thousand '
-        + 'four hundred of them, on five thousand three hundred buildings.',
+        + 'four hundred of them.',
       altEase: 'land',
       stage: { alt: 3.265, fov: 46, phi: 0.334, dust: 1, pin: 0, clouds: 1,
                lock: 1, aim: 0, tilt: 0 },
@@ -413,11 +411,11 @@ export function buildStory(data, globe) {
      * anyone would have guessed.
      */
     {
-      chapter: 'III', title: 'One building', phase: 'city', seconds: 4.5,
+      chapter: 'III', title: 'One building', phase: 'city', seconds: 5.9,
       text: `Take this one. ${hero.addr}. ${hero.floors} floors, ${hero.year}, `
         + `${hero.units} homes.`,
       say: `Take this one. Seven forty-seven Second Avenue. ${Words(hero.floors)} floors, `
-        + `nineteen seventy-two, ${words(hero.units)} homes.`,
+        + `${words(hero.units)} homes.`,
       act: ({ ui }) => {
         ui.showTab('view');
         ui.setLayer('surface');
@@ -430,17 +428,17 @@ export function buildStory(data, globe) {
       },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 4.5,
+      chapter: 'III', phase: 'city', seconds: 5.6,
       text: 'On the flat map it’s one shade of orange. It isn’t one temperature.',
       act: ({ ui }) => { ui.setHour(m.peak_index); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5,
+      chapter: 'III', phase: 'city', seconds: 6.3,
       text: `${Words(m.bands)} height bands, one for every three storeys, `
         + 'and a separate answer on every face.',
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.5,
+      chapter: 'III', phase: 'city', seconds: 6.3,
       get text() { return (() => {
         const f = heroFloor();
         return f?.sun
@@ -462,7 +460,7 @@ export function buildStory(data, globe) {
       act: ({ ui }) => { ui.setHour(lateSun); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.5,
+      chapter: 'III', phase: 'city', seconds: 6.3,
       get text() { return (() => {
         const f = heroFloor();
         return f?.shade
@@ -479,7 +477,7 @@ export function buildStory(data, globe) {
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6,
+      chapter: 'III', phase: 'city', seconds: 7.1,
       get text() {
         const n = neighbour();
         return n
@@ -494,7 +492,7 @@ export function buildStory(data, globe) {
           // The year is in the caption and not in the mouth: `words` gives up
           // above a thousand and returns digits, and spelling it by hand here
           // would be a number that stops matching the data the day it changes.
-          ? `That heat is not coming from the sky. It comes off the ${words(n.floors)}-storey `
+          ? `That heat isn’t from the sky. It comes off the ${words(n.floors)}-storey `
             + 'tower opposite, straight into the wall.'
           : 'That heat is not coming from the sky. It comes off the building '
             + 'across the street, straight into the wall.';
@@ -505,7 +503,7 @@ export function buildStory(data, globe) {
       act: ({ ui }) => { ui.highlight([HERO_BIN, NEIGHBOUR_BIN]); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.5,
+      chapter: 'III', phase: 'city', seconds: 6.3,
       text: 'The model splits every wall three ways. Sun, the surroundings, '
         + 'and what it loses upward.',
       // The brief opens here and not three beats earlier. It is a full-screen
@@ -525,13 +523,15 @@ export function buildStory(data, globe) {
       act: ({ ui }) => { ui.openBrief(HERO_BIN); ui.briefSection(2); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.5,
-      text: 'Then it goes floor by floor. Surface temperature, what it costs to '
-        + 'hold twenty-four degrees inside, hours a year it fails.',
+      chapter: 'III', phase: 'city', seconds: 7.5,
+      text: 'Then floor by floor. Surface temperature, what it costs to hold '
+        + '24 inside, hours a year it fails.',
+      say: 'Then floor by floor. Surface temperature, what it costs to hold '
+        + 'twenty-four inside, hours a year it fails.',
       act: ({ ui }) => { ui.briefSection(3); },     // The floor schedule
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5,
+      chapter: 'III', phase: 'city', seconds: 6.7,
       get text() { return (() => {
         const f = heroFloor();
         if (!f) return 'One floor is the worst of them, and the schedule names it.';
@@ -550,12 +550,12 @@ export function buildStory(data, globe) {
         if (!f) return 'One floor is the worst of them, and the schedule names it.';
         const t = f.row.t_in || [];
         return `Floor ${words(f.it.worst_floor)} is the worst. ${Words(f.row.t_surf)} outside, `
-          + `${words(t[0])} to ${words(t[1])} in the rooms, and it fails for `
+          + `${words(t[1])} in the rooms, `
           + `${words(Math.round((f.row.hrs || 0) / 100))} hundred hours a year.`;
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6,
+      chapter: 'III', phase: 'city', seconds: 8.6,
       get text() { return (() => {
         const g = heroRx()?.geometry;
         if (!g) return 'Shading will not work here, and the model says why.';
@@ -567,13 +567,13 @@ export function buildStory(data, globe) {
       get say() { return (() => {
         const g = heroRx()?.geometry;
         if (!g) return 'Shading will not work here, and the model says why.';
-        return `Shading will not work here. At the peak hour the sun is `
-          + `${words(g.peak_altitude_deg)} degrees up and ${words(g.incidence_deg)} degrees `
-          + `off the wall. An overhang would need four metres.`;
+        return `Shading won’t work. At its peak the sun is `
+          + `${words(g.peak_altitude_deg)} degrees up, nearly square on. `
+          + `An overhang would need four metres.`;
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.5,
+      chapter: 'III', phase: 'city', seconds: 6.7,
       get text() { return (() => {
         const rx = heroRx();
         if (!rx) return 'So it prescribes the glass instead.';
@@ -588,9 +588,9 @@ export function buildStory(data, globe) {
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.5,
+      chapter: 'III', phase: 'city', seconds: 5.9,
       text: 'With a price on it, and a range, because the envelope is an '
-        + 'assumption and the panel says so.',
+        + 'assumption.',
       // Section five is the one that says what the whole document rests on, and
       // it is the reason the film can print a dollar figure at all. The brief
       // closes on the next beat, which is where the chapter does.
@@ -605,7 +605,7 @@ export function buildStory(data, globe) {
      * are all seen working rather than described.
      */
     {
-      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 5.5,
+      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 4.0,
       text: 'Every wall in Midtown has an answer like that.',
       act: ({ ui, scene }) => {
         ui.closeBrief();
@@ -615,7 +615,7 @@ export function buildStory(data, globe) {
       },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.5,
+      chapter: 'IV', phase: 'city', seconds: 5.9,
       text: `${Words(LAYERS.length)} layers. Surface temperature, sun and shade, `
         + `hours above ${r0(m.event.threshold_c)}, the longest unbroken run.`,
       say: `${Words(LAYERS.length)} layers. Surface temperature, sun and shade, `
@@ -623,20 +623,20 @@ export function buildStory(data, globe) {
       act: ({ ui }) => { ui.showTab('view'); ui.setLayer('sun'); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.5,
+      chapter: 'IV', phase: 'city', seconds: 5.6,
       text: 'Any hour of any day. Or a month, a season, the whole year.',
       act: ({ ui }) => { ui.setLayer('exceedance'); ui.play?.(); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.5,
+      chapter: 'IV', phase: 'city', seconds: 7.1,
       text: typeof overlap === 'number'
-        ? `Run the year and the ranking moves. Of the fifty worst in the heat wave, `
-          + `${words(overlap)} are still worst across twelve months.`
+        ? `Run the year and the ranking moves. ${Words(overlap)} of the heat wave’s `
+          + 'worst fifty are still worst.'
         : 'Run the year and the ranking moves.',
       act: ({ ui }) => { ui.stop?.(); ui.setLayer('annual_priority'); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.5,
+      chapter: 'IV', phase: 'city', seconds: 6.3,
       text: 'Change something and it solves again. Cool roofs, trees, a coating. '
         + 'It re-runs the physics.',
       act: ({ ui }) => {
@@ -646,7 +646,7 @@ export function buildStory(data, globe) {
       },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6,
+      chapter: 'IV', phase: 'city', seconds: 5.2,
       get text() { return (() => {
         const a = data.decision?.portfolio?.allocation;
         if (!a) return 'Then it spends a budget, and says where it went.';
@@ -664,7 +664,7 @@ export function buildStory(data, globe) {
       act: ({ ui }) => { ui.openPortfolio(); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5,
+      chapter: 'IV', phase: 'city', seconds: 5.6,
       get text() { return (() => {
         const a = data.decision?.portfolio?.allocation;
         return a
@@ -672,11 +672,20 @@ export function buildStory(data, globe) {
             + 'exposure nobody has to sit through.'
           : 'Hours of exposure nobody has to sit through.';
       })(); },
-      say: 'A hundred and fifty thousand hours of exposure nobody has to sit through.',
+      get say() {
+        const a = data.decision?.portfolio?.allocation;
+        if (!a) return 'Hours of exposure nobody has to sit through.';
+        // `words` gives up above a thousand, so the spoken form is the figure to
+        // the nearest thousand, spelled. Hand-typing it here is what put "a
+        // hundred and fifty thousand" in the film's mouth for a week after the
+        // portfolio was re-solved down to a hundred and thirty-seven.
+        const k = Math.round(a.person_hours_avoided / 1000);
+        return `${Words(k)} thousand hours of exposure nobody has to sit through.`;
+      },
       act: ({ ui }) => { ui.scrollSurface('pf-body', '.pfsvg'); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.5,
+      chapter: 'IV', phase: 'city', seconds: 4.8,
       text: 'Every cost carries a range, because tariffs and capex are assumptions.',
       act: ({ ui }) => { ui.closePortfolio(); },
     },
@@ -706,27 +715,27 @@ export function buildStory(data, globe) {
      * this wall hotter.
      */
     {
-      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 5.5,
+      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 2.9,
       text: 'And you can ask it questions.',
       act: ({ ui }) => { ui.replayAnalyst(ANALYST_RUN, ANALYST_QUESTION); },
     },
     {
-      chapter: 'V', phase: 'city', seconds: 6,
+      chapter: 'V', phase: 'city', seconds: 6.7,
       text: 'It has the physics engine, a shell, and twenty tools. '
-        + 'It writes the query, runs it, and shows what it ran.',
+        + 'It shows you what it ran.',
       // A recorded turn replays off disk in a second or two, so by the time this
       // line is read the transcript is already at its end and sitting still.
       // These two beats walk back down it: the working first, then the answer.
       act: ({ ui }) => { ui.scrollSurface('agent-scroll', '.workings, .toolcall'); },
     },
     {
-      chapter: 'V', phase: 'city', seconds: 5.5,
+      chapter: 'V', phase: 'city', seconds: 6.3,
       text: 'This one re-solved the canyon six times to answer a question '
         + 'about a single wall.',
       act: ({ ui }) => { ui.scrollSurface('agent-scroll', '.atable'); },
     },
     {
-      chapter: 'V', phase: 'city', seconds: 5,
+      chapter: 'V', phase: 'city', seconds: 4.0,
       act: ({ ui }) => { ui.closeAnalyst(); },
     },
   ];

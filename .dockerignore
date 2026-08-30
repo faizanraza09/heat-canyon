@@ -1,0 +1,39 @@
+# The raw sources the pipeline consumes — 200 MB of LiDAR tiles, footprints and
+# cached API responses. The image serves the SOLVED fields under web/data/ and
+# never re-runs the pipeline, so none of this is reachable at runtime. Keeping
+# data/manhattan out also keeps the FortyGuard responses, and the credit ledger
+# that records what they cost, off a public host.
+data/
+
+# Never. The image gets its credentials from the platform's secret store.
+.env
+
+node_modules/
+.git/
+.gitignore
+
+# Playwright's suite, its screenshots and its output. The tests drive a running
+# server from outside; nothing in the image runs them.
+tests/
+test-results/
+playwright-report/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+
+notebooks/
+*.ipynb
+
+# Agent run transcripts are per-machine scratch. The one the film replays is
+# tracked in git and re-created by the deploy script, which is the only reason
+# this exclusion is safe.
+.agent/runs/*
+!.agent/runs/r17880442193644fa/
+
+# The design brief, and the staging tree the deploy script builds.
+Design Overhaul Request.zip
+*:Zone.Identifier
+.deploy/
+Dockerfile
+.dockerignore

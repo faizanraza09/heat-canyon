@@ -151,12 +151,18 @@ test('the film is the length it promises, in the chapters it says', async ({ pag
 
 test('the voiced cut gives every line a shot long enough to say it in', async ({ page }) => {
   const { errors } = await openFilm(page);
-  // The script is fetched while the title card is up. Wait for it rather than
-  // for a timeout: on a checkout with no cached audio there is nothing to wait
-  // for, and the assertions below are all conditioned on there being a voice.
+  // Wait for the film's own promise, not for a timeout and not for the narrator
+  // merely reporting itself enabled. The script is asked for twice — once
+  // immediately, and once when floors.json and prescriptions.json land and five
+  // of the sentences change — and the first pass is what flips `enabled`. Read
+  // the state after the second, or this measures a film mid-correction.
   const voiced = await page
-    .waitForFunction(() => window.HC?.film?.narrator?.enabled === true, null, { timeout: 30_000 })
-    .then(() => true, () => false);
+    .waitForFunction(() => window.HC?.film?.narration !== undefined, null, { timeout: 60_000 })
+    .then(() => page.evaluate(async () => {
+      await window.HC.film.narration;
+      return window.HC.film.narrator?.enabled === true;
+    }))
+    .catch(() => false);
   test.skip(!voiced, 'no cached narration in web/data/vo — the film reads itself');
 
   const shape = await page.evaluate(() => {

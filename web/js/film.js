@@ -1425,7 +1425,17 @@ export class Film {
     if (!Film.voiceWanted()) return;
     this.narrator = new Narrator();
     this.narrator.onSpeaking = (on) => this._duck(on);
-    this._narrate();
+    /* Asked for twice, and the whole thing is one promise.
+     *
+     * `narration` resolves when the script has been asked for as many times as
+     * it is going to be. Nothing in the player waits on it — the film starts on
+     * time regardless, and an unrecorded line is one the platform voice takes —
+     * but it exists so that something *can*: the test for the voiced cut has to
+     * read the finished state rather than whichever of the two passes happened
+     * to have landed when it looked, and "wait for the narrator to report
+     * enabled" is not that, because the first pass enables it.
+     */
+    this.narration = this._narrate().then(() => this._renarrate(data));
 
     /* And again once the decision layer lands.
      *
@@ -1444,8 +1454,13 @@ export class Film {
      * nothing, because a second look at the same cache is a second look at the
      * same cache.
      */
-    data?.decision?.ready
-      ?.then(() => { if (!this.running) this._narrate(); })
+  }
+
+  _renarrate(data) {
+    const ready = data?.decision?.ready;
+    if (!ready) return null;
+    return ready
+      .then(() => (this.running ? null : this._narrate()))
       .catch(() => { /* no decision layer on this build; the first call stands */ });
   }
 

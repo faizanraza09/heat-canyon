@@ -83,9 +83,22 @@ handover is a photograph turning into the model with the buildings standing up o
 of it. On a transport bar you can scrub, pause and step through.
 Every figure it narrates is read out of `meta.json`, `ranked.json` and the GISTEMP
 series at run time — and spelled as words, so the caption reads as prose and the
-speech synthesiser does not have to pronounce "°C". Add `?intro=0` to skip it,
-or click *Go straight to the atlas*; it is suppressed automatically under
+voice does not have to pronounce "°C". Add `?intro=0` to skip it, or click *Go
+straight to the atlas*; it is suppressed automatically under
 `prefers-reduced-motion`.
+
+**It is narrated, and the narration is free to play.** The read is ElevenLabs,
+one MP3 per line, cached to `web/data/vo/` and committed — so a clone with no key
+and no network plays the real voice, and every play after the first costs nothing
+anywhere. A page load *cannot* spend even with a key present: the endpoint the
+film calls is a cache read, and only `node scripts/prewarm_voice.mjs` sets the
+flag that allows synthesis. Without a recording a line falls back to the browser's
+own speech synthesiser, per line rather than per film. Because the sentences are
+generated from the model, a rebuild can change one — the dry run says which, for
+free — and because a spoken line needs more room than a read one, a beat whose
+recording is longer than its shot is stretched to fit rather than cutting the
+sentence off: 3:35 voiced against 2:42 on `?voice=0`. See
+[docs/HEATCANYON.md](docs/HEATCANYON.md#the-voice).
 
 What it hands over to is one screen: the instrument on the left — what is being
 measured, over what range, from what camera — the ranking on the right, and the
@@ -131,6 +144,8 @@ python -m heatcanyon.cli build      # solve the model (offline, cached, ~15 min)
 python -m heatcanyon.cli validate   # 20 validation checks
 python -m heatcanyon.cli serve      # http://127.0.0.1:8000
 python scripts/make_globe_assets.py # rebuild the opening film's globe assets
+node scripts/prewarm_voice.mjs --dry # what the film says, and what it would cost
+node scripts/prewarm_voice.mjs      # bake the narration (once; it is committed)
 ```
 
 **It runs with no FortyGuard key.** The responses it used are committed under
