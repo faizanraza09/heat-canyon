@@ -11,13 +11,43 @@
  * cursor. Comparability is handled by the axis labels, which always name the
  * unit, rather than by withholding a shared colour language.
  *
- * The ramp itself is inferno's family — near-black indigo through magenta and
- * orange into a pale cream — desaturated and warmed to sit inside the near-black
- * #0A0908 shell without vibrating against it. It keeps the two properties that
- * made inferno the right choice: it is monotonic in lightness, so it survives
- * greyscale and reads unambiguously as "hot", and it has no green band to throw
- * false edges. Its stops are deliberately uneven — the hot end is stretched,
- * because that is where the finding is.
+ * The ramp runs pale straw through amber and orange into a deep red, and the
+ * direction is the point: red is the hot end.
+ *
+ * It was inferno's family before this — near-black indigo, through magenta and
+ * orange, into a pale cream — chosen because it is monotonic in lightness and
+ * because that order is physically true. Heat a bar of steel and it glows dull
+ * red, then orange, then yellow, then white; "red-hot" is the coolest visible
+ * glow and "white-hot" the hottest, which is why inferno, magma and FLIR's
+ * ironbow all end pale. It is also what makes those ramps survive greyscale and
+ * colour-blindness.
+ *
+ * It was still read backwards. A viewer looking at this instrument sees red and
+ * concludes hot, and no amount of correctness in the encoding survives being
+ * misread by the audience it was drawn for. So the convention wins over the
+ * physics here, deliberately, and the costs are taken on the chin below.
+ *
+ * What it costs, and what is done about it:
+ *
+ *  - The hottest surfaces are now the darkest, on a near-black shell. The hot
+ *    end stops at rgb(163,26,34) rather than going deeper, which keeps it about
+ *    2.6:1 against #0A0908 — dim, but never lost in it. Going further into
+ *    oxblood, which would read as "hotter" still, would put the finding below
+ *    the floor of the frame.
+ *  - Darkness now means two things at once: hotter, and further back. Anything
+ *    that used to push a surface back by darkening it had to stop — see the
+ *    ambient-occlusion floor and the dimming rule in scene.js, both of which
+ *    now work by desaturating instead.
+ *  - Compositing over the photoreal layer can no longer be additive, because
+ *    adding a dark red to a photograph does almost nothing. See the note in
+ *    photoreal.js on why the operator changed and what of the original fix
+ *    survives.
+ *
+ * It keeps the properties that do not depend on direction: no green band to
+ * throw false edges, monotonic in lightness (descending now rather than
+ * ascending, so greyscale and colour-blind reading still work), and stops that
+ * are deliberately uneven, with the hot end stretched because that is where the
+ * finding is.
  *
  * Scenario deltas keep a diverging ramp centred on zero, because there the sign
  * carries the meaning: some interventions make some metrics worse.
@@ -25,22 +55,30 @@
 
 /** The heat ramp, as [position, rgb] stops. Uneven by design. */
 const CANYON = [
-  [0.00, [18, 16, 30]],
-  [0.22, [62, 26, 64]],
-  [0.45, [136, 46, 60]],
-  [0.68, [199, 96, 42]],
-  [0.86, [232, 166, 78]],
-  [1.00, [247, 231, 190]],
+  [0.00, [246, 232, 176]],
+  [0.20, [249, 206, 122]],
+  [0.42, [244, 160, 78]],
+  [0.62, [231, 112, 54]],
+  [0.82, [205, 58, 44]],
+  [1.00, [163, 26, 34]],
 ];
 
 /** The same stops as a CSS gradient, so a legend swatch and a painted pixel
  *  cannot drift apart. */
 export const CANYON_CSS =
-  'linear-gradient(90deg, rgb(18,16,30) 0%, rgb(62,26,64) 22%, rgb(136,46,60) 45%,'
-  + ' rgb(199,96,42) 68%, rgb(232,166,78) 86%, rgb(247,231,190) 100%)';
+  'linear-gradient(90deg, rgb(246,232,176) 0%, rgb(249,206,122) 20%, rgb(244,160,78) 42%,'
+  + ' rgb(231,112,54) 62%, rgb(205,58,44) 82%, rgb(163,26,34) 100%)';
 
-/** Sun and shade is categorical, not continuous: two colours taken from the
- *  ends of the same ramp so the layer still belongs to it. */
+/** Sun and shade is categorical, not continuous.
+ *
+ * These used to be the two ends of the ramp, so the layer visibly belonged to
+ * it. They are deliberately no longer, and the exception is worth stating: the
+ * ramp's hot end is now dark, and taking it literally would draw sunlit walls
+ * darker than shaded ones. Light-means-lit is a more direct mapping than any
+ * ramp convention — it is not a convention at all, it is what light does — and
+ * an encoding that fought it would be unreadable however consistent it was. So
+ * shade stays dark and sun stays bright, and this layer alone sits outside the
+ * ramp's direction. */
 export const SHADE_RGB = [44, 38, 46];
 export const SUNLIT_RGB = [238, 184, 102];
 export const SUN_CSS =

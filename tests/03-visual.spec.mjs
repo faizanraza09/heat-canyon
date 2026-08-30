@@ -258,13 +258,27 @@ test.describe('visual appearance', () => {
     console.log('night', JSON.stringify(nightCity));
     console.log('day  ', JSON.stringify(dayCity));
 
-    expect(dayCity.lum, 'the afternoon sits further up the heat ramp')
-      .toBeGreaterThan(nightCity.lum * 1.15);
-    expect(dayCity.sat, 'and nearer the cream at the top of it, so less saturated')
-      .toBeLessThan(nightCity.sat * 0.95);
-    // The green channel carries most of the climb, because the ramp's top end
-    // is a warm white rather than a pure red.
-    expect(day.meanRGB[1]).toBeGreaterThan(night.meanRGB[1]);
+    /* All three of these read the opposite way round to how they once did, and
+     * the reversal is the ramp's, not a regression.
+     *
+     * The heat ramp used to run near-black indigo up to a pale cream, so a hot
+     * afternoon was the *brighter*, *less saturated* frame and the green channel
+     * climbed with the heat. It now runs pale straw down to a deep red, because
+     * an audience reads red as hot however faithful the blackbody order was. So
+     * the hot hour is now the darker, more saturated one, and green falls as the
+     * measurement rises rather than climbing with it.
+     *
+     * What is actually under test is unchanged and is the thing worth keeping:
+     * that 03:00 and 15:00 render as visibly different frames on a fixed domain,
+     * so the clock moves the picture. Only the direction of each difference is
+     * restated. */
+    expect(nightCity.lum, 'the cool hour sits at the pale end of the heat ramp')
+      .toBeGreaterThan(dayCity.lum * 1.15);
+    expect(dayCity.sat, 'and the hot hour at the saturated red end')
+      .toBeGreaterThan(nightCity.sat * 1.05);
+    // The green channel now carries most of the fall, because the ramp runs from
+    // a straw that is rich in green to a red that has almost none.
+    expect(night.meanRGB[1]).toBeGreaterThan(day.meanRGB[1]);
   });
 
   test('no long thin bright streaks across the scene', async ({ page }) => {

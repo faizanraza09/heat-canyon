@@ -44,7 +44,12 @@ const FACADE_OUTWARD_M = 0.7;
  * whole city on a flat mauve, and mauve is a colour the ramp itself uses. Scaling
  * the value alone keeps every wall's hue exactly where the measurement put it,
  * so the unselected city stays readable as data while clearly stepping back. */
-const DIM = 0.46;
+/* Dimming is now mostly a drain of colour and only a little a drop in
+ * brightness, because the ramp's hot end is dark and brightness is spoken for.
+ * DIM alone at 0.46 is what made a dimmed hot wall indistinguishable from the
+ * shell behind it. */
+const DIM = 0.72;
+const DIM_DESAT = 0.72;
 
 /* The other half of the same decision. Dimming five thousand buildings is how a
  * selection is shown, but it is not enough to show a SET — the analyst routinely
@@ -82,11 +87,13 @@ const CONTRAST = (() => {
     //
     // This used to be `min(1, base * 1.05)`, and `base` is already 1 at x = 1 —
     // so the gain did nothing at the top of the range except clip it. Everything
-    // above about 0.95 came out pure white, which threw away the cream the heat
-    // ramp actually ends on (247, 231, 190) and flattened the hottest walls in
-    // the city into one indistinguishable band. The exponent lifts the midtones
+    // above about 0.95 came out pure white, which flattened the brightest end of
+    // the ramp into one indistinguishable band. The exponent lifts the midtones
     // by very nearly the same amount — 0.523 against 0.525 at the midpoint —
-    // and leaves the top of the ramp where the design put it.
+    // and leaves the ends of the ramp where the design put them. That still
+    // matters with the ramp reversed: the bright end is now the *cool* end, and
+    // clipping it would erase the difference between a cool wall and a very
+    // cool one.
     t[i] = Math.pow(x * 0.40 + sm * 0.60, 0.94);
   }
   return t;
@@ -1002,7 +1009,17 @@ export class Scene {
       // still receives light reflected from the road and the facade opposite,
       // which is why a real deep canyon is dim rather than pitch black. Without
       // it the deepest canyons rendered as unreadable murk.
-      this.quadAO[q] = 0.34 + 0.66 * Math.pow(svf, 0.58);
+      /* A shallow floor, raised from 0.34 when the ramp turned round.
+       *
+       * Ambient occlusion says "this surface sees little sky" by darkening it,
+       * and on the old ramp that was unambiguous because darkness carried no
+       * data — the hot end was cream. It does now: the hottest walls are the
+       * darkest, so a deep floor multiplied a dark red down into the shell and
+       * the exact surfaces the model exists to find — hot walls in shaded
+       * canyons — were the ones it made invisible. A floor of 0.62 keeps enough
+       * of the form to read the geometry while leaving the darkness channel
+       * mostly to the measurement. */
+      this.quadAO[q] = 0.62 + 0.38 * Math.pow(svf, 0.58);
       const a = (facades.az[p] * Math.PI) / 180;
       this.quadNX[q] = Math.sin(a);
       this.quadNZ[q] = -Math.cos(a);
@@ -2136,6 +2153,16 @@ export class Scene {
       const dimmed = (sel !== null && this.quadBuilding[q] !== sel)
         || (sel === null && hi && !hi.has(this.quadBuilding[q]));
       if (dimmed) {
+        /* Pushed back by draining the colour, not by darkening it.
+         *
+         * A multiply toward black was right while the ramp's hot end was cream:
+         * dark meant "not the subject" and nothing else. With red as the hot end
+         * darkness is the measurement, so dimming by darkening made every
+         * unselected building read as hotter, and a dimmed hot one vanish into
+         * the shell entirely. Desaturating says "not the subject" using a
+         * channel the data is not speaking on. */
+        const y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+        r += (y - r) * DIM_DESAT; g += (y - g) * DIM_DESAT; bl += (y - bl) * DIM_DESAT;
         r *= DIM; g *= DIM; bl *= DIM;
       } else if (hi && hi.has(this.quadBuilding[q])) {
         // Lift the highlighted set rather than only dimming the rest: on a dark
@@ -2321,6 +2348,10 @@ export class Scene {
       let r = (c[0] / 255) * rs, g = (c[1] / 255) * rs, bl = (c[2] / 255) * rs;
       const dimmed = (sel !== null && i !== sel) || (sel === null && hi && !hi.has(i));
       if (dimmed) {
+        // Desaturate then dim, for the reason given in _recolour: darkness now
+        // carries the measurement and cannot also carry "not the subject".
+        const y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+        r += (y - r) * DIM_DESAT; g += (y - g) * DIM_DESAT; bl += (y - bl) * DIM_DESAT;
         r *= DIM; g *= DIM; bl *= DIM;
       } else if (hi && hi.has(i)) {
         r = Math.min(1, r * 1.18 + 0.05);

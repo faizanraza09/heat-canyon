@@ -1009,8 +1009,11 @@ export class Photoreal {
                // What the measurement contributes, kept apart from the
                // photograph until the very end so the two can be combined by
                // something other than a mix().
+               // Accumulated as colour-times-weight and weight, so the two can
+               // be separated again at the end: a mix needs a colour and an
+               // amount, where the old screen only needed a sum.
                vec3 glow = vec3( 0.0 );
-               float paint = 0.0;
+               float wSum = 0.0;
 
                if ( uHasGrid > 0.5 ) {
                  vec2 cellF = prCell( vWorldPR );
@@ -1089,7 +1092,7 @@ export class Photoreal {
                                                    tAgg );
                        float amt = wFar * overAgg;
                        glow += ag.rgb * amt;
-                       paint = max( paint, amt );
+                       wSum += amt;
                      }
                    }
 
@@ -1171,7 +1174,7 @@ export class Photoreal {
                                             depth );
                          float amt = wallAmt * over;
                          glow += heat.rgb * ( amt * shade );
-                         paint = max( paint, amt );
+                         wSum += amt;
                        }
                      }
                    }
@@ -1191,20 +1194,37 @@ export class Photoreal {
                 * is deliberately left alone, so the same rule turned the whole
                 * city grey and took the photograph's one job — recognition —
                 * away from it. */
+               float paint = clamp( wSum, 0.0, 1.0 );
                float desatW = uDesat * mix( 0.35, 1.0, clamp( paint * 1.5, 0.0, 1.0 ) );
                c = mix( c, vec3( l ), desatW );
 
-               /* Screen, not mix, and not a plain add.
+               /* Mixed, where this was a screen — forced by the ramp turning
+                * round, and worth being straight about.
                 *
-                * Photogrammetry is unlit baked albedo. A mix() replaces the
-                * picture with the measurement and a multiply fights the light
-                * already baked into it; adding sits on top and survives shade,
-                * which is the whole point. Screen is the add that cannot clip:
-                * it behaves like addition in the dark, where nearly all of this
-                * mesh lives, and rolls off at the top instead of burning a
-                * sunlit spandrel to flat white. */
-               glow = clamp( glow, 0.0, 1.0 );
-               c = 1.0 - ( 1.0 - c ) * ( 1.0 - glow );
+                * Screen was the right operator while the ramp ran dark to pale:
+                * photogrammetry is unlit baked albedo, so adding light sits on
+                * top of it and survives the mesh's own shadow, and screen is the
+                * add that cannot clip. None of that survives a ramp whose hot
+                * end is rgb(163,26,34). Screening a dark red over a photograph
+                * changes almost nothing — the hotter the surface, the less the
+                * layer would show it, which is worse than the bug this replaced.
+                *
+                * What the original fix was actually for does survive. The defect
+                * was never that the ramp was blended in; it was that the ramp's
+                * colour was *multiplied by the photograph's baked luminance*,
+                * which threw away the lightness the ramp carries the measurement
+                * in and pinned half the frame at the bottom of a clamp. Here the
+                * colour arrives intact and luminance appears only as a shade term, a
+                * modulation of at most a few tens of per cent, applied to the
+                * mixed colour rather than gating it.
+                *
+                * The threshold is what keeps figure and ground apart now, and it
+                * does that job independently of the operator: below it the
+                * photograph is untouched, above it the measurement takes the
+                * surface. */
+               if ( paint > 0.001 ) {
+                 c = mix( c, glow / max( wSum, 1e-4 ), paint );
+               }
 
                // ---- the measured field, washed onto roads and plazas
                if ( uWash > 0.0 ) {

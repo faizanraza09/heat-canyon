@@ -68,7 +68,10 @@ async function patchProbe(page) {
       linked: prog ? !!gl.getProgramParameter(prog, gl.LINK_STATUS) : null,
       uniforms,
       // The three fixes, each identifiable in the compiled source.
-      hasScreen: /1\.0 - \( 1\.0 - c \) \* \( 1\.0 - glow \)/.test(frag),
+      // The measurement is blended in as a colour, never multiplied by the
+      // photograph's own baked luminance — which is the defect the additive
+      // rewrite existed to remove and which survives the operator change.
+      hasBlend: /mix\( c, glow \/ max\( wSum/.test(frag),
       hasLadder: /wFar|wMid|wNear/.test(frag),
       hasFootprintAzimuth: /prSolid\( cellF/.test(frag),
       // And the thing that must be gone.
@@ -94,7 +97,7 @@ test('the tile shader compiles, and carries all three encodings',
     expect(errors, 'no shader compiler output on the console').toEqual([]);
 
     // Additive rather than multiplicative compositing.
-    expect(out.hasScreen, 'the glow is screened over the photograph').toBe(true);
+    expect(out.hasBlend, 'the measurement is blended over the photograph').toBe(true);
     expect(out.hasOldMultiply, 'the ramp is no longer multiplied by baked luminance')
       .toBe(false);
     // The ladder, and the footprint-derived wall orientation.
