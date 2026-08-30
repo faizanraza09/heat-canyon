@@ -11,28 +11,36 @@
 # The rule to remember: .gitignore answers "what is not source?" and this file
 # answers "what does the server not need?" Those are different questions, and
 # web/data is the case where they give opposite answers.
+#
+# AND EVERY PATTERN HERE IS ANCHORED WITH A LEADING SLASH, which is not
+# decoration. This file is gitignore syntax, where a pattern containing no
+# internal slash matches a directory of that name AT ANY DEPTH — so a bare
+# `data/` silently takes `web/data/` with it, and that is precisely the 189 MB
+# the server cannot start without. The .dockerignore beside this one looks
+# identical and does NOT behave this way: Docker anchors its patterns to the
+# context root. Two files, the same lines, different meanings.
 
-.git/
-.gitignore
+/.git/
+/.gitignore
 
 # The pipeline's raw inputs — LiDAR tiles, NYC footprints, cached FortyGuard
 # responses and the credit ledger. Only `cli build` reads them, and that never
 # runs in the image.
-data/
+/data/
 
-.env
-node_modules/
+/.env
+/node_modules/
 
-tests/
-test-results/
-playwright-report/
-notebooks/
+/tests/
+/test-results/
+/playwright-report/
+/notebooks/
 *.ipynb
 
 __pycache__/
 *.pyc
-.pytest_cache/
-.ruff_cache/
+/.pytest_cache/
+/.ruff_cache/
 
 # Agent run transcripts are per-machine scratch, except the one the film replays.
 .agent/runs/*
@@ -40,4 +48,4 @@ __pycache__/
 
 Design Overhaul Request.zip
 *:Zone.Identifier
-.deploy/
+/.deploy/

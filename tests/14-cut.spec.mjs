@@ -35,6 +35,14 @@ import { openApp, settle } from './helpers.mjs';
  * a screenshot both come back empty or composited, and the difference between
  * "the city is gone" and "the capture was empty" is the entire point of the
  * measurement.
+ *
+ * The default camera is used throughout and nothing is hidden. An earlier
+ * version of this spec framed its own overview and switched off the ground, the
+ * backdrop and the sky, on the reasoning that the cut acts on the prisms alone
+ * and everything else is noise. It measured 100% ink in every condition and
+ * reported the shader as dead when the shader was in fact working perfectly.
+ * Measuring what the application actually draws, and subtracting an empty
+ * frame taken the same way, is both simpler and honest about what it counts.
  */
 async function inkFraction(page) {
   return page.evaluate(() => {
@@ -44,9 +52,8 @@ async function inkFraction(page) {
     const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
     const px = new Uint8Array(w * h * 4);
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    // The shell is #0A0908 and the sky dome sits just off it, so the threshold
-    // has to clear both: anything within a few levels of the clear colour is
-    // background, anything past it is city.
+    // The shell is #0A0908, so anything within a few levels of it is
+    // background and anything past it is something the scene drew.
     let ink = 0;
     for (let i = 0; i < px.length; i += 4) {
       if (px[i] > 24 || px[i + 1] > 22 || px[i + 2] > 20) ink++;
@@ -55,28 +62,16 @@ async function inkFraction(page) {
   });
 }
 
-/** Frame the whole study area, and leave nothing in it but the prisms.
- *
- * The cut acts on our facade and roof meshes and on nothing else — the ground,
- * the backdrop and the sky are deliberately never clipped, because with the
- * photoreal layer on the terrain is the one surface both representations stand
- * on and cutting it would put a step at every boundary. That is correct and it
- * makes them noise here: they cover most of the frame, so a measurement taken
- * over the whole picture reports the ground plane rather than the geometry
- * under test. A 220 m lens removed a third of the *city* and only a quarter of
- * the *frame*, which is a true statement about the wrong thing.
- *
- * Stripping them leaves ink that is the prisms and only the prisms.
- */
-async function overview(page) {
-  await page.evaluate(() => {
-    const s = window.HC.scene;
-    s.camera.position.set(0, 1600, 1900);
-    s.camera.lookAt(0, 0, 0);
-    s.camera.updateMatrixWorld();
-    for (const m of [s.ground, s.backdrop, s.streets, s.sky]) if (m) m.visible = false;
-  });
-  await settle(page);
+const setCut = (page, patch) =>
+  page.evaluate((p) => window.HC.scene.setCut(p), patch).then(() => settle(page));
+
+/** Ink with every prism cut away: the ground, the backdrop and the sky, which
+ *  the cut deliberately never touches. Subtracting it leaves the city alone. */
+async function emptyFloor(page) {
+  await setCut(page, { enabled: true, mode: 1, follow: false, radius: -1e9 });
+  const floor = await inkFraction(page);
+  await setCut(page, { enabled: false });
+  return floor;
 }
 
 test('the shader patch compiles: the app opens clean with the cut in every material',
@@ -93,83 +88,80 @@ test('does nothing until asked: no cut is live with the photoreal layer off',
   async ({ page }) => {
     await openApp(page);
     expect(await page.evaluate(() => window.HC.scene.cut.active)).toBe(false);
-
-    await overview(page);
     const before = await inkFraction(page);
 
     // Choosing a mode is not the same as enabling one. With no photograph
     // underneath there is nothing for the cut to separate our geometry *from*,
     // so the mode is remembered and the frame is untouched.
-    await page.evaluate(() => window.HC.scene.setCut({ mode: 1, radius: 300 }));
-    await settle(page);
+    await setCut(page, { mode: 1, radius: 300 });
     expect(await page.evaluate(() => window.HC.scene.cut.active)).toBe(false);
-    expect(await inkFraction(page)).toBeCloseTo(before, 2);
+    expect(await inkFraction(page)).toBeCloseTo(before, 3);
   });
 
 test('the lens clips our geometry to a disc, and releasing it restores the city',
   async ({ page }) => {
     const { errors } = await openApp(page);
-    await overview(page);
     const full = await inkFraction(page);
-    expect(full).toBeGreaterThan(0.05);
+    const floor = await emptyFloor(page);
+    const city = full - floor;
+    expect(city).toBeGreaterThan(0.1);
 
     /* `enabled` is what the photoreal layer would set. Setting it directly is
      * the whole reason this spec costs nothing: the clip lives in our own
      * materials, so it can be proven without a tile ever being requested. */
-    await page.evaluate(() => window.HC.scene.setCut({
+    await setCut(page, {
       enabled: true, mode: 1, follow: false, radius: 220, center: { x: 0, y: 0, z: 0 },
-    }));
-    await settle(page);
-    const lensed = await inkFraction(page);
+    });
+    const lensed = await inkFraction(page) - floor;
 
-    // A 220 m disc against a study area kilometres across: most of the city has
-    // to be gone, and something has to be left.
-    expect(lensed).toBeLessThan(full * 0.5);
+    // A 220 m disc against a study area two and a half kilometres across: all
+    // but a few per cent of the city has to be gone, and something has to be
+    // left standing inside the disc.
+    expect(lensed).toBeLessThan(city * 0.2);
     expect(lensed).toBeGreaterThan(0);
 
     // Widening it puts the city back, monotonically.
-    await page.evaluate(() => window.HC.scene.setCut({ radius: 900 }));
-    await settle(page);
-    expect(await inkFraction(page)).toBeGreaterThan(lensed);
+    await setCut(page, { radius: 900 });
+    const wider = await inkFraction(page) - floor;
+    expect(wider).toBeGreaterThan(lensed);
+    expect(wider).toBeLessThan(city);
 
-    await page.evaluate(() => window.HC.scene.setCut({ enabled: false }));
-    await settle(page);
-    expect(await inkFraction(page)).toBeCloseTo(full, 2);
+    await setCut(page, { enabled: false });
+    expect(await inkFraction(page)).toBeCloseTo(full, 3);
     expect(errors).toEqual([]);
   });
 
 test('the section keeps one side of the plane and drops the other',
   async ({ page }) => {
     await openApp(page);
-    await overview(page);
     const full = await inkFraction(page);
+    const floor = await emptyFloor(page);
+    const city = full - floor;
 
-    await page.evaluate(() => window.HC.scene.setCut({
-      enabled: true, mode: 2, bearing: 0, center: { x: 0, y: 0, z: 0 },
-    }));
-    await settle(page);
-    const half = await inkFraction(page);
-    expect(half).toBeLessThan(full);
+    await setCut(page, { enabled: true, mode: 2, bearing: 0, center: { x: 0, y: 0, z: 0 } });
+    const half = await inkFraction(page) - floor;
     expect(half).toBeGreaterThan(0);
+    expect(half).toBeLessThan(city);
 
-    // Flipping the plane end for end keeps the complementary half. The two do
-    // not have to be equal — the camera is oblique and the city is not
-    // symmetric — but together they have to account for the whole frame, which
-    // is what proves the boundary is a plane and not a fade.
-    await page.evaluate(() => window.HC.scene.setCut({ bearing: 180 }));
-    await settle(page);
-    const other = await inkFraction(page);
+    /* Flipping the plane end for end keeps the complementary half. The two do
+     * not have to be equal — the camera is oblique and Midtown is not
+     * symmetric about the origin — but together they have to account for the
+     * whole city, which is what proves the boundary is a plane through the
+     * scene rather than a fade or a global dimming. */
+    await setCut(page, { bearing: 180 });
+    const other = await inkFraction(page) - floor;
     expect(other).toBeGreaterThan(0);
-    expect(half + other).toBeGreaterThan(full * 0.85);
+    expect(half + other).toBeGreaterThan(city * 0.9);
   });
 
 test('the alignment check suspends the cut rather than being clipped by it',
   async ({ page }) => {
     await openApp(page);
 
-    // Both are conditions the scene applies to the same geometry, and the
-    // alignment check exists to draw both representations on top of each other.
-    // A cut left live underneath it would clip half the comparison away.
+    // Both conditions act on the same geometry, and the alignment check exists
+    // to draw our prisms and Google's mesh on top of each other so their
+    // disagreement can be read directly. A cut left live underneath it would
+    // clip half the comparison away.
     await page.evaluate(() => {
       const s = window.HC.scene;
       s.photorealOn = true;                       // pretend the layer is on

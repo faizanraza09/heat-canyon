@@ -831,48 +831,52 @@ export class Photoreal {
              uniform float uGroundY;
              uniform float uHasGrid;
              ${CUT_GLSL}`)
+          /* ---- the cut: inside it, this building is not ours to draw
+           *
+           * See cut.js for why the two representations are separated rather
+           * than blended. Placed at `clipping_planes_fragment`, the first thing
+           * in the fragment main, for the same reason the prism side is: a
+           * fragment that is about to be thrown away should not first pay for
+           * the material's whole texture and lighting chain. It also puts the
+           * two halves of the cut in structurally the same place, which is the
+           * only way the claim that they are mirror images stays true.
+           *
+           * The test is a *column* test — is there a modelled building in this
+           * vertical column, and is this fragment above its pavement. It
+           * deliberately does not use the derivative normal the tint relies on:
+           * that normal is noise at coarse LOD, which costs the tint some
+           * speckle and would cost a discard a ragged silhouette.
+           *
+           * Terrain, roadway, vehicles and street trees are never cut. They are
+           * the one ground both representations stand on, and swapping them too
+           * would put a step at every boundary, because our own ground plane is
+           * flat at the datum while this layer stands on real terrain across a
+           * 26 m range. */
+          .replace('#include <clipping_planes_fragment>',
+            `#include <clipping_planes_fragment>
+             float cutSd = cutSigned( vWorldPR );
+             if ( uCutMode != 0 && cutSd > 0.0 && uHasGrid > 0.5 ) {
+               vec2 cCell = floor( vec2(
+                 ( vWorldPR.x - uGridRect.x ) / uGridRect.z,
+                 ( ( -vWorldPR.z ) - uGridRect.y ) / uGridRect.z ) );
+               if ( all( greaterThanEqual( cCell, vec2( 0.0 ) ) ) &&
+                    all( lessThan( cCell, uGridSize ) ) ) {
+                 vec4 cg = texture2D( uGrid, ( cCell + 0.5 ) / uGridSize );
+                 float cb = cg.r * 255.0 + cg.g * 255.0 * 256.0;
+                 if ( cb < 65535.0 ) {
+                   // Params .r is the building's ground elevation relative to
+                   // the scene datum. A 1.5 m sill above it clears the kerb, the
+                   // parked cars and the podium grille without ever clipping a
+                   // wall we mean to replace.
+                   vec4 cp = texture2D( uParams,
+                     vec2( 0.5, ( cb + 0.5 ) / uLutSize.y ) );
+                   if ( vWorldPR.y > cp.r + 1.5 ) discard;
+                 }
+               }
+             }`)
           .replace('#include <dithering_fragment>',
             `#include <dithering_fragment>
              {
-               /* ---- the cut: inside it, this building is not ours to draw
-                *
-                * See cut.js for why the two representations are separated
-                * rather than blended. The test is a *column* test — is there a
-                * modelled building in this vertical column, and is this
-                * fragment above its pavement — and it deliberately does not use
-                * the derivative normal the tint below relies on. That normal is
-                * noise at coarse LOD, which costs the tint some speckle and
-                * would cost a discard a ragged silhouette.
-                *
-                * Terrain, roadway, vehicles and street trees are never cut:
-                * they are the one ground both representations stand on, and
-                * swapping them too would put a step at every boundary, because
-                * our own ground plane is flat at the datum while this layer
-                * stands on real terrain across a 26 m range.
-                *
-                * First thing in the block, so a fragment about to be thrown
-                * away does not pay for the field lookup below. */
-               float cutSd = cutSigned( vWorldPR );
-               if ( uCutMode != 0 && cutSd > 0.0 && uHasGrid > 0.5 ) {
-                 vec2 cCell = floor( vec2(
-                   ( vWorldPR.x - uGridRect.x ) / uGridRect.z,
-                   ( ( -vWorldPR.z ) - uGridRect.y ) / uGridRect.z ) );
-                 if ( all( greaterThanEqual( cCell, vec2( 0.0 ) ) ) &&
-                      all( lessThan( cCell, uGridSize ) ) ) {
-                   vec4 cg = texture2D( uGrid, ( cCell + 0.5 ) / uGridSize );
-                   float cb = cg.r * 255.0 + cg.g * 255.0 * 256.0;
-                   if ( cb < 65535.0 ) {
-                     // Params .r is the building's ground elevation relative to
-                     // the scene datum. A 1.5 m sill above it clears the kerb,
-                     // the parked cars and the podium grille without ever
-                     // clipping a wall we mean to replace.
-                     vec4 cp = texture2D( uParams,
-                       vec2( 0.5, ( cb + 0.5 ) / uLutSize.y ) );
-                     if ( vWorldPR.y > cp.r + 1.5 ) discard;
-                   }
-                 }
-               }
-
                vec3 c = gl_FragColor.rgb;
                float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
 

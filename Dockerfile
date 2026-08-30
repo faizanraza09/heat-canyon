@@ -46,6 +46,19 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Then the application. web/ is ~190 MB of solved fields and is the bulk of it.
 COPY --chown=user:user . .
 
+# Fail the BUILD if the model did not make it into the context, rather than
+# letting the container start and 503 on everything that needs data. This is not
+# hypothetical: .gcloudignore is gitignore syntax, where a bare `data/` matches
+# at any depth and quietly takes `web/data/` with it, and the first deploy did
+# exactly that — 189 MB missing, image built clean, container dead on the
+# startup probe with the real cause four levels down a stack trace.
+RUN test -f web/data/meta.json \
+    || (echo "FATAL: web/data/meta.json missing — the solved fields were not in the build context. Check .gcloudignore/.dockerignore." >&2; exit 1) \
+    && n=$(find web/data -name '*.bin' | wc -l) \
+    && test "$n" -ge 20 \
+    || (echo "FATAL: only $n .bin files under web/data; expected 20+. The build context is incomplete." >&2; exit 1) \
+    && echo "model present: $n solved-field binaries, $(du -sh web/data | cut -f1)"
+
 # The agent's workspace and the run transcripts the film replays.
 RUN mkdir -p /app/.agent/runs && chown -R user:user /app
 
