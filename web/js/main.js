@@ -117,19 +117,26 @@ async function start() {
   // from the ANNUAL extremes — the minimum of the annual minima and the maximum of
   // the annual maxima across every facade band — and it never moves again.
   //
-  // The percentiles are wide on purpose. A 1-99 window over one day came out at
-  // 28-45 degC while peak-hour surfaces sit at 40-45, which crushed the hour of
-  // interest into the top third of the ramp and clipped the hottest 3% to flat
-  // white: the sunlit walls that are the whole point. Over the year the same logic
-  // applies at both ends, since a January north wall at -10 degC is as real a
-  // datum as a July west wall at 55.
+  /* The percentiles are wide on purpose: a 1-99 window over one day came out at
+   * 28-45 degC while peak-hour surfaces sit at 40-45, which crushed the hour of
+   * interest into the top of the ramp and clipped the hottest 3% to flat white —
+   * the sunlit walls that are the whole point. 0.2-99.8 over the period keeps
+   * them.
+   *
+   * This used to widen the surface domain further, to the annual t_min and t_max
+   * planes, so that loading any of the thirteen periods could never clip. The
+   * guarantee was worth having; the price was not. Measured over the resulting
+   * -21.2 to 61.4 degC span, every wall in Midtown at the peak hour of the heat
+   * wave fell between 0.72 and 0.90 of the ramp — seventeen per cent of the
+   * scale, all of it in the amber-to-cream end — and the city rendered as one
+   * flat cream with nothing distinguishable from anything else. Half the ramp
+   * was reserved for a January north wall this layer never draws.
+   *
+   * The clipping guarantee now comes from Scene.setPeriod recomputing the domain
+   * against whichever period is loaded, which is both safe and far better spent.
+   * The annual planes keep their own per-plane domains and are unaffected. */
   scene.setDomains({
-    surface: [
-      Math.min(domain(data.annual.t_min, 0.2, 99.8)[0],
-               domain(data.active.surface, 0.2, 99.8)[0]),
-      Math.max(domain(data.annual.t_max, 0.2, 99.8)[1],
-               domain(data.active.surface, 0.2, 99.8)[1]),
-    ],
+    surface: domain(data.active.surface, 0.2, 99.8),
     air: domain(data.hourly.t_air_c, 0.5, 99.5),
   });
 

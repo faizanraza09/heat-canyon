@@ -1892,12 +1892,12 @@ export class Scene {
   }
 
   _defaultDomains() {
-    // Wide percentiles for the same reason main.js gives: a tight window puts
-    // the whole afternoon in the top of the ramp and clips the hottest walls.
-    // The event day's own field, which is what is loaded at construction time.
-    // main.js widens this to the whole year once the annual planes are in hand —
-    // see its comment on why the ramp must not rescale as the clock moves.
-    this.surfaceDomain = Scene._domain(this.data.active.surface, 0.5, 99.8);
+    // Wide percentiles, but over the loaded period rather than the year: a tight
+    // window clips the hottest walls, and a year-wide one spends most of the
+    // ramp on temperatures this layer never draws. See setPeriod for the
+    // measurement behind that, and for why rescaling per period does not break
+    // the comparison the instrument actually rests on.
+    this.surfaceDomain = Scene._domain(this.data.active.surface, 0.2, 99.8);
     this.airDomain = this.data.active.air
       ? Scene._domain(this.data.active.air, 0.5, 99.5)
       : [this.surfaceDomain[0], this.surfaceDomain[0] + 12];
@@ -1947,8 +1947,39 @@ export class Scene {
   }
 
   /** The active period or aggregate changed under us. Repaint everything that
-   *  reads it, which is the facades, the roofs and the ground. */
+   *  reads it, which is the facades, the roofs and the ground.
+   *
+   * The facade domain is recomputed here, and that is a deliberate change of
+   * meaning worth spelling out.
+   *
+   * main.js used to fix it once, at startup, to the widest range any period
+   * could produce — the annual t_min and t_max planes — so that loading a
+   * January week could never clip. That is a real requirement and it is why the
+   * widening existed. What it cost was measured: over −21.2 to 61.4 °C, the
+   * whole city at the peak hour of a July heat wave lands between 0.72 and 0.90
+   * of the ramp. Seventeen per cent of the scale for every wall on screen, in
+   * the amber-to-cream end of it — which is why Midtown came out a single flat
+   * cream and nothing could be told from anything else. Half the ramp was held
+   * in reserve for a January north wall that this layer never draws.
+   *
+   * Recomputing per period keeps the clipping guarantee, because the domain is
+   * always the period's own 0.2–99.8 percentiles, and it spends the ramp on the
+   * data actually in front of the viewer: the same peak hour now spans 0.39 to
+   * 0.89.
+   *
+   * The invariant main.js was protecting is kept. Its comment asks that the
+   * ramp not rescale "as the clock moves", and it does not: the domain is
+   * constant across all eight hours of a period, so 03:00 and 15:00 stay
+   * directly comparable, which is the comparison the instrument is built on.
+   * Loading a different week does rescale it — but that is a deliberate act,
+   * not a scrub of the clock, and the legend's own figures move with it, so the
+   * change is visible rather than silent.
+   */
   setPeriod() {
+    this.surfaceDomain = Scene._domain(this.data.active.surface, 0.2, 99.8);
+    if (this.data.active.air) {
+      this.airDomain = Scene._domain(this.data.active.air, 0.5, 99.5);
+    }
     this._updateSky();
     this._recolour();
     this._paintGround();
