@@ -1175,8 +1175,16 @@ def v_ranges_never_collapse() -> None:
     doc = json.loads(f.read_text())
     items = doc.get("items", {})
     paired = ("peak_kw", "annual_mwh")
-    floor_paired = ("peak_w", "annual_kwh", "t_indoor_free_c")
-    bad, checked = [], 0
+    # The floor record is written with COMPACT keys — `f`, `t_in` — not the long
+    # names. This check spent its life looking for `floor` and
+    # `t_indoor_free_c`, found None every time, and reported 589 figures as
+    # collapsed when every one of them was a proper two-ended range. That is the
+    # benign direction of the fault; the dangerous one is the mirror image,
+    # where a rename makes a field vanish from the check and a real collapse
+    # ships unnoticed. Hence the schema guard below: a name this file no longer
+    # recognises has to fail loudly rather than quietly measure nothing.
+    floor_paired = ("peak_w", "annual_kwh", "t_in")
+    bad, checked, absent = [], 0, []
     for bin_, rec in items.items():
         for k in paired:
             v = rec.get(k)
@@ -1188,15 +1196,29 @@ def v_ranges_never_collapse() -> None:
                 v = fl.get(k)
                 checked += 1
                 if not (isinstance(v, list) and len(v) == 2):
-                    bad.append(f"{bin_}.floor{fl.get('floor')}.{k}")
+                    bad.append(f"{bin_}.floor{fl.get('f')}.{k}")
+
+    # Absent everywhere is drift, not a collapse, and it must not read as a pass.
+    all_floors = [fl for rec in items.values() for fl in rec.get("floors", [])]
+    for k in paired:
+        if items and not any(k in rec for rec in items.values()):
+            absent.append(k)
+    for k in floor_paired:
+        if all_floors and not any(k in fl for fl in all_floors):
+            absent.append(k)
+
     rows = [f"{checked:,} assumed figures checked across {len(items)} buildings",
             f"carried as a two-ended range: {checked - len(bad):,}"]
+    if absent:
+        rows.append("FIELD NAMES THIS CHECK NO LONGER FINDS: " + ", ".join(absent))
+        rows.append("The schedule was renamed and this check was measuring nothing.")
     if bad:
         rows.append("COLLAPSED TO A SINGLE VALUE: " + ", ".join(bad[:6]))
-    else:
+    if not bad and not absent:
         rows.append("None collapsed. The assembly table's spread reaches the")
         rows.append("interface intact, which is what lets a reader argue with it.")
-    check("Assumed figures ship as ranges, never midpoints", not bad, "\n".join(rows))
+    check("Assumed figures ship as ranges, never midpoints",
+          not bad and not absent, "\n".join(rows))
 
 
 def v_constants_are_sourced() -> None:

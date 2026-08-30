@@ -5,6 +5,9 @@
  * instead, so the city rotated about its centre and the direction of travel
  * depended on where you happened to be standing. These tests assert on the
  * actual sign of the motion, which is the only thing that settles it.
+ *
+ * Turning is a different gesture with a different pivot and lives in
+ * 15-orbit.spec.mjs. One owner per behaviour.
  */
 
 import { test, expect } from '@playwright/test';

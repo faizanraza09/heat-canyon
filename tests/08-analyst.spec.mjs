@@ -77,7 +77,7 @@ test('a map_control action moves the map', async ({ page }) => {
   await page.evaluate(async ([bs]) => {
     await window.HC.ui.applyMapAction({
       kind: 'map',
-      layer: 'sun_hours',
+      layer: 'annual_kh35',
       aggregate: 'year',
       highlight_bins: bs,
       note: 'the walls this is about',
@@ -92,7 +92,7 @@ test('a map_control action moves the map', async ({ page }) => {
     frozen: document.getElementById('time').classList.contains('frozen'),
     note: document.getElementById('agent-note')?.textContent || '',
   }));
-  expect(got.layer).toBe('sun_hours');
+  expect(got.layer).toBe('annual_kh35');
   expect(got.aggregate).toBe('year');
   expect(got.highlighted).toBe(5);
   expect(got.frozen).toBe(true);
@@ -184,9 +184,15 @@ test('a live turn streams, calls tools, and answers', async ({ page }) => {
     + 'Use area_summary and nothing else.');
   await page.click('#analyst-body button.primary');
 
-  // The transcript must show the work: a tool call, then prose.
-  await expect(page.locator('#analyst-body .toolcall').first())
+  // The transcript must show the work, and the answer must not be behind it: the
+  // working is one closed block carrying a count of what it ran, and opening it
+  // is where the calls are.
+  await expect(page.locator('#analyst-body .workblock').first())
     .toBeVisible({ timeout: 180_000 });
+  await expect(page.locator('#analyst-body .toolcall').first()).toBeHidden();
+  await page.locator('#analyst-body .workblock').first().evaluate((d) => { d.open = true; });
+  await expect(page.locator('#analyst-body .toolcall').first()).toBeVisible();
+  await page.locator('#analyst-body .workblock').first().evaluate((d) => { d.open = false; });
   await expect(page.locator('#analyst-body .bubble.agent').first())
     .toBeVisible({ timeout: 240_000 });
   await expect(page.locator('#analyst-body .runstatus.done').first())

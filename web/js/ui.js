@@ -23,7 +23,7 @@
  * being made rather than a disclaimer about it.
  */
 
-import { RAMPS, css, gradient, norm, SUN_CSS } from './colors.js';
+import { RAMPS, css, gradient, norm, SUN_CSS, TEMP_DOMAIN } from './colors.js';
 import { findApiKey, resolveApiKey, storeApiKey } from './photoreal.js';
 import { YearStrip } from './year.js';
 import { AgentConsole } from './agent.js';
@@ -51,6 +51,28 @@ const PAUSE_SVG =
   + '<rect x="0" y="0" width="2.6" height="10" fill="currentColor"></rect>'
   + '<rect x="5.4" y="0" width="2.6" height="10" fill="currentColor"></rect></svg>';
 const cap = (v) => (v ? v[0].toUpperCase() + v.slice(1) : v);
+
+/* How long the city takes to travel between two clock states.
+ *
+ * The scene can dissolve one painted state into another for nothing (see
+ * `fadeable` in scene.js), so the only question left here is how long, and the
+ * answer is different for a step taken by hand and a step taken by the
+ * transport.
+ *
+ * A step of a PLAYED day or year is one frame of a continuous sweep, so its
+ * dissolve is exactly as long as the step and runs linearly: back to back they
+ * make one unbroken movement, where an eased dissolve per step would settle and
+ * set off again eight times a day and read as a stutter the code does not have.
+ *
+ * A step taken by hand — an hour chip, an arrow key, an answer that jumps to
+ * the hour it is about — is a discrete move and gets a shorter, eased one. Half
+ * a second is long enough to see the shadow line travel and short enough that
+ * scrubbing the strip still feels like scrubbing.
+ */
+const DAY_STEP_MS = 1100;
+const YEAR_STEP_MS = 260;
+const HOUR_FADE_S = 0.55;
+const DATE_FADE_S = 0.5;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December'];
 
@@ -63,7 +85,40 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
 
    The captions are one sentence and they say what the number *means*, not how it
    was computed. "Hours above 35 °C" needs no explanation; "duration harms more
-   than peak" is the reason to look at it.                                     */
+   than peak" is the reason to look at it.
+
+   EIGHT, DOWN FROM THIRTEEN. Four of them were cut and it is worth saying which
+   and why, because each was defensible on its own and the list was not.
+
+     Longest unbroken run   The same duration field as "Hours above 35 °C", over
+                            the same wave, sampled from the same 60 m tile at the
+                            same address. A refinement of its neighbour rather
+                            than a second question.
+     Air temperature        Its own caption said it: "it barely varies with
+                            height, which is the point". A layer whose finding is
+                            that it is uniform is a flat map, it costs 4.7 MB a
+                            period, and data.js calls it the one field whose
+                            uncertainty exceeds its own signal. The comparison it
+                            existed to make — air against the wall beside it —
+                            is made far better in the building dossier's height
+                            profile, which draws both curves against each other
+                            with the uncertainty band on. That chart still loads
+                            the field; see `_loadAir`.
+     Sunlit hours a year    An input to "Annual solar dose", which is the same
+                            geometry multiplied by the irradiance that makes it
+                            matter. The dose is the actionable one, so it stays
+                            and the hours go. The plane itself is still shipped
+                            and still appears in the hover readout.
+     Month it peaks         A curiosity rather than a decision, and it painted a
+                            month INDEX on the temperature ramp — so December
+                            drew deep blue and July drew deep red on a scale
+                            whose labels read −20 to 60 °C. That was tolerable
+                            while the ramp was abstract; against a fixed absolute
+                            scale it is simply wrong.
+
+   The test of the list is that every row answers a question somebody would ask
+   out loud. Four rows that were answering a variation of the row above them is
+   what "layer fatigue" is.                                                    */
 
 export const LAYERS = [
   {
@@ -79,14 +134,6 @@ export const LAYERS = [
     caption: 'How long each address stays over the threshold across the heat wave. Duration harms more than peak.',
   },
   {
-    key: 'persistence', name: 'Longest unbroken run', unit: 'h', ramp: 'duration',
-    caption: 'The stretch with no relief at all. Recovery needs cool hours, not cool minutes.',
-  },
-  {
-    key: 'air', name: 'Air temperature', unit: '°C', ramp: 'temperature',
-    caption: 'Measured at 2 m and extended upward. It barely varies with height, which is the point.',
-  },
-  {
     key: 'priority', name: 'Where to act — heat wave', unit: 'score', ramp: 'priority',
     caption: 'Exposure weighted by how many people live behind each wall and how well they can cope.',
   },
@@ -99,11 +146,6 @@ export const LAYERS = [
     key: 'annual_priority', name: 'Where to act — the year', unit: 'score', ramp: 'priority',
     annual: true, plane: null,
     caption: 'Chronic annual load instead of one heat wave. It ranks a different set of buildings, and the difference is the finding.',
-  },
-  {
-    key: 'sun_hours', name: 'Sunlit hours a year', unit: 'h', ramp: 'duration',
-    annual: true, plane: 'sun_hours',
-    caption: 'Hours of direct beam on each facade band across the year. A south wall takes three times a north wall.',
   },
   {
     key: 'annual_kh35', name: 'Annual heat dose', unit: 'K·h', ramp: 'duration',
@@ -124,11 +166,6 @@ export const LAYERS = [
     key: 'winter_sun', name: 'Winter sun share', unit: '', ramp: 'diverging',
     annual: true, plane: 'winter_sun_share',
     caption: 'Winter sunlit hours as a fraction of summer. Near zero means shading in July costs nothing in January; high means it takes away the heating season\'s free gain.',
-  },
-  {
-    key: 'month_of_peak', name: 'Month it peaks', unit: '', ramp: 'temperature',
-    annual: true, plane: 'month_of_max',
-    caption: 'The month each facade band reaches its annual maximum. Not every wall peaks in July.',
   },
 ];
 
@@ -350,6 +387,15 @@ export class UI {
         // North. The single most useful key in a 3D view of a city whose whole
         // vocabulary is which way a wall faces.
         case 'n': case 'N': this.scene.faceNorth(); break;
+        /* Turning and tilting, on the keys they sit on in every other 3D view:
+         * Q and E either side of the hand, W and S above and below it. The
+         * building being turned around is whichever one is selected, so these
+         * are the keyboard route to the three walls you cannot see. */
+        case 'q': case 'Q': this.scene.turn(-1); break;
+        case 'e': case 'E': this.scene.turn(1); break;
+        case 'w': case 'W': this.scene.tilt(-1); break;
+        case 's': case 'S': this.scene.tilt(1); break;
+        case 'o': case 'O': this.scene.toggleSpin(); break;
         case 'a': case 'A': this.toggleAnalyst(); break;
         case 'ArrowRight':
           // Left and right walk the day.
@@ -483,6 +529,13 @@ export class UI {
     setTimeout(() => this.agent?.replay(runId, question), 260);
   }
 
+  /* The working is a closed drawer, which is right for someone who came for an
+   * answer and wrong for the one beat of the film whose whole line is "it shows
+   * you what it ran". The film opens it; nothing else does. */
+  openWorking() {
+    document.querySelector('#analyst-body .workblock')?.setAttribute('open', '');
+  }
+
   /** Switch tabs from outside the panel. The guided tour uses this to put the
    *  left rail on the tab whose card it is about to open. */
   showTab(name) {
@@ -523,6 +576,41 @@ export class UI {
     this._syncSurfaces('layer');
   }
 
+  /** Fetch the air field for the period on screen, then redraw the open dossier.
+   *
+   * The air profile is 4.7 MB per period and is deliberately not loaded up
+   * front — it is the field whose uncertainty exceeds its own signal, and most
+   * sessions never need it. It has one consumer now that the air LAYER is gone:
+   * the height profile in a building's dossier, which draws the air curve and
+   * its uncertainty band against that building's hottest and coolest wall. That
+   * chart is where the air-versus-facade comparison actually reads — two curves
+   * a few metres apart on the same axis, rather than a flat wash over the whole
+   * city — so opening a dossier is the demand that loads it.
+   *
+   * Before this the only thing that ever asked for it was `setTime`, and only
+   * when the date changed while the air layer was already showing. So the
+   * obvious gesture loaded nothing: every band read NaN and the chart quietly
+   * dropped its air curve, which looks like a chart that has no air data rather
+   * than one whose data has not arrived.
+   *
+   * Guarded on re-entry by `hasAir`, and on the selection having changed under
+   * the fetch, so a dossier closed mid-flight does not redraw five seconds later.
+   */
+  async _loadAir() {
+    const want = this.selected;
+    $('time').classList.add('loading');
+    try {
+      await this.d.ensureAir();
+    } catch (e) {
+      console.warn('could not load the air field', e);
+      return;
+    } finally {
+      $('time').classList.remove('loading');
+    }
+    if (this.selected === null || this.selected !== want) return;
+    this.showDetail(this.selected, true);
+  }
+
   /* The caption sits *above* the ramp, not below it. Read top to bottom you get
      the question, then the scale that answers it, then the numbers on that
      scale — which is the order you need them in. Underneath the ramp the
@@ -532,11 +620,8 @@ export class UI {
     const d = this.d;
     let lo, hi;
     if (L.key === 'exceedance') { const s = d.tiles.stats.exceedance; lo = s.min; hi = s.max; }
-    else if (L.key === 'persistence') { const s = d.tiles.stats.persistence; lo = s.min; hi = s.max; }
     else if (L.key === 'priority' || L.key === 'annual_priority') { lo = 0; hi = 85; }
-    else if (L.key === 'month_of_peak') { lo = 1; hi = 12; }
     else if (L.annual) { [lo, hi] = this.scene.annualDomain(L.plane); }
-    else if (L.key === 'air') { [lo, hi] = this.scene.airDomain; }
     else { [lo, hi] = this.scene.surfaceDomain; }
 
     if (L.key === 'sun') {
@@ -551,13 +636,49 @@ export class UI {
     }
     $('legend-cap').textContent = L.caption;
 
+    /* Where the field on screen actually sits on the scale.
+     *
+     * Only for the two layers whose scale is fixed rather than derived, because
+     * they are the only ones where the question arises. Everywhere else the
+     * domain IS the data's range and a bracket would span the whole ramp and say
+     * nothing.
+     *
+     * The span comes from the scene's last repaint rather than from a second
+     * sweep of the field: `_recolour` has already visited every quad and already
+     * normalised every value against this exact domain, so reading its result
+     * costs nothing and cannot disagree with what was drawn. Reading it here
+     * also means the bracket follows the hour, which is right — three in the
+     * morning and three in the afternoon are two very different slices of the
+     * same fixed scale, and watching the bracket move up the ramp as the clock
+     * runs is the clearest statement of that the panel can make. */
+    const span = $('legend-span');
+    const here = $('legend-here');
+    const pr = (L.key === 'surface') ? this.scene.paintedRange : null;
+    span.hidden = !pr;
+    here.hidden = !pr;
+    if (pr) {
+      const [a, b] = pr;
+      // A floor on the width so a period that spans two kelvin of an eighty
+      // kelvin scale is still a mark you can see rather than a hairline. At
+      // 03:00 on the heat-wave day the whole city sits inside 2.1 K, which is
+      // 2.6% of the ramp, and that is a true and interesting fact about three in
+      // the morning — it should read as "narrow", not as "missing".
+      const w = Math.max(0.012, b - a);
+      const left = Math.min(1 - w, a);
+      span.style.left = `${(left * 100).toFixed(2)}%`;
+      span.style.width = `${(w * 100).toFixed(2)}%`;
+      const u = L.unit ? ` ${L.unit}` : '';
+      here.textContent =
+        `ON SCREEN NOW · ${f1(lo + a * (hi - lo))} TO ${f1(lo + b * (hi - lo))}${u}`;
+    }
+
     // Where a layer is solved on a coarser grid than the thing it is painted
     // on, the panel says so under the scale. One shared ramp means a legend
     // reading "h" also applies to the walls, and the walls get that value by
     // sampling the tile at the address rather than by having one of their own —
     // which is honest, and worth one line of type.
     const note = $('legend-note');
-    const ground = L.key === 'exceedance' || L.key === 'persistence';
+    const ground = L.key === 'exceedance';
     note.hidden = !ground;
     if (ground) note.textContent = 'SOLVED PER 60 M TILE · SAMPLED AT EACH ADDRESS';
 
@@ -584,7 +705,12 @@ export class UI {
     // one slider was tried and made the interesting question — the same hour in
     // different months — impossible to ask.
     this.year = new YearStrip($('year-host'), this.d, (date, aggregate) => {
-      this.setDate(date, aggregate);
+      // A played year is a sweep and a dragged one is a scrub; both want the
+      // dissolve to be over by the time the next date lands, so it is the step
+      // that sets the length rather than a constant.
+      this.setDate(date, aggregate, this.playingYear
+        ? { fade: YEAR_STEP_MS / 1000, linear: true }
+        : { fade: DATE_FADE_S });
     });
 
     this._hourButtons();
@@ -615,8 +741,14 @@ export class UI {
    * responsive during the fetch and the scene repaints when it lands, which is
    * better than blocking the drag.
    */
-  async setDate(date, aggregate) {
-    const wantAir = this.layer === 'air';
+  async setDate(date, aggregate, { fade = DATE_FADE_S, linear = false } = {}) {
+    /* Carry the air field across a change of period, but never fetch it for a
+     * period that was not going to have it anyway. It is 4.7 MB and it belongs
+     * to the period, so a scrub from July to January has to re-fetch it or the
+     * dossier's height profile silently loses its air curve halfway through a
+     * comparison. Keyed on whether we already have it rather than on the layer,
+     * because there is no longer an air layer to key on. */
+    const wantAir = this.d.hasAir();
     this.dateBusy = true;
     $('time').classList.add('loading');
     try {
@@ -630,7 +762,7 @@ export class UI {
     $('time').classList.remove('loading');
     this.dateBusy = false;
     this._hourButtons();
-    this.scene.setPeriod();
+    this.scene.setPeriod({ fade, linear });
     this._timeMeta();
     this._legend();
     this._bottomLabel();
@@ -639,13 +771,18 @@ export class UI {
     this._syncSurfaces('time');
   }
 
-  setHour(i) {
+  /** Point the whole application at an hour slot.
+   *
+   *  `fade` and `linear` reach the scene untouched; every caller that does not
+   *  care gets the hand-taken dissolve, which is the right default because a
+   *  caller that does not care is a person having clicked something. */
+  setHour(i, { fade = HOUR_FADE_S, linear = false } = {}) {
     this.hour = i;
     const kids = $('hours').children;
     for (let k = 0; k < kids.length; k++) {
       kids[k].setAttribute('aria-pressed', String(k === i));
     }
-    this.scene.setHour(i);
+    this.scene.setHour(i, { fade, linear });
     this._timeMeta();
     this._legend();
     this._bottomLabel();
@@ -659,7 +796,8 @@ export class UI {
     $('play').title = 'Pause';
     clearInterval(this._timer);
     this._timer = setInterval(
-      () => this.setHour((this.hour + 1) % this.d.meta.hours.length), 1100);
+      () => this.setHour((this.hour + 1) % this.d.meta.hours.length,
+        { fade: DAY_STEP_MS / 1000, linear: true }), DAY_STEP_MS);
   }
   stop() {
     this.playing = false;
@@ -683,7 +821,7 @@ export class UI {
     this._yearTimer = setInterval(() => {
       if (this.dateBusy) return;
       this.year.select((this.year.index + 6) % this.d.days.length);
-    }, 260);
+    }, YEAR_STEP_MS);
   }
   stopYear() {
     this.playingYear = false;
@@ -759,7 +897,9 @@ export class UI {
      * rather than read. There is one camera now — the fly-over — so this is no
      * longer two texts swapped by mode. */
     hint.innerHTML = 'DRAG TO PAN&nbsp;&nbsp;·&nbsp;&nbsp;SCROLL TO ZOOM<br>'
-      + 'RIGHT-DRAG TO TURN&nbsp;&nbsp;·&nbsp;&nbsp;N FACES NORTH<br>'
+      + 'RIGHT-DRAG OR SHIFT-DRAG TURNS AND TILTS<br>'
+      + 'Q E TURN&nbsp;&nbsp;·&nbsp;&nbsp;W S TILT&nbsp;&nbsp;·&nbsp;&nbsp;'
+      + 'O ORBITS&nbsp;&nbsp;·&nbsp;&nbsp;N FACES NORTH<br>'
       + 'DOUBLE-CLICK TO CLOSE IN&nbsp;&nbsp;·&nbsp;&nbsp;CLICK TO INSPECT<br>'
       + 'SPACE PLAYS THE DAY&nbsp;&nbsp;·&nbsp;&nbsp;← → THE HOUR<br>'
       + '[ ] \\ THE PANELS&nbsp;&nbsp;·&nbsp;&nbsp;H CLEARS THE VIEW';
@@ -788,6 +928,23 @@ export class UI {
     $('nav-compass').onclick = () => this.scene.faceNorth();
     $('nav-in').onclick = () => this.scene.zoomBy(0.62);
     $('nav-out').onclick = () => this.scene.zoomBy(1 / 0.62);
+
+    /* The turn pad. Each press is a flown step rather than a jump, for the same
+     * reason every other camera control here is: a cut to the far side of a
+     * building loses which side you were on, and the whole point of turning
+     * around one building is knowing which wall you have arrived at. */
+    $('nav-turn-l').onclick = () => this.scene.turn(-1);
+    $('nav-turn-r').onclick = () => this.scene.turn(1);
+    $('nav-tilt-up').onclick = () => this.scene.tilt(-1);
+    $('nav-tilt-down').onclick = () => this.scene.tilt(1);
+
+    const orbitBtn = $('nav-spin');
+    orbitBtn.onclick = () => this.scene.toggleSpin();
+    // The button follows the scene rather than its own click, because the
+    // revolution stops for a drag, a wheel, a reset and a new selection — all
+    // of which happen without the button being touched.
+    this.scene.onSpinChange = (on) =>
+      orbitBtn.setAttribute('aria-pressed', String(on));
   }
 
   /* ------------------------------------------------------------ photoreal
@@ -842,6 +999,7 @@ export class UI {
     resolveApiKey().then((k) => {
       envKey = k || '';
       if (envKey) say('Key loaded from the server environment.');
+      openIfWanted();
     });
     const anyKey = () => findApiKey() || envKey;
 
@@ -852,6 +1010,45 @@ export class UI {
       look.hidden = !live;
       if (on && !ok) { keyBox.hidden = false; input?.focus(); }
       return live;
+    };
+
+    /* The layer opens ON wherever a key can be found, and remembers being
+     * turned off.
+     *
+     * The default used to be off, and the reasoning behind that is still on the
+     * record above: billing is per session, so the honest thing was to request
+     * nothing until asked. What changed is that the photograph is now the view
+     * the film hands over to, and a film that ends by revealing untextured
+     * blocks is a film that undersells the thing it just spent three minutes
+     * introducing.
+     *
+     * Two properties keep it honest. No key, no request — a build with nothing
+     * in `.env` and nothing in this browser behaves exactly as it did, which
+     * includes the CDN deploy, where there is no /api/config to answer. And the
+     * choice is remembered: switching it off is a decision that survives a
+     * reload, so nobody has to keep switching it off on a metered connection.
+     *
+     * `?photoreal=0` forces it off for one visit without touching the
+     * remembered preference, which is what a demo on someone else's quota
+     * wants. */
+    const PR_PREF = 'heatcanyon.photoreal_on';
+    const wantsOn = () => {
+      if (new URLSearchParams(location.search).get('photoreal') === '0') return false;
+      try { return localStorage.getItem(PR_PREF) !== '0'; } catch (e) { return true; }
+    };
+    const remember = (on) => {
+      try { localStorage.setItem(PR_PREF, on ? '1' : '0'); }
+      catch (e) { /* private browsing: it applies to this page and no further */ }
+    };
+
+    // Opened once, from whichever key arrives first. `_prAuto` guards the race:
+    // a key in this browser resolves synchronously and one from the server does
+    // not, and the layer must not be built twice.
+    const openIfWanted = async () => {
+      if (this._prAuto || !wantsOn() || !anyKey()) return;
+      if (toggle.getAttribute('aria-pressed') === 'true') return;
+      this._prAuto = true;
+      await setOn(true);
     };
 
     /* The tile profile, for a machine without a GPU.
@@ -890,6 +1087,7 @@ export class UI {
         input?.focus();
         return;
       }
+      remember(on);
       setOn(on);
     };
 
@@ -930,11 +1128,20 @@ export class UI {
       (v) => this.scene.photoreal?.setLook({ threshold: v / 100 }));
     slider('pr-wash', 'pr-wash-out', (v) => `${Math.round(v)}%`,
       (v) => this.scene.photoreal?.setLook({ fieldWash: v / 100 }));
+    /* The reach cap. Read out in kilometres, and the top stop reads NO LIMIT
+     * rather than 12.5 km because that is what it is: the cull stands down and
+     * the frustum is the only bound again, which is the right picture for a
+     * fly-over that wants the horizon in it. */
+    slider('pr-radius', 'pr-radius-out', (v) => (v > 12 ? 'NO LIMIT' : `${v.toFixed(1)} KM`),
+      (v) => this.scene.photoreal?.setContextRadius(v > 12 ? Infinity : v * 1000));
     $('pr-solids').onchange = (e) => this.scene.setShowSolids(e.target.checked);
     slider('pr-nudge', 'pr-nudge-out', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} m`,
       (v) => this.scene.photoreal?.setNudge(v));
 
     if (findApiKey()) say('Key found in this browser.');
+    // A key already in this browser needs no round trip; the server's own key
+    // arrives later and calls this again, and openIfWanted ignores the second.
+    openIfWanted();
   }
 
   /* ------------------------------------------------------------ what if
@@ -1180,6 +1387,74 @@ export class UI {
         ? ` (${bins.length - idx.length} not in this study area)` : '');
   }
 
+  /* ------------------------------------------------------- storeys, in the
+     model
+
+     The decision layer talks in STOREYS and the solve is in BANDS — ten of them
+     on this building, three or four storeys each — and the conversion needs the
+     floor count, which lives in the ranking rather than in the geometry. So it
+     is done once, here, and nothing downstream has to know that "floor
+     twenty-five" is band seven.
+
+     This is what lets the walkthrough point at a floor instead of naming one.
+     Five of chapter three's beats are about one storey or one range of them and
+     every one of them used to play over a tower lit evenly from pavement to
+     roof; the argument was in the caption and the picture was of a building. */
+
+  /** Bands, inclusive, for a run of storeys on one building. Null if the
+   *  building is not in the study area or has no stated floor count. */
+  _bandsOfFloors(bin, from, to) {
+    const i = this.d.binToIndex.get(String(bin));
+    if (i === undefined) return null;
+    const item = this.d.ranked.items.find((it) => String(it.bin) === String(bin));
+    const floors = item?.floors || 0;
+    const nBand = this.d.facades?.bands || 0;
+    if (!floors || !nBand) return null;
+    const band = (f) => Math.max(0, Math.min(nBand - 1,
+      Math.floor(((Math.max(1, Math.min(floors, f)) - 1) / floors) * nBand)));
+    const lo = band(Math.min(from, to ?? from));
+    const hi = band(Math.max(from, to ?? from));
+    return { i, lo, hi, floors };
+  }
+
+  /** Light one storey, or a run of them, and drain the rest of the building.
+   *  Called with no arguments — or with a building that is not here — it takes
+   *  the focus away, which is what every beat that stops talking about a floor
+   *  wants. */
+  focusFloors(bin = null, from = null, to = null) {
+    if (bin === null || from === null) {
+      this.scene.setBandFocus(null);
+      this.surfaces?.brief?.markFloors?.(null);
+      return;
+    }
+    const b = this._bandsOfFloors(bin, from, to);
+    if (!b) { this.scene.setBandFocus(null); return; }
+    this.scene.setBandFocus(b.i, b.lo, b.hi);
+    // The same storeys, marked on the schedule. The document and the model are
+    // two views of one claim and they should never be pointing at different
+    // parts of it.
+    this.surfaces?.brief?.markFloors?.(
+      Math.min(from, to ?? from), Math.max(from, to ?? from));
+  }
+
+  /** Metres above the pavement at the middle of a storey — what the camera
+   *  needs to stand level with the floor the narration just named. */
+  floorHeight(bin, f) {
+    const i = this.d.binToIndex.get(String(bin));
+    if (i === undefined) return null;
+    const item = this.d.ranked.items.find((it) => String(it.bin) === String(bin));
+    const floors = item?.floors || 0;
+    const h = this.d.buildings?.attrs?.[i]?.h || 0;
+    if (!floors || !h) return null;
+    return h * ((Math.max(1, Math.min(floors, f)) - 0.5) / floors);
+  }
+
+  /** The model's own index for a BIN, for the camera calls that want one. */
+  indexOf(bin) {
+    const i = this.d.binToIndex.get(String(bin));
+    return i === undefined ? null : i;
+  }
+
   _agentNote(text) {
     let n = $('agent-note');
     if (!n) {
@@ -1360,6 +1635,13 @@ export class UI {
     const changed = this.selected !== i;
     this.selected = i;
     this._markRow();
+
+    // The dossier's height profile wants the air field, and opening a dossier is
+    // the only thing that ever asks for it now. Fired and not awaited: the card
+    // is drawn from data already in memory and must not wait 4.7 MB to appear.
+    // `_loadAir` redraws it when the field lands, and does nothing if the
+    // selection moved on in the meantime.
+    if (!this.d.hasAir()) this._loadAir();
 
     const bi = this.d.binToIndex.get(String(b.bin));
     if (bi !== undefined) {
@@ -1589,6 +1871,12 @@ export class UI {
   briefSection(n) {
     this.scrollSurface('brief-doc', `.brf-sec:nth-of-type(${n})`);
   }
+  /** The programme the portfolio panel is currently showing. Anything that
+   *  narrates that panel reads this rather than the stored allocation, so the
+   *  words and the picture are the same programme. Null before the decision
+   *  layer has landed. */
+  programme() { return this.surfaces?.portfolio?.programme?.() || null; }
+
   openPortfolio() { this.surfaces?.portfolio?.open(); }
   closePortfolio() { this.surfaces?.portfolio?.close(); }
 
@@ -1609,8 +1897,15 @@ export class UI {
     const hi = Math.max(...vals) + 1;
     const bw = (W - ml - mr) / 12;
     const Y = (v) => H - mb - ((v - lo) / (hi - lo)) * (H - mt - mb);
+    // Height off this building's own range, colour off the absolute scale — the
+    // same split the year strip makes, for the same reason. Colouring the bars
+    // against `lo`/`hi` made every building's January bar the coldest colour on
+    // the ramp and every building's July bar the hottest, so twelve months of a
+    // cool courtyard wall and twelve months of a west-facing tower drew the
+    // identical picture. The bar heights already carry the shape; the colour is
+    // there to say which of those two walls you are looking at.
     const bars = vals.map((v, i) => {
-      const c = css(RAMPS.temperature(norm(v, lo, hi)));
+      const c = css(RAMPS.temperature(norm(v, TEMP_DOMAIN[0], TEMP_DOMAIN[1])));
       const y = Y(v);
       return `<rect x="${(ml + i * bw + 1).toFixed(1)}" y="${y.toFixed(1)}"
         width="${(bw - 2).toFixed(1)}" height="${(H - mb - y).toFixed(1)}"
@@ -1678,9 +1973,12 @@ export class UI {
 
     // Both curves come out of the same ramp the city is painted with, so the
     // chart is legible as the same measurement rather than a second scheme.
-    // Far enough apart on the ramp to be told apart, and both far enough from
-    // the panel's own background to be seen at all: ramp(0.34) put the coolest
-    // wall at a near-black plum that simply vanished against #131110.
+    // Fixed positions rather than the curves' own values, because these two are
+    // a hot wall and a cool wall of the same building and the pair has to stay
+    // told apart at every hour of every month. Far enough apart on the ramp to
+    // be distinguishable, and both far enough from the panel's own background to
+    // be seen at all — 0.52 is the pale hinge and 0.88 a strong orange, which
+    // both clear #131110 comfortably.
     const hotC = css(RAMPS.temperature(0.88));
     const coldC = css(RAMPS.temperature(0.52));
     const airC = '#C9C0B4';

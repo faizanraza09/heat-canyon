@@ -281,12 +281,38 @@ export class FloorSchedule {
       return;
     }
 
-    const b = (doc.items || doc)[bin];
+    /* Bundled, or fetched for this one building.
+     *
+     * The ranked set is in hand already; everything else is a shard the host
+     * goes and gets. That fetch is why this render can finish twice: once now
+     * saying it is reading, and once when the shard lands. `_renderedBin` is
+     * checked on the way back so a reader who has moved on to another building
+     * does not get the first one painted over the second. */
+    let b = (doc.items || doc)[bin];
+    if (!b) {
+      const get = this.ctx?.decision?.floorsFor;
+      if (typeof get === 'function') {
+        const cached = this._shard && this._shard.bin === bin ? this._shard.data : undefined;
+        if (cached !== undefined) {
+          b = cached;
+        } else {
+          host.appendChild(this._quiet('Reading this building\u2019s floor schedule.'));
+          get(bin).then((got) => {
+            if (!this.host || this._renderedBin !== bin) return;
+            this._shard = { bin, data: got ? got.loads : null };
+            this._shardRx = got ? got.prescriptions : null;
+            this._renderedBin = undefined;   // force the full path, not the hour one
+            this._render(bin);
+          });
+          return;
+        }
+      }
+    }
     if (!b || !Array.isArray(b.floors) || !b.floors.length) {
-      const n = doc.n || Object.keys(doc.items || {}).length;
       host.appendChild(this._quiet(
-        `No floor schedule for this address. The schedule was solved for the `
-        + `${n0(n)} highest-priority buildings only; this one is outside that set.`));
+        'No floor schedule for this address. It is one of the footprints the '
+        + 'model carries but does not score \u2014 no facade panels were solved '
+        + 'on it, so there is nothing to schedule.'));
       return;
     }
 
@@ -365,6 +391,15 @@ export class FloorSchedule {
       `${esc(String(b.floors.length))} STOREYS · `
       + `${this._asm(esc(asm.label || 'Envelope unknown'), asmWhy)} · `
       + `${this._asm(esc(occ.label || 'Occupancy unknown'), this._occText(occ))}`));
+
+    /* The way into the brief, directly under the address rather than at the
+       foot of the prescriptions. It sat there for as long as the pane was read
+       as one document ending in "and here is the whole thing written up", but
+       that put it about two screenfuls down: people worked the schedule, the
+       legend and the measures without ever learning the brief existed. Above
+       the numbers it is the first thing offered, and the cost is one control
+       between the address and the headline figure. */
+    box.appendChild(this._briefButton(bin));
 
     /* The one large figure on the surface, and it is a range. A serif midpoint
        here — 453 kW, set at 34px — would be the most over-trusted number in the
@@ -774,7 +809,11 @@ export class FloorSchedule {
 
   _prescriptions(bin) {
     const doc = this._doc('prescriptions');
-    const list = doc ? ((doc.items || doc)[bin] || null) : null;
+    // The shard carries its own measures; the bundled table only covers the
+    // ranked set, so a shard-backed building must not be read out of it.
+    const list = (this._shard && this._shard.bin === bin)
+      ? (this._shardRx || null)
+      : (doc ? ((doc.items || doc)[bin] || null) : null);
     const box = el('div', 'fs-pad fs-rx');
     box.appendChild(el('div', 'klabel', list?.length
       ? `WHAT TO DO (${list.length})` : 'WHAT TO DO'));
@@ -803,11 +842,16 @@ export class FloorSchedule {
       }
     }
 
-    const btn = el('button', 'fs-brief', 'OPEN THE BUILDING BRIEF');
+    return box;
+  }
+
+  /** The full-screen brief for this building. Built here rather than inline so
+   *  the headline stays a wall of markup and this stays one behaviour. */
+  _briefButton(bin) {
+    const btn = el('button', 'fs-brief top', 'OPEN THE BUILDING BRIEF');
     btn.type = 'button';
     btn.addEventListener('click', () => this.ctx?.openBrief?.(bin));
-    box.appendChild(btn);
-    return box;
+    return btn;
   }
 
   _markRange(lo, hi) {

@@ -291,6 +291,18 @@
 .brf-chart .brf-ax { stroke: var(--brf-rule); stroke-width: 1; }
 .brf-chart .brf-band { stroke: var(--brf-rule-soft); stroke-width: 1; }
 .brf-chart .brf-mark { fill: var(--brf-accent); }
+/* The walkthrough's cursor onto a storey. Behind the bars, so it tints nothing
+   that carries a measurement, and weak enough that a marked row and an unmarked
+   one are still the same chart. It slides between rows rather than jumping,
+   because the film walks down the schedule and the movement is what says the
+   two rows are part of one document. */
+.brf-chart .brf-cursor {
+  fill: var(--brf-accent); opacity: .14;
+  transition: y .45s var(--ease), height .45s var(--ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .brf-chart .brf-cursor { transition: none; }
+}
 .brf-chart rect { shape-rendering: crispEdges; }
 
 .brf-legend {
@@ -319,6 +331,28 @@
   margin: 0 0 14px; font-family: var(--mono); font-size: 10px;
   line-height: 1.9; letter-spacing: .12em; color: var(--brf-soft);
 }
+/* ---------------------------------------------- the reasoning, in its parts
+
+   Five answers to five questions, set as five rather than run together into one
+   paragraph. The label carries the question, so the paragraph under it only has
+   to answer it: "Where the heat is", "What carries it", "Sizing", "Why not
+   something simpler", "Why this device". A reader looking for the projection
+   stops at Sizing instead of reading twelve lines to find it.               */
+
+.brf-why { margin: 0 0 16px; }
+.brf-wpart { margin: 0 0 15px; break-inside: avoid; page-break-inside: avoid; }
+.brf-wpart:last-child { margin-bottom: 0; }
+.brf-wlab { margin: 0 0 4px; display: block; }
+.brf-wpart .brf-p { margin: 0; }
+
+/* An equation set in the body face reads as a sentence that happens to have
+   symbols in it. This one is a calculation and is set as one, tabular so the
+   metres line up with every other figure in the document. */
+.brf-wsum .brf-p {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--brf-ink); font-variant-numeric: tabular-nums;
+}
+
 .brf-presc > .brf-lab { display: block; margin: 22px 0 0; }
 .brf-caveats {
   display: grid; grid-template-columns: 1fr 1fr; gap: 22px 28px;
@@ -469,6 +503,7 @@
   .brf-ph { font-size: 13.5pt; }
   .brf-p { font-size: 10.5pt; line-height: 1.6; max-width: none; }
   .brf-big { font-size: 25pt; }
+  .brf-wsum .brf-p { font-size: 9.5pt; }
   .brf-lab, .brf-kick, .brf-sub, .brf-dateline, .brf-spec, .brf-legend, .brf-basis {
     color: var(--brf-label);
   }

@@ -137,11 +137,29 @@ export function makeContext(host) {
 
     /* Live, not a snapshot. See above. */
     get state() {
+      /* A selection comes in two shapes, and this used to understand only one.
+       *
+       * `showBuilding` selects a ranked building by its INDEX into
+       * `ranked.items`, and any of the other 5,179 footprints by handing over
+       * the building's own RECORD — because they have no index to hand over.
+       * Reading `ranked.items[sel]` with a record for a subscript yields
+       * undefined, so `selectedBin` came out null for 97% of the city: every
+       * pane keyed on it behaved as though nothing were selected at all while a
+       * building sat lit on screen with its card open beside them. The floor
+       * schedule offered "Pick a building" at a building already picked, and
+       * `openBrief` was handed null and opened nothing.
+       *
+       * Both shapes carry a bin; that is the thing every surface downstream
+       * actually wants, so resolve it from whichever arrived. `selectedIndex`
+       * stays strictly an index into the ranked list, and is null when the
+       * selection is not in it — a record's position is not one. */
       const sel = host.selected;
-      const item = sel !== null && sel !== undefined ? host.d.ranked.items[sel] : null;
+      const item = typeof sel === 'number' ? host.d.ranked.items[sel]
+        : (sel && typeof sel === 'object' ? sel : null);
       return {
-        selectedIndex: sel,
-        selectedBin: item ? String(item.bin) : null,
+        selectedIndex: typeof sel === 'number' ? sel : null,
+        selectedBin: item && item.bin !== undefined && item.bin !== null
+          ? String(item.bin) : null,
         hour: host.hour,
         day: host.d.time?.date || null,
         layer: host.layer,

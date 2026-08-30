@@ -63,6 +63,15 @@
  * bare midpoint anywhere in here is a bug.
  */
 
+/* The allocator lives in programme.js, not here.
+ *
+ * The film has to quote the programme this panel is drawing, and it has to do so
+ * from a script that bakes the voice cache without ever opening the panel. A
+ * solver that can only be reached through a constructed surface cannot serve
+ * both. So the walk, the default budget and the figures a caption needs are a
+ * pure function of portfolio.json, and this class is one of its callers. */
+import { allocate, defaultBudget, figuresOf, mid as rangeMid } from './programme.js';
+
 /* ------------------------------------------------------------------ helpers */
 
 const el = (tag, cls, html) => {
@@ -81,7 +90,7 @@ const svg = (tag, attrs) => {
   return n;
 };
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-const mid = (r) => (Array.isArray(r) ? (r[0] + r[1]) / 2 : Number(r) || 0);
+const mid = rangeMid;
 
 /* The four objectives, in the register the rest of the interface uses: a name
  * that is a name, and one sentence that says what the number MEANS rather than
@@ -333,13 +342,7 @@ export class Portfolio {
      the next. A quarter of everything on the table is defensible, explicable in
      one clause, and lands in the part of the curve where the marginal cost is
      still climbing gently — which is where the interesting conversation is. */
-  _defaultBudget() {
-    const t = this.data.total;
-    if (!t) return 0;
-    const q = t * 0.25;
-    const step = q >= 1e7 ? 1e6 : q >= 1e6 ? 1e5 : 1e4;
-    return Math.max(step, Math.round(q / step) * step);
-  }
+  _defaultBudget() { return defaultBudget(this.data); }
 
   /* ------------------------------------------------------------- allocation
 
@@ -353,47 +356,7 @@ export class Portfolio {
      The extra fraction of a percent of packing efficiency is not worth making
      the chart lie about its own contents. */
 
-  _alloc(objective, budget) {
-    const order = this.data.curves[objective] || [];
-    const C = this.data.candidates;
-    const idx = [];
-    let spend = 0; let lo = 0; let hi = 0;
-    let ph = 0; let kwhLo = 0; let kwhHi = 0; let cLo = 0; let cHi = 0;
-    const bins = new Set();
-    for (const i of order) {
-      const c = C[i];
-      if (!c) continue;
-      const m = mid(c.capex);
-      if (spend + m > budget) break;
-      spend += m;
-      lo += (c.capex?.[0] ?? m); hi += (c.capex?.[1] ?? m);
-      ph += c.person_hours_avoided || 0;
-      kwhLo += (c.kwh_saved?.[0] ?? 0); kwhHi += (c.kwh_saved?.[1] ?? 0);
-      cLo += (c.carbon_t?.[0] ?? 0); cHi += (c.carbon_t?.[1] ?? 0);
-      bins.add(String(c.bin));
-      idx.push(i);
-    }
-    // Homes are summed over DISTINCT buildings. A building appears in the
-    // candidate list once per applicable measure — 10 Park Avenue is in there
-    // three times — and summing `units` over candidates counted its residents
-    // three times over, which inflated the ledger's population by a factor of
-    // nearly three before it was caught.
-    const seen = new Set();
-    let units = 0;
-    for (const i of idx) {
-      const c = C[i];
-      const b = String(c.bin);
-      if (seen.has(b)) continue;
-      seen.add(b);
-      units += c.units || 0;
-    }
-    const marginal = idx.length ? C[idx[idx.length - 1]].usd_per_person_hour : null;
-    const next = order[idx.length] !== undefined ? C[order[idx.length]] : null;
-    return {
-      objective, idx, spend, capex: [lo, hi], ph, kwh: [kwhLo, kwhHi], carbon: [cLo, cHi],
-      units, buildings: bins.size, bins, marginal, next,
-    };
-  }
+  _alloc(objective, budget) { return allocate(this.data, objective, budget); }
 
   /* ------------------------------------------------------------------ DOM
 
@@ -535,6 +498,26 @@ export class Portfolio {
   }
 
   /* ------------------------------------------------------------- lifecycle */
+
+  /* The programme this panel is currently drawing, as figures a caption can use.
+   *
+   * WHY ANYTHING NARRATING THIS PANEL MUST READ IT FROM HERE
+   *
+   * The film used to quote `portfolio.json`'s stored allocation while this panel
+   * was on screen showing its own. They are not the same programme and they were
+   * never going to be: the stored one prices at the midpoint and accounts for
+   * measures interacting on the same building, this one walks the objective's
+   * own curve and stops rather than skips, so they disagree even when handed the
+   * identical budget. Two million dollars buys twenty buildings and thirty-three
+   * measures there, and twenty-one buildings and forty-four measures here.
+   *
+   * On top of which the panel opens at a quarter of everything on the table, so
+   * what a viewer actually saw was a caption reading "$2 million, 20 buildings,
+   * 33 measures" over a rail reading $57M, 91 and 292. Both figures were honest
+   * and the pair of them told two different stories at once, which is worse than
+   * either being wrong: the picture is the one the viewer believes, so the words
+   * have to come from the picture.                                             */
+  programme() { return figuresOf(this.data, this.objA, this.budget); }
 
   open() {
     if (this.isOpen) return;

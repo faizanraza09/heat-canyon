@@ -35,7 +35,7 @@
  * and that is the thing you see.
  */
 
-import { RAMPS, css, norm } from './colors.js';
+import { RAMPS, css, norm, TEMP_DOMAIN } from './colors.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
@@ -86,18 +86,25 @@ export class YearStrip {
     this.resize();
   }
 
-  /* The colour and height scale, from the year's own range rather than a guess.
-   * Fixed once: a scale that rescaled as you scrubbed would make January look
-   * like July. */
+  /* Two scales, and they are deliberately not the same one.
+   *
+   * The HEIGHT of a day's column comes from the year's own range, so the strip
+   * fills its box and the shape of the year is legible.
+   *
+   * The COLOUR comes from TEMP_DOMAIN, the absolute scale the city itself is
+   * painted against — not from the year's range, and not from anything that
+   * moves. This strip sits directly under the model, and a July column and the
+   * July city have to be the same colour or the strip is not a key to the thing
+   * above it. It used to clamp its low end at −10 °C and take its high end from
+   * whatever the hottest day happened to be, which was close but not the same
+   * scale, so the two drifted by a few per cent of the ramp for no reason
+   * anybody could have named. */
   _domain() {
     const tmax = this.days.map((d) => d.tmax);
     const tmin = this.days.map((d) => d.tmin);
     this.lo = Math.min(...tmin);
     this.hi = Math.max(...tmax);
-    // The ramp is anchored on the same absolute temperatures the city's legend
-    // uses, so a warm colour means the same thing in both places.
-    this.rampLo = Math.max(-10, this.lo);
-    this.rampHi = this.hi;
+    [this.rampLo, this.rampHi] = TEMP_DOMAIN;
   }
 
   _modes() {

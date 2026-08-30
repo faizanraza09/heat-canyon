@@ -290,6 +290,13 @@ class Prescription:
     geometry: dict
     area_m2: float
     why: str
+    #: The same reasoning in labelled parts, in the order it was written:
+    #: ``[("Where the heat is", "..."), ("Sizing", "..."), ...]``. ``why`` is
+    #: these joined, and stays because a model reading a schedule wants prose.
+    #: The brief sets each part under its own heading, which is what turned
+    #: section 4 from a page of unbroken paragraph into something a contractor
+    #: can find a number in.
+    why_parts: list[tuple[str, str]]
     winter_cost: str
     programme: list[str]
     does_not_fix: str
@@ -956,7 +963,30 @@ class _Pick:
     geometry: dict
     area_m2: float
     governing_metric: float      # larger wins the merged geometry
-    why_floor: str               # the attribution sentence for THIS floor
+    why: tuple[tuple[str, str], ...]   # the reasoning, in labelled parts
+
+    @property
+    def why_floor(self) -> str:
+        """The same reasoning as one paragraph.
+
+        Kept because two other readers want prose: the analyst's
+        ``prescribe_building`` tool, which hands it to a model that would rather
+        have sentences than a structure to walk, and the tests, which assert on
+        phrases. The brief takes ``why`` and sets each part under its own
+        heading, which is the whole reason the parts exist.
+        """
+        return " ".join(t for _, t in self.why if t).strip()
+
+
+def _why(*parts: tuple[str, str]) -> tuple[tuple[str, str], ...]:
+    """Drop the parts that did not apply, and keep the order they were written in.
+
+    Most branches have one or two parts that are conditional — a device is only
+    rejected when a simpler one was tried, a selection is only overridden when
+    something overrode it — and the alternative to filtering here is a heading
+    with nothing under it.
+    """
+    return tuple((label, text.strip()) for label, text in parts if text and text.strip())
 
 
 def _face_attr(fl: Any, name: str, default: float = 0.0) -> float:
@@ -1060,8 +1090,11 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
     capex_blocked = bool(ctx.get("capex_blocked")) or landmark
     acute = hours < ACUTE_HOURS_THRESHOLD and severity >= 3
 
+    # The diagnosis every branch opens with. It answers "how hot, and why", and
+    # it is the same three facts each time, so it is its own labelled part rather
+    # than the first three sentences of nine different paragraphs.
     attrib = (
-        f"{_fmt_floors(floor, floor)} sits in band {band} and peaks at "
+        f"{_fmt_floors(floor, floor).capitalize()} sits in band {band} and peaks at "
         f"{t_surf:.1f} °C. The attribution splits that as {dt_solar:.1f} K "
         f"absorbed shortwave and {dt_trap:.1f} K longwave trapped from the "
         f"surfaces opposite ({sh['solar'] * 100:.0f}% solar, "
@@ -1135,32 +1168,37 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                     )
                     key, dev = "window_film", "film"
 
-                why = attrib + " " + _fmt_faces(gnames).capitalize() + " "
-                why += (
+                sun = (
+                    f"{_fmt_faces(gnames).capitalize()} "
                     f"carr{'ies' if len(gnames) == 1 else 'y'} the load. "
                     f"At the peak hour ({geo.get('peak_hour_edt', hour)}:00 EDT) the "
                     f"sun is {geo['peak_altitude_deg']:.0f}° above the horizon and "
                     f"{geo['incidence_deg']:.0f}° off the wall normal"
                 )
                 if geo.get("profile_angle_deg") is not None:
-                    why += f", a profile angle of {geo['profile_angle_deg']:.0f}°"
-                why += ". "
+                    sun += f", a profile angle of {geo['profile_angle_deg']:.0f}°"
+                sun += "."
+
+                sizing = ""
                 if geo.get("projection_uncapped_m") is not None:
-                    why += (
+                    sizing = (
                         f"P = {geo['window_head_m']:.2f} m · "
                         f"cos({geo['incidence_deg']:.0f}°) / "
                         f"tan({geo['peak_altitude_deg']:.0f}°) = "
-                        f"{geo['projection_uncapped_m']:.2f} m. "
+                        f"{geo['projection_uncapped_m']:.2f} m."
                     )
-                if reason:
-                    why += reason + " "
-                if override:
-                    why += override
 
                 picks.append(_Pick(
                     key=key, faces=gnames, device=dev, floor=floor, band=band,
                     geometry=geo, area_m2=garea,
-                    governing_metric=_governing(geo), why_floor=why.strip(),
+                    governing_metric=_governing(geo),
+                    why=_why(
+                        ("Where the heat is", attrib),
+                        ("What carries it", sun),
+                        ("Sizing", sizing),
+                        ("Why not something simpler", reason or ""),
+                        ("Why this device", override),
+                    ),
                 ))
 
         # The measure that can happen before the next heat wave.
@@ -1177,15 +1215,20 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                 key="blinds_policy", faces=names, device="internal",
                 floor=floor, band=band, geometry={}, area_m2=_face_area(faces),
                 governing_metric=0.0,
-                why_floor=(
-                    f"{attrib} Every facade measure above answers \"not before the "
-                    f"next heat wave\", and {trigger}. A managed closure schedule "
-                    f"on {_fmt_faces(names)} is available this season. It acts "
-                    f"inside the glass line, so it controls glare and radiant "
-                    f"asymmetry well and the {dt_solar:.1f} K of absorbed shortwave "
-                    f"poorly — perhaps a third of what an external device would "
-                    f"take. It is offered because a third, this year, is not "
-                    f"nothing."
+                why=_why(
+                    ("Where the heat is", attrib),
+                    ("Why now", (
+                        f"Every facade measure above answers \"not before the next "
+                        f"heat wave\", and {trigger}. A managed closure schedule on "
+                        f"{_fmt_faces(names)} is available this season."
+                    )),
+                    ("What it will and will not do", (
+                        f"It acts inside the glass line, so it controls glare and "
+                        f"radiant asymmetry well and the {dt_solar:.1f} K of absorbed "
+                        f"shortwave poorly — perhaps a third of what an external "
+                        f"device would take. It is offered because a third, this "
+                        f"year, is not nothing."
+                    )),
                 ),
             ))
 
@@ -1200,14 +1243,20 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                 key="night_purge", faces=names, device="operational",
                 floor=floor, band=band, geometry={}, area_m2=area,
                 governing_metric=0.0,
-                why_floor=(
-                    f"{attrib} The load is trapping, not sun: {dt_trap:.1f} K of the "
-                    f"positive drivers is longwave from the surfaces opposite "
-                    f"({sh['trap'] * 100:.0f}%), which shading cannot intercept "
-                    f"because it is not a beam. But the sky term is {dt_sky:.1f} K "
-                    f"and the night recovery reads \"good\", so this fabric can "
-                    f"actually shed its stored heat overnight — which is the one "
-                    f"condition under which purge ventilation is worth running."
+                why=_why(
+                    ("Where the heat is", attrib),
+                    ("The mechanism", (
+                        f"The load is trapping, not sun: {dt_trap:.1f} K of the "
+                        f"positive drivers is longwave from the surfaces opposite "
+                        f"({sh['trap'] * 100:.0f}%), which shading cannot intercept "
+                        f"because it is not a beam."
+                    )),
+                    ("Why purge works here", (
+                        f"The sky term is {dt_sky:.1f} K and the night recovery reads "
+                        f"\"good\", so this fabric can actually shed its stored heat "
+                        f"overnight — which is the one condition under which purge "
+                        f"ventilation is worth running."
+                    )),
                 ),
             ))
         else:
@@ -1223,27 +1272,34 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                 key="wall_insulation", faces=names, device="fabric",
                 floor=floor, band=band, geometry={}, area_m2=area,
                 governing_metric=0.0,
-                why_floor=(
-                    f"{attrib} {dt_trap:.1f} K of the {dt_solar + dt_trap:.1f} K of "
-                    f"positive driver is longwave arriving from the buildings "
-                    f"opposite ({sh['trap'] * 100:.0f}%), against {dt_solar:.1f} K "
-                    f"of sun. Shading this wall would treat the smaller term: the "
-                    f"lever is the fabric's own admittance, which governs how much "
-                    f"of that net radiation it absorbs rather than sheds. "
-                    f"{excluded}"
+                why=_why(
+                    ("Where the heat is", attrib),
+                    ("The mechanism", (
+                        f"{dt_trap:.1f} K of the {dt_solar + dt_trap:.1f} K of "
+                        f"positive driver is longwave arriving from the buildings "
+                        f"opposite ({sh['trap'] * 100:.0f}%), against {dt_solar:.1f} K "
+                        f"of sun. Shading this wall would treat the smaller term: "
+                        f"the lever is the fabric's own admittance, which governs "
+                        f"how much of that net radiation it absorbs rather than sheds."
+                    )),
+                    ("Why not night purge", excluded),
                 ),
             ))
             picks.append(_Pick(
                 key="opposite_facade_albedo", faces=names, device="fabric",
                 floor=floor, band=band, geometry={}, area_m2=area,
                 governing_metric=0.0,
-                why_floor=(
-                    f"{attrib} The {dt_trap:.1f} K trapping term is radiated by a "
-                    f"surface this owner does not own. Raising the albedo of the "
-                    f"facade opposite lowers what it runs at and therefore what it "
-                    f"radiates across. The model re-solves both sides, so the "
-                    f"reflected-shortwave penalty that partly offsets it is in the "
-                    f"answer rather than in a footnote. {excluded}"
+                why=_why(
+                    ("Where the heat is", attrib),
+                    ("The mechanism", (
+                        f"The {dt_trap:.1f} K trapping term is radiated by a surface "
+                        f"this owner does not own. Raising the albedo of the facade "
+                        f"opposite lowers what it runs at and therefore what it "
+                        f"radiates across. The model re-solves both sides, so the "
+                        f"reflected-shortwave penalty that partly offsets it is in "
+                        f"the answer rather than in a footnote."
+                    )),
+                    ("Why not night purge", excluded),
                 ),
             ))
             if overnight:
@@ -1251,12 +1307,15 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                     key="cooling_centre_routing", faces=names, device="people",
                     floor=floor, band=band, geometry={}, area_m2=area,
                     governing_metric=0.0,
-                    why_floor=(
-                        f"{attrib} People sleep behind this wall and the geometry "
-                        f"precludes the overnight recovery they would need — a "
-                        f"{dt_sky:.1f} K sky term is not a recovery window. The "
-                        f"fabric measure above is a capital-cycle answer to an "
-                        f"overnight exposure that exists now."
+                    why=_why(
+                        ("Where the heat is", attrib),
+                        ("Why now", (
+                            f"People sleep behind this wall and the geometry "
+                            f"precludes the overnight recovery they would need — a "
+                            f"{dt_sky:.1f} K sky term is not a recovery window. The "
+                            f"fabric measure above is a capital-cycle answer to an "
+                            f"overnight exposure that exists now."
+                        )),
                     ),
                 ))
 
@@ -1265,15 +1324,17 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
         names = ("all",)
         area = _face_attr(fl, "envelope_m2")
         no_facade = (
-            f"{attrib} The surface is within 1.5 K of air temperature, so neither "
-            f"driver is worth naming and there is no facade measure to make: this "
-            f"floor is hot because the city is hot. Prescribing shading here would "
-            f"recover a fraction of a kelvin and cost a facade contract."
+            "The surface is within 1.5 K of air temperature, so neither driver is "
+            "worth naming and there is no facade measure to make: this floor is hot "
+            "because the city is hot. Prescribing shading here would recover a "
+            "fraction of a kelvin and cost a facade contract."
         )
         picks.append(_Pick(
             key="mechanical_capacity", faces=names, device="mechanical",
             floor=floor, band=band, geometry={}, area_m2=area,
-            governing_metric=0.0, why_floor=no_facade,
+            governing_metric=0.0,
+            why=_why(("Where the heat is", attrib),
+                     ("Why there is nothing to bolt on", no_facade)),
         ))
         if severity >= 3:
             key = "cooling_centre_routing" if overnight else "tenant_relocation"
@@ -1281,10 +1342,14 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                 key=key, faces=names, device="people",
                 floor=floor, band=band, geometry={}, area_m2=area,
                 governing_metric=0.0,
-                why_floor=(
-                    f"{no_facade} Severity {severity} with {hours:.0f} free-running "
-                    f"hours above 28 °C a year, and the mechanical review above is "
-                    f"a one-year answer. This one is available this season."
+                why=_why(
+                    ("Where the heat is", attrib),
+                    ("Why there is nothing to bolt on", no_facade),
+                    ("Why now", (
+                        f"Severity {severity} with {hours:.0f} free-running hours "
+                        f"above 28 °C a year, and the mechanical review above is a "
+                        f"one-year answer. This one is available this season."
+                    )),
                 ),
             ))
 
@@ -1358,18 +1423,21 @@ def _roof_picks(loads: Any, ctx: dict, floors: Sequence[Any]) -> list[_Pick]:
     lo, hi = min(in_band), max(in_band)
     t_roof = float(getattr(roof, "t_peak_c", 0.0) or 0.0)
     roof_txt = f" The roof peaks at {t_roof:.0f} °C." if t_roof else ""
-    why = (
+    reach = (
         f"Building height {height:.0f} m with {area:,.0f} m² of roof, and the top "
         f"band holds {len(in_band)} of {n_floors} storeys — {share * 100:.0f}% of "
-        f"the floor area sits directly under it.{roof_txt} A roof has the highest "
-        f"sky view factor of any surface on the building and nothing shades it, so "
-        f"it takes the full solar load; raising albedo from a typical 0.25 to 0.70 "
-        f"removes most of the absorbed shortwave at the one surface where nothing "
-        f"else can."
+        f"the floor area sits directly under it.{roof_txt}"
     )
+    mech = (
+        "A roof has the highest sky view factor of any surface on the building and "
+        "nothing shades it, so it takes the full solar load; raising albedo from a "
+        "typical 0.25 to 0.70 removes most of the absorbed shortwave at the one "
+        "surface where nothing else can."
+    )
+    why = _why(("What sits under it", reach), ("The mechanism", mech))
     out = [_Pick(key="cool_roof", faces=("roof",), device="coating",
                  floor=lo, band=top_band, geometry={"albedo_target": 0.70},
-                 area_m2=round(area, 1), governing_metric=0.0, why_floor=why)]
+                 area_m2=round(area, 1), governing_metric=0.0, why=why)]
     # A coating over a poor deck treats the symptom the assembly is causing, so
     # the insulation measure is raised alongside it wherever the top floor is
     # actually in trouble.
@@ -1378,12 +1446,12 @@ def _roof_picks(loads: Any, ctx: dict, floors: Sequence[Any]) -> list[_Pick]:
             key="roof_insulation", faces=("roof",), device="fabric",
             floor=lo, band=top_band, geometry={}, area_m2=round(area, 1),
             governing_metric=0.0,
-            why_floor=(
-                why + f" The top storey is at severity "
-                f"{_int_attr(top, 'severity')}, which a coating alone "
-                f"will not clear: the coating lowers the surface the deck sees, "
-                f"the deck decides how much of that reaches the floor below."
-            ),
+            why=why + _why(("Why the coating is not enough", (
+                f"The top storey is at severity {_int_attr(top, 'severity')}, which "
+                f"a coating alone will not clear: the coating lowers the surface the "
+                f"deck sees, the deck decides how much of that reaches the floor "
+                f"below."
+            ))),
         ))
     # Merging expects one pick per floor; extend the range explicitly.
     for p in out:
@@ -1425,22 +1493,27 @@ def _canopy_picks(loads: Any, ctx: dict, floors: Sequence[Any]) -> list[_Pick]:
             f"and canopy acts on the radiant term directly — which is the term "
             f"that dominates what a person on the sidewalk feels."
         )
-    why = (
-        f"Bands 0–{CANOPY_TOP_BAND} of the ten solved bands — {_fmt_floors(lo, hi)} "
-        f"of {top_floor} — sit within reach of a street canopy, and "
-        f"{len(solar_ground)} of those {len(ground)} storeys are solar-dominant at "
-        f"the sidewalk.{gap_txt} This measure reaches band {CANOPY_TOP_BAND} and no "
-        f"further: a mature London plane in Midtown is 12 to 15 m to the crown "
-        f"against a building of {top_floor} storeys, so it does nothing whatever "
-        f"for the floors above it. That is stated here rather than left to be "
-        f"inferred from a measure list that happens not to mention it."
+    why = _why(
+        ("What it reaches", (
+            f"Bands 0–{CANOPY_TOP_BAND} of the ten solved bands — "
+            f"{_fmt_floors(lo, hi)} of {top_floor} — sit within reach of a street "
+            f"canopy, and {len(solar_ground)} of those {len(ground)} storeys are "
+            f"solar-dominant at the sidewalk.{gap_txt}"
+        )),
+        ("What it does not reach", (
+            f"This measure reaches band {CANOPY_TOP_BAND} and no further: a mature "
+            f"London plane in Midtown is 12 to 15 m to the crown against a building "
+            f"of {top_floor} storeys, so it does nothing whatever for the floors "
+            f"above it. That is stated here rather than left to be inferred from a "
+            f"measure list that happens not to mention it."
+        )),
     )
     p = _Pick(key="street_canopy", faces=("sidewalk",), device="canopy",
               floor=lo, band=0, geometry={"canopy_fraction": 0.45,
                                           "bands": [0, CANOPY_TOP_BAND],
                                           "floor_range": [lo, hi]},
               area_m2=round(sum(_face_attr(f, "envelope_m2") for f in ground), 1),
-              governing_metric=0.0, why_floor=why)
+              governing_metric=0.0, why=why)
     return [p]
 
 
@@ -1495,6 +1568,7 @@ def _merge(picks: Sequence[_Pick]) -> list[dict]:
                 "geometry": dict(gov.geometry),
                 "area_m2": round(sum(p.area_m2 for p in run), 1),
                 "why": gov.why_floor,
+                "why_parts": [list(x) for x in gov.why],
                 "n_floors": len(run),
                 "gov_floor": gov.floor,
             })
@@ -1841,6 +1915,7 @@ def for_building(
             geometry=g["geometry"],
             area_m2=g["area_m2"],
             why=g["why"],
+            why_parts=[tuple(x) for x in g.get("why_parts", [])],
             winter_cost=fam.winter_cost,
             programme=list(fam.programme),
             does_not_fix="",

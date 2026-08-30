@@ -167,7 +167,9 @@ test('a day inside a month is reconstructed, and the reconstruction moves with t
   expect(h.period).toBe('month_07');
   expect(c.period).toBe('month_07');
   // And the interface has to say so, with that day's own measured error.
-  await expect(page.locator('#time-meta .prov')).toContainText('reconstructed');
+  // Case-insensitive: the badge is set in lower case and uppercased in CSS, and
+  // `toContainText` reads innerText, which has the transform applied.
+  await expect(page.locator('#time-meta .prov')).toContainText(/reconstructed/i);
   // Same solved field, different air-temperature departure: the walls have to
   // differ, and in the right direction.
   expect(h.meanSurface).toBeGreaterThan(c.meanSurface + 2);
@@ -193,7 +195,7 @@ test('the four aggregate modes each change what is on screen', async ({ page }) 
 
 test('annual layers ignore the clock and say so', async ({ page }) => {
   const { errors } = await openApp(page);
-  await setLayer(page, 'Sunlit hours a year');
+  await setLayer(page, 'Annual heat dose');
 
   await expect(page.locator('#time')).toHaveClass(/frozen/);
   await expect(page.locator('#time-frozen')).toBeVisible();
@@ -218,9 +220,11 @@ test('annual layers ignore the clock and say so', async ({ page }) => {
 
 test('every annual layer paints a varied field', async ({ page }) => {
   const { errors } = await openApp(page);
-  const layers = ['Where to act — the year', 'Sunlit hours a year',
-                  'Annual heat dose', 'Annual solar dose', 'Winter sun share',
-                  'Month it peaks'];
+  // Four, down from six. "Sunlit hours a year" was cut as an input to "Annual
+  // solar dose", and "Month it peaks" because it painted a month index on the
+  // temperature ramp. See the note above LAYERS in ui.js.
+  const layers = ['Where to act — the year', 'Annual heat dose',
+                  'Annual solar dose', 'Winter sun share'];
   for (const name of layers) {
     await setLayer(page, name);
     const s = await facadeColorStats(page);
@@ -275,18 +279,21 @@ test("a building's dossier carries the year and a monthly profile", async ({ pag
   const { errors } = await openApp(page);
   await page.locator('#side-body .rank').first().click();
   await settle(page);
-  await expect(page.locator('#side-body')).toContainText('The year');
-  await expect(page.locator('#side-body')).toContainText('Sunlit hours a year');
-  // Two charts: the monthly bars and the vertical profile.
-  await expect(page.locator('#side-body svg.chart')).toHaveCount(2);
+  // The dossier is the card in the LEFT panel. It used to be rendered into the
+  // ranking's own panel on the right, which is why this looked for it there.
+  const card = page.locator('#selcard');
+  await expect(card).toContainText(/the year/i);
+  // Two charts: the monthly bars and the vertical height profile.
+  await expect(card.locator('.selmore .chart')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
 
 test('the what-if panel shows the seasonal cost of a measure', async ({ page }) => {
   const { errors } = await openApp(page);
-  await page.evaluate(() => document.querySelector('#tabs button[data-tab="whatif"]').click());
+  // What if is a pane inside the Decide tab now; it was a top-level tab of its own.
+  await page.evaluate(() => document.querySelector('#tabs button[data-tab="decide"]').click());
   await settle(page);
-  await expect(page.locator('#tab-whatif')).toContainText('Across the year');
+  await expect(page.locator('#tab-decide')).toContainText('Across the year');
   const tables = page.locator('#tab-whatif table.sctab');
   await expect(tables).toHaveCount(2);
   // The annual table must carry a summer and a winter column with real numbers.
@@ -295,20 +302,36 @@ test('the what-if panel shows the seasonal cost of a measure', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
-test('the air layer fetches its profile on demand and then draws it', async ({ page }) => {
+/* The air field, and where its demand comes from now.
+ *
+ * There used to be an "Air temperature" LAYER, and selecting it was what asked
+ * for the field. The layer was cut — a map of a quantity that barely varies
+ * across the study area is a flat wash, and its own caption said so — but the
+ * comparison it existed to make did not go with it. It moved to the building
+ * dossier's height profile, where the air curve and its ±1σ band are drawn
+ * against that building's hottest and coolest wall on one axis, which is where
+ * "the wall runs far hotter than the air beside it" is actually legible.
+ *
+ * So opening a dossier is the demand. This test is the old one repointed rather
+ * than a new one: what it has always guarded is that 4.7 MB per period is
+ * fetched when something needs it and not before. */
+test('the air profile is fetched on demand, when a dossier needs it', async ({ page }) => {
   const { errors } = await openApp(page);
   // NOT loaded up front, not even for the event day: it is 4.7 MB per period and
-  // it is the least trustworthy field in the model, so it is fetched only when the
-  // layer that shows it is selected.
+  // it is the least trustworthy field in the model.
   expect(await page.evaluate(() => window.HC.data.hasAir())).toBe(false);
 
   await setDate(page, '2026-03-14', 'month');
   expect(await page.evaluate(() => window.HC.data.hasAir())).toBe(false);
 
-  await setLayer(page, 'Air temperature');
-  await page.waitForFunction(() => window.HC.data.hasAir(), null, { timeout: 60_000 });
+  await page.locator('#side-body .rank').first().click();
+  await page.waitForFunction(() => window.HC.data.hasAir(), null, { timeout: 120_000 });
   await settle(page);
-  const s = await facadeColorStats(page);
-  expect(s.distinct).toBeGreaterThan(5);
+
+  // And the chart redraws once it lands, rather than keeping the version that
+  // was rendered from data that had not arrived. The air curve appears in the
+  // profile's own legend only when every band read a finite value.
+  await expect(page.locator('#selcard .selmore .chart')).toHaveCount(2);
+  await expect(page.locator('#selcard .clegend').last()).toContainText('AIR');
   expect(errors).toEqual([]);
 });

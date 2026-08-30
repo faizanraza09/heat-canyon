@@ -1,4 +1,4 @@
-/* Colour ramps.
+/* Colour ramps, and the temperature they are anchored to.
  *
  * One heat ramp, used for every quantity the model draws.
  *
@@ -11,63 +11,134 @@
  * cursor. Comparability is handled by the axis labels, which always name the
  * unit, rather than by withholding a shared colour language.
  *
- * The ramp runs pale straw through amber and orange into a deep red, and the
- * direction is the point: red is the hot end.
+ * The ramp runs deep blue through pale blue and a near-neutral cream into amber,
+ * orange and a deep red. Cold is blue, hot is red, and the middle is the pale
+ * hinge between them.
  *
- * It was inferno's family before this — near-black indigo, through magenta and
- * orange, into a pale cream — chosen because it is monotonic in lightness and
- * because that order is physically true. Heat a bar of steel and it glows dull
- * red, then orange, then yellow, then white; "red-hot" is the coolest visible
- * glow and "white-hot" the hottest, which is why inferno, magma and FLIR's
- * ironbow all end pale. It is also what makes those ramps survive greyscale and
- * colour-blindness.
+ * HOW IT GOT HERE, AND WHY THE COLD END IS BLUE
  *
- * It was still read backwards. A viewer looking at this instrument sees red and
- * concludes hot, and no amount of correctness in the encoding survives being
- * misread by the audience it was drawn for. So the convention wins over the
- * physics here, deliberately, and the costs are taken on the chin below.
+ * It was inferno's family first — near-black indigo, through magenta and orange,
+ * into a pale cream — chosen because it is monotonic in lightness and because
+ * that order is physically true. Heat a bar of steel and it glows dull red, then
+ * orange, then yellow, then white; "red-hot" is the coolest visible glow and
+ * "white-hot" the hottest, which is why inferno, magma and FLIR's ironbow all
+ * end pale.
  *
- * What it costs, and what is done about it:
+ * It was read backwards by everyone who looked at it, so the ramp was turned
+ * round: pale straw at the cold end into deep red at the hot end. That fixed the
+ * direction and left a different problem, which is the one this version is for.
+ * A ramp that begins at pale straw has no cold end. It has a *less hot* end.
+ * Straw at the bottom of a January scale and straw at the bottom of a July scale
+ * are the same colour standing for temperatures thirty kelvin apart, and nothing
+ * in the frame said so. Giving the bottom of the ramp a colour nobody would ever
+ * call warm is half of the fix; the other half is TEMP_DOMAIN below, which stops
+ * the bottom of the ramp from moving.
  *
- *  - The hottest surfaces are now the darkest, on a near-black shell. The hot
- *    end stops at rgb(163,26,34) rather than going deeper, which keeps it about
- *    2.6:1 against #0A0908 — dim, but never lost in it. Going further into
- *    oxblood, which would read as "hotter" still, would put the finding below
- *    the floor of the frame.
- *  - Darkness now means two things at once: hotter, and further back. Anything
- *    that used to push a surface back by darkening it had to stop — see the
- *    ambient-occlusion floor and the dimming rule in scene.js, both of which
- *    now work by desaturating instead.
- *  - Compositing over the photoreal layer can no longer be additive, because
- *    adding a dark red to a photograph does almost nothing. See the note in
- *    photoreal.js on why the operator changed and what of the original fix
- *    survives.
+ * WHAT THE DIRECTION COSTS, AND WHAT IS DONE ABOUT IT
  *
- * It keeps the properties that do not depend on direction: no green band to
- * throw false edges, monotonic in lightness (descending now rather than
- * ascending, so greyscale and colour-blind reading still work), and stops that
- * are deliberately uneven, with the hot end stretched because that is where the
- * finding is.
+ *  - It is no longer monotonic in lightness. It cannot be: two saturated ends
+ *    and a pale middle is what "diverging" means, and a diverging ramp is what
+ *    blue-cold-red-hot is. So a −20 °C wall and a +60 °C wall have the same
+ *    luminance and greyscale can no longer tell them apart. The compensation is
+ *    that the two ends are now the one pair of hues that survives every common
+ *    form of colour blindness, which the straw-to-red version did not: the old
+ *    ramp put its whole span in the red-green axis deuteranopes lose.
+ *  - Both ends are dark against a near-black shell, where before only the hot
+ *    end was. They are held at exactly the same distance from it — rgb(44,82,145)
+ *    and rgb(163,26,34) are both 2.58:1 against #0A0908 — so neither end is the
+ *    one that vanishes, and the pale middle carries most of the frame anyway.
+ *  - Darkness still means two things at once: further from 20 °C, and further
+ *    back. Everything that used to push a surface back by darkening it still
+ *    works by desaturating instead — see the ambient-occlusion floor and the
+ *    dimming rule in scene.js.
+ *  - Compositing over the photoreal layer still cannot be additive. See the note
+ *    in photoreal.js on why the operator changed and what of the original fix
+ *    survives; the argument there was about the hot end being dark, and it now
+ *    applies to both ends.
  *
- * Scenario deltas keep a diverging ramp centred on zero, because there the sign
- * carries the meaning: some interventions make some metrics worse.
+ * It keeps the property that never depended on direction: no saturated green
+ * band to throw false edges. The hinge at t=0.5 passes from pale blue to cream
+ * through a desaturated neutral — hue jumps 195 deg to 57 deg across two stops at
+ * roughly ten per cent saturation — which is a pale grey to the eye rather than
+ * the green that makes jet unreadable. The stops stay deliberately uneven, with
+ * the warm half stretched, because that is where the finding is.
+ *
+ * Scenario deltas keep their own diverging ramp, and it is now the same colour
+ * language rather than a competing one: blue means cooler in both, which is what
+ * a negative delta is.
  */
 
-/** The heat ramp, as [position, rgb] stops. Uneven by design. */
+/** The heat ramp, as [position, rgb] stops. Uneven by design.
+ *
+ * Read against TEMP_DOMAIN, the positions land on round temperatures: 0.25 is
+ * 0 °C, 0.50 is 20 °C, 0.6875 is the 35 °C exceedance threshold — which is why
+ * the ramp has turned decisively amber by the time a surface crosses it — and
+ * 0.75 is 40 °C. That alignment is the reason the stops sit where they do. */
 const CANYON = [
-  [0.00, [246, 232, 176]],
-  [0.20, [249, 206, 122]],
-  [0.42, [244, 160, 78]],
-  [0.62, [231, 112, 54]],
-  [0.82, [205, 58, 44]],
-  [1.00, [163, 26, 34]],
+  [0.00, [ 44,  82, 145]],
+  [0.16, [ 68, 124, 178]],
+  [0.32, [126, 170, 201]],
+  [0.44, [186, 205, 214]],
+  [0.52, [232, 224, 196]],
+  [0.62, [249, 205, 124]],
+  [0.74, [245, 158,  76]],
+  [0.86, [229, 100,  52]],
+  [1.00, [163,  26,  34]],
 ];
+
+/** The absolute temperature scale, degC. Every temperature the model paints is
+ *  read against this and nothing else.
+ *
+ * THIS IS THE POINT OF THE WHOLE FILE. A colour is worth having only if it means
+ * the same thing twice, and until this constant existed it did not.
+ *
+ * The domain used to be recomputed from whichever period was loaded — the 0.2 to
+ * 99.8 percentiles of that month's own solved field. Measured across the thirteen
+ * solved periods, that put January's scale at −8.2 to 11.7 °C and July's at 22.2
+ * to 45.6 °C. A wall at −2 °C in January and a wall at 28 °C in July therefore
+ * landed within a few per cent of each other on the ramp and were painted the
+ * same amber. Scrubbing from January to July showed a city that barely changed
+ * colour, which is the exact opposite of the truth, and the legend's figures
+ * moved underneath to make it arithmetically defensible. Nobody reads the legend
+ * on every scrub. They read the colour.
+ *
+ * So the scale is fixed, and fixed at round numbers, because a viewer who has
+ * learned that mid-blue is freezing and amber is dangerous should never have to
+ * unlearn it. −20 °C covers the year's coldest solved surface (the annual t_min
+ * plane bottoms at −23 °C on a handful of panels on one January night, which
+ * clamps); 60 °C covers the hottest (the heat-wave day's 99.8th percentile is
+ * 55.9 °C and its maximum 61.2 °C, which also clamps). Clamping the last
+ * fractions of a per cent at both ends is the price of round numbers, and it is
+ * worth it.
+ *
+ * WHAT THIS COSTS, STATED PLAINLY. A fixed 80 K scale spends only as much of the
+ * ramp on a day as that day actually spans. A January day covers about eight
+ * kelvin, so the whole city renders in one narrow band of blue with little
+ * internal structure. That was measured before, on a wider domain, and read as
+ * "the city is flat". It is not a rendering failure: in January the city IS
+ * flat, and eleven per cent of the ramp is the honest amount of colour for eight
+ * kelvin of variation. The heat-wave day spans twenty-one kelvin and gets thirty
+ * per cent of the ramp, running cream through orange into red, because that is
+ * the day where the finding is.
+ *
+ * Air and surface deliberately share this. A wall at 35 °C and the air at 35 °C
+ * are now the same colour, which is the comparison the instrument is built to
+ * invite. Air never reaches the top quarter of the scale, and that is not waste
+ * — it is the measurement. The one exception is the ground air layer, which
+ * spans one to two kelvin across the whole AOI at any hour and is contrast
+ * stretched for spatial pattern; scene.js `_paintGround` says so where it does
+ * it.
+ *
+ * Quantities that are not temperatures — sunlit hours, degree-hours, dose,
+ * priority — keep their own domains. They share the ramp, not the scale. */
+export const TEMP_DOMAIN = [-20, 60];
 
 /** The same stops as a CSS gradient, so a legend swatch and a painted pixel
  *  cannot drift apart. */
 export const CANYON_CSS =
-  'linear-gradient(90deg, rgb(246,232,176) 0%, rgb(249,206,122) 20%, rgb(244,160,78) 42%,'
-  + ' rgb(231,112,54) 62%, rgb(205,58,44) 82%, rgb(163,26,34) 100%)';
+  'linear-gradient(90deg, rgb(44,82,145) 0%, rgb(68,124,178) 16%, rgb(126,170,201) 32%,'
+  + ' rgb(186,205,214) 44%, rgb(232,224,196) 52%, rgb(249,205,124) 62%,'
+  + ' rgb(245,158,76) 74%, rgb(229,100,52) 86%, rgb(163,26,34) 100%)';
 
 /** Sun and shade is categorical, not continuous.
  *

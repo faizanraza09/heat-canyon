@@ -129,8 +129,19 @@ test('the film is the length it promises, in the chapters it says', async ({ pag
   // target: it is how long someone will sit still before they have been shown
   // anything. Assert the ceiling as well as the figure, so a beat lengthened by
   // half a second at a time cannot walk the film back to forty.
-  expect(shape.total).toBeCloseTo(185.7, 1);
-  expect(shape.total).toBeLessThanOrEqual(190);
+  /* Under three minutes, and the ceiling is what actually guards that.
+   *
+   * The figure has moved twice. Up, when the layer beat was given room to name
+   * its four layers one at a time instead of naming four and showing one; and
+   * then down by nine, taken entirely out of the three beats with NO WORDS IN
+   * THEM — the hold before the first sentence, the fall into New York, and the
+   * silent close. Not one spoken line lost a frame. That is the rule the
+   * ceiling is here to keep: length comes off silence first, and if a cut ever
+   * has to come out of a sentence it should be an argued change to the script
+   * rather than a number quietly shaved here.
+   */
+  expect(shape.total).toBeCloseTo(179.3, 1);
+  expect(shape.total).toBeLessThan(180);
   expect(shape.beats).toBe(30);
   expect(shape.stated).toBe(true);
   expect(shape.chapters.map((c) => c.n)).toEqual(['I', 'II', 'III', 'IV', 'V']);
@@ -144,7 +155,7 @@ test('the film is the length it promises, in the chapters it says', async ({ pag
   // application being driven: one building taken apart, then the instrument
   // around it, then the analyst. A walkthrough that spends a third of itself
   // arriving is a trailer, and this one has to be a demo.
-  expect(shape.chapters.map((c) => Math.round(c.dur))).toEqual([25, 13, 79, 47, 22]);
+  expect(shape.chapters.map((c) => Math.round(c.dur))).toEqual([22, 9, 79, 49, 20]);
   const arrival = shape.chapters.slice(0, 2).reduce((a, c) => a + c.dur, 0);
   expect(arrival / shape.total).toBeLessThan(0.25);
 });

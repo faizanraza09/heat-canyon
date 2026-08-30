@@ -23,7 +23,7 @@ import * as THREE from 'three';
 // desktop left-drag pan is implemented below: its distance-based approximation
 // made the city slip away from the pointer at oblique camera angles.
 import { MapControls } from 'three/addons/controls/MapControls.js';
-import { RAMPS, norm, SHADE_RGB, SUNLIT_RGB } from './colors.js';
+import { RAMPS, norm, SHADE_RGB, SUNLIT_RGB, TEMP_DOMAIN } from './colors.js';
 import { Photoreal, findApiKey } from './photoreal.js';
 
 /** Contrast curve, indexed 0-255. A smoothstep-weighted lift: dark values fall
@@ -45,11 +45,186 @@ const FACADE_OUTWARD_M = 0.7;
  * the value alone keeps every wall's hue exactly where the measurement put it,
  * so the unselected city stays readable as data while clearly stepping back. */
 /* Dimming is now mostly a drain of colour and only a little a drop in
- * brightness, because the ramp's hot end is dark and brightness is spoken for.
- * DIM alone at 0.46 is what made a dimmed hot wall indistinguishable from the
- * shell behind it. */
+ * brightness, because both ends of the ramp are dark and brightness is spoken
+ * for. DIM alone at 0.46 is what made a dimmed hot wall indistinguishable from
+ * the shell behind it, and on the blue-to-red ramp it would do the same to a
+ * dimmed freezing one. */
 const DIM = 0.72;
 const DIM_DESAT = 0.72;
+
+/* How much of that recession is currently applied, 0 to 1.
+ *
+ * For the interface this is always 1 and always was: a click selects, and the
+ * city steps back on the frame the click lands. Nothing about that changes.
+ *
+ * It exists for the film, and for one specific fault. The walkthrough arrives
+ * out of a two-and-a-half-minute-per-halving fall through cloud and satellite
+ * imagery into a lit city — the best-looking thing in the whole piece — and
+ * then, on the frame chapter three begins, selects a building and drains four
+ * thousand others to grey. The cut from the descent to the walkthrough was a cut
+ * from a photograph to a diagram, and it landed on the sentence that is supposed
+ * to make you interested. Ramped over the sentence instead, the city is still a
+ * city when we arrive and has stepped back by the time the line is finished,
+ * which is the same information delivered as a move rather than as a switch. */
+const DIM_FULL = 1;
+
+/* And how much of the rest of the city you can see *through*, while one
+ * building is selected.
+ *
+ * Draining colour says "not the subject", which is the whole job as long as the
+ * subject is visible. In Midtown it routinely is not: the thing that hides a
+ * tower is the tower in front of it, and no amount of desaturation moves an
+ * opaque wall out of the way. So a selection also makes everything else
+ * see-through, and the answer to "which building is that" stops depending on
+ * where the camera happens to be standing.
+ *
+ * Stippled rather than blended, which is the part worth explaining. The city is
+ * two merged meshes of some five thousand buildings; turning either one
+ * `transparent` moves it into the sorted pass, where a single mesh cannot be
+ * sorted against itself — the draw order becomes the index order, and the
+ * result is five thousand buildings blending in whatever sequence they happened
+ * to be built in. Hashed alpha keeps both meshes in the opaque pass with the
+ * depth buffer doing the sorting exactly as it does now, and spends alpha as a
+ * fraction of pixels kept instead. The dither is stable in world space, so it
+ * sits on the surface like a screen tint rather than crawling as the camera
+ * moves, and the selected building is written at full alpha and stays solid.
+ *
+ * 0.42 is where a sweep put it, and the number is only half the answer — see
+ * `_selOverlay` for the other half. Alpha spent as a fraction of pixels
+ * MULTIPLIES down a line of sight: at 0.55 a selected tower standing behind two
+ * ghosted neighbours reached the screen through 0.45 x 0.45 of their holes, so
+ * a fifth of its pixels survived and the subject came out sparser than the
+ * things hiding it. Lower alpha widens the holes, but it cannot fix that on its
+ * own — three layers deep the product is small at any setting worth looking at.
+ * So the overlay guarantees the subject and this number is free to be chosen
+ * for the CONTEXT alone: low enough that the city clearly steps back, high
+ * enough that it still reads as buildings rather than as noise. */
+const GHOST = 0.42;
+
+/* Give one of the city's merged meshes a per-vertex see-through amount.
+ *
+ * `aGhost` is carried as its own attribute rather than as a fourth colour
+ * channel on purpose: every recolour path in this file writes colour in threes,
+ * and widening that attribute would mean rewriting each of them for a value
+ * that changes only when the selection does.
+ *
+ * The multiply lands after `color_fragment`, which is where three has just
+ * folded the vertex colour into `diffuseColor`, and before `alphahash_fragment`
+ * reads the alpha back out to decide whether to keep the pixel. */
+/* The selected building again, drawn last and never occluded.
+ *
+ * Hashed alpha sorts correctly but it spends alpha as pixels, and pixels
+ * compound: whatever stands in front of the subject removes a fraction of it,
+ * and two ordinary neighbours are enough to reduce the one building the view is
+ * about to a stipple fainter than its surroundings. No value of GHOST fixes
+ * that, because the loss is a product and the fix has to be a guarantee.
+ *
+ * So the subject is drawn a second time from the SAME geometry — no extra
+ * buffers, one more draw call, and only while something is selected — with the
+ * depth test off so nothing can take pixels from it. `vGhost` is already the
+ * flag this needs: the recolour writes 1 on the selection and GHOST everywhere
+ * else, so keeping only the full-alpha fragments isolates the subject without a
+ * second attribute to keep in step. The mesh is hidden when nothing is
+ * selected, which is also when that test would let the whole city through. */
+function selOverlay(mat) {
+  /* Drawn last, against a depth buffer of its own.
+   *
+   * The first version simply switched the depth test off, which is wrong the
+   * moment a building is not convex — and Manhattan buildings are routinely not:
+   * setbacks, L-plans, light wells, re-entrant corners. With no depth test a
+   * building's own far wall paints over its near one, so the subject came out
+   * looking like a cut-away with its inside showing.
+   *
+   * What the overlay actually needs is not "no depth" but "no depth from
+   * anything else": the rest of the city must not occlude it, while its own
+   * walls must still occlude each other. So the depth buffer is cleared once,
+   * immediately before it draws, and the normal test and write are left on.
+   *
+   * That clear is only safe because these two meshes are the last thing in the
+   * frame — hence `transparent`, which moves them into the sorted pass, and a
+   * render order past everything in it. Nothing is drawn afterwards, so nothing
+   * can find the depth it needed gone. */
+  mat.transparent = true;
+  mat.depthTest = true;
+  mat.depthWrite = true;
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>',
+        '#include <common>\nattribute float aGhost;\nvarying float vGhost;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nvGhost = aGhost;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nvarying float vGhost;')
+      .replace('#include <color_fragment>',
+        '#include <color_fragment>\nif ( vGhost < 0.999 ) discard;');
+  };
+  return mat;
+}
+
+function ghostable(mat) {
+  mat.alphaHash = true;
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>',
+        '#include <common>\nattribute float aGhost;\nvarying float vGhost;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nvGhost = aGhost;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nvarying float vGhost;')
+      .replace('#include <color_fragment>',
+        '#include <color_fragment>\ndiffuseColor.a *= vGhost;');
+  };
+  return mat;
+}
+
+/* Let a data mesh hold TWO painted states at once and dissolve between them.
+ *
+ * WHY IT IS DONE ON THE GPU AND NOT BY REPAINTING
+ *
+ * Stepping the clock used to be a cut: `_recolour` rewrote 294,150 quads and
+ * the city changed in one frame. That is a hard edit in the middle of a
+ * continuous physical process — the sun does not jump three hours — and it
+ * costs the viewer the very thing the hourly axis exists to show, which is
+ * which walls warm first and how the shadow line sweeps.
+ *
+ * The obvious fix is to repaint at a fractional hour every frame. It is not
+ * affordable: `_recolour` is ~40 ms on this mesh (measured), so a per-frame
+ * repaint caps the whole scene at 25 fps and pins a core doing it. What IS
+ * affordable is paying for the repaint once per step and letting the GPU
+ * interpolate: the mesh carries the hour it came from in `color` and the hour
+ * it is going to in `aColorTo`, and one uniform slides between them. A frame of
+ * the dissolve then costs a single float upload.
+ *
+ * Interpolating COLOUR rather than temperature is an approximation, and worth
+ * naming. Two adjacent slots differ by a few kelvin on any given wall, which is
+ * a short move along the ramp, and a straight line between two nearby ramp
+ * colours is within a byte or two of the ramp itself. It would be wrong across
+ * the whole domain — the ramp is diverging, so the midpoint of deep blue and
+ * deep red is a mauve the ramp never contains — and that is exactly why the
+ * dissolve is only ever run between two states a step apart.
+ *
+ * The cache key has to be written by hand. Three derives its default program
+ * cache key from `onBeforeCompile.toString()`, and every material wrapped here
+ * gets the same wrapper source, so a ghosted mesh and an overlay mesh would
+ * otherwise be handed each other's compiled program.
+ */
+function fadeable(mat, mixU) {
+  const inner = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, renderer) => {
+    if (inner) inner(sh, renderer);
+    sh.uniforms.uMix = mixU;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>',
+        '#include <common>\nattribute vec3 aColorTo;\nuniform float uMix;')
+      .replace('#include <color_vertex>',
+        '#include <color_vertex>\n#ifdef USE_COLOR\n'
+        + 'vColor.xyz = mix( vColor.xyz, aColorTo, uMix );\n#endif');
+  };
+  mat.customProgramCacheKey = () => `hcfade|${inner ? inner.toString() : ''}`;
+  return mat;
+}
 
 /* The other half of the same decision. Dimming five thousand buildings is how a
  * selection is shown, but it is not enough to show a SET — the analyst routinely
@@ -59,6 +234,27 @@ const DIM_DESAT = 0.72;
  * for a hotter measurement. */
 
 const PAN_SPEED = 0.72;
+
+/* How far the orbit may tilt, as polar angle from straight up.
+ *
+ * The floor is not zero: at exactly zero the camera is over its pivot and the
+ * bearing is undefined, so a tilt that reached it would lose which way the
+ * building faces — the one thing this model is about. Five degrees short of
+ * vertical still reads as a plan view and still has a north. The ceiling is
+ * `controls.maxPolarAngle`, three degrees short of level, which is what puts
+ * the eye on a facade rather than on a roof.
+ */
+const ORBIT_MIN_PHI = 0.09;
+
+/* One press of a turn or tilt control, in radians. An eighth of a turn: four
+ * presses take you to the opposite face, eight all the way round, and each
+ * step is large enough to be worth the animation that carries it. */
+const ORBIT_STEP = Math.PI / 4;
+const TILT_STEP = Math.PI / 9;
+
+/* Seconds for one full automatic revolution. Slow enough to read a facade as
+ * it goes past, short enough that watching all four is not a commitment. */
+const SPIN_PERIOD = 22;
 
 /* Aerial perspective, as near/far metres.
  *
@@ -110,6 +306,11 @@ export class Scene {
     this.hour = data.meta.peak_index;
     this.layer = 'surface';
     this.selected = null;
+    /* The selection the ghost attributes were last written for. `undefined`
+     * rather than null so the first repaint writes them. */
+    this._ghostSel = null;
+    this._hidden = false;
+    this._spin = null;
     this.photorealOn = false;
     this.showSolids = false;
     this.forceCpuPhotoreal = false;
@@ -124,6 +325,21 @@ export class Scene {
      * the tileset's terrain at the height most of Midtown actually sits at, and
      * makes the residual error symmetric instead of one-sided. */
     this.datumM = Scene._medianBase(data);
+
+    /* The dissolve between the last painted state of the city and the next one.
+     *
+     * `_mixU` is shared by every material that carries data — both facade
+     * meshes, both roof meshes and the ground plane — so one float moves all of
+     * them together and they can never disagree about what time it is. It rests
+     * at 1, meaning "show the buffer the last repaint wrote"; a faded repaint
+     * drops it to 0 and `_stepFade` walks it back up. See `fadeable`.
+     */
+    this._mixU = { value: 1 };
+    this._fade = null;
+    /* The solar state currently on screen, which is not `meta.hours[hour]`
+     * while a dissolve is running. Held so an interrupted dissolve can start
+     * from where the sky actually is rather than from where it was going. */
+    this._skyNow = null;
 
     this._initRenderer();
     this._initScene();
@@ -310,13 +526,35 @@ export class Scene {
    * only moves when the clock does, and the interpolation is cheap but not
    * free.
    */
+  /** The solar state one hour slot of the loaded period stands under. */
+  _skyStateAt(hour) {
+    const h = this.data.meta.hours?.[hour];
+    if (!h) return null;
+    return {
+      alt: h.sun_alt ?? -20,
+      az: h.sun_az ?? 0,
+      cloud: Math.max(0, Math.min(1, h.cloud ?? 0)),
+    };
+  }
+
   _updateSky() {
-    const hours = this.data.meta.hours;
-    const h = hours && hours[this.hour];
-    if (!this.sky || !h) return;
-    const alt = h.sun_alt ?? -20;
-    const az = h.sun_az ?? 0;
-    const cloud = Math.max(0, Math.min(1, h.cloud ?? 0));
+    this._applySky(this._skyStateAt(this.hour));
+  }
+
+  /** Put the sky under a given sun, rather than under the current hour's.
+   *
+   * Split out from `_updateSky` so a dissolve can drive it with an intermediate
+   * sun: three hours of the clock is up to forty degrees of solar altitude, and
+   * a sky that cut between two of those while the walls dissolved smoothly
+   * would be the hard edit moved rather than removed. Everything here is a
+   * handful of uniforms, so unlike the facade repaint it IS affordable per
+   * frame, and the interpolation is done on the sun rather than on the
+   * resulting colours — the same inputs the hour slots carry.
+   */
+  _applySky(state) {
+    if (!this.sky || !state) return;
+    this._skyNow = state;
+    const { alt, az, cloud } = state;
 
     const K = Scene.SKY_KEYS;
     // Built once: constructing eight Colors per hour change is pointless, and
@@ -508,13 +746,51 @@ export class Scene {
     this.groundTex.generateMipmaps = true;
     this.groundTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
+    /* The same canvas again, holding the state the ground is dissolving FROM.
+     *
+     * The ground is not a passive backdrop across an hour step: the ray-traced
+     * building shadows are painted into it, and they are the fastest-moving
+     * thing in the frame. Cutting them while the facades dissolve would put the
+     * one hard edit back in exactly the place the eye is watching.
+     *
+     * It is a copy rather than a ping-pong pair because `groundTex` is also
+     * handed to the photoreal layer as its street wash, and an identity that
+     * changes every hour would have to be chased through that shader too. One
+     * 2048-square blit per step is the price of leaving it alone.
+     */
+    this.groundPrevCanvas = document.createElement('canvas');
+    this.groundPrevCanvas.width = this.groundCanvas.width;
+    this.groundPrevCanvas.height = this.groundCanvas.height;
+    this.groundPrevTex = new THREE.CanvasTexture(this.groundPrevCanvas);
+    this.groundPrevTex.colorSpace = THREE.SRGBColorSpace;
+    this.groundPrevTex.minFilter = THREE.LinearMipmapLinearFilter;
+    this.groundPrevTex.magFilter = THREE.LinearFilter;
+    this.groundPrevTex.generateMipmaps = true;
+    this.groundPrevTex.anisotropy = this.groundTex.anisotropy;
+
     // Deliberately semi-transparent over the dark backdrop: the ground carries
     // the measured 2 m field, but the facades carry the finding, and a fully
     // opaque ground at peak hour drowns them.
-    const g = new THREE.Mesh(
-      new THREE.PlaneGeometry(w, h),
-      new THREE.MeshBasicMaterial({ map: this.groundTex, transparent: true, opacity: 0.62 })
-    );
+    const gmat = new THREE.MeshBasicMaterial({
+      map: this.groundTex, transparent: true, opacity: 0.62,
+    });
+    /* Same dissolve as the facades, one level lower: the plane samples both
+     * canvases and mixes on the shared uniform. Both textures are sRGB and are
+     * therefore decoded by the sampler before the mix, so this interpolates in
+     * linear light — the same space the vertex colours are mixed in. */
+    gmat.onBeforeCompile = (sh) => {
+      sh.uniforms.uMix = this._mixU;
+      sh.uniforms.uMapPrev = { value: this.groundPrevTex };
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>',
+          '#include <common>\nuniform float uMix;\nuniform sampler2D uMapPrev;')
+        .replace('#include <map_fragment>',
+          '#ifdef USE_MAP\n'
+          + 'diffuseColor *= mix( texture2D( uMapPrev, vMapUv ),'
+          + ' texture2D( map, vMapUv ), uMix );\n#endif');
+    };
+    gmat.customProgramCacheKey = () => 'hcground';
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(w, h), gmat);
     g.rotation.x = -Math.PI / 2;
     g.position.y = -0.25;
     this.scene.add(g);
@@ -834,39 +1110,17 @@ export class Scene {
 
     const layer = this.groundLayer || 'exceedance';
     let pts, dom, rampName;
-    if (layer === 'persistence') {
-      pts = tiles.persistence;
-      const s = tiles.stats.persistence;
-      dom = [s.min, s.max]; rampName = 'duration';
-    } else if (layer === 'air') {
-      // Air temperature across the AOI spans only about 1-2.6 K at any one
-      // hour. Painted against the whole-day domain it saturates to a single
-      // flat colour, which hides the very spatial pattern a 60 m grid exists to
-      // show. So this layer alone is contrast-stretched to the hour's own
-      // range, and the interface says so wherever it is selected. Absolute
-      // values stay available in the scrubber readout and on hover.
-      //
-      // On the event day these are FortyGuard's measured values. On any other
-      // date they are that day's measured spatial anomaly carried onto the
-      // reanalysis level — a composite, and `tilesAt` says which it handed back.
-      const got = this.data.tilesAt(this.hour);
-      pts = got.rows;
-      this.groundKind = got.kind;
-      const vals = pts.map((r) => r[2]).sort((a, b) => a - b);
-      dom = vals.length
-        ? [vals[Math.floor(vals.length * 0.1)], vals[Math.floor(vals.length * 0.9)]]
-        : this.airDomain;
-      rampName = 'temperature';
-    } else if (this.groundYearLayer) {
+    if (this.groundYearLayer) {
       // An annual per-tile metric: hours above 35 C across the year, tropical
-      // nights, the annual mean. Same composite caveat as the air layer.
+      // nights, the annual mean. These are a composite: on the event day they
+      // are FortyGuard's measured values, and on any other date that day's
+      // measured spatial anomaly carried onto the reanalysis level.
       const rows = this.data.tileYearAt(this.groundYearLayer);
       if (rows) {
         pts = rows;
         const vals = rows.map((r) => r[2]).sort((a, b) => a - b);
         dom = [vals[0], vals[vals.length - 1]];
         rampName = 'duration';
-        this.groundKind = 'composite';
       } else {
         pts = tiles.exceedance;
         const st = tiles.stats.exceedance;
@@ -1012,9 +1266,10 @@ export class Scene {
       /* A shallow floor, raised from 0.34 when the ramp turned round.
        *
        * Ambient occlusion says "this surface sees little sky" by darkening it,
-       * and on the old ramp that was unambiguous because darkness carried no
-       * data — the hot end was cream. It does now: the hottest walls are the
-       * darkest, so a deep floor multiplied a dark red down into the shell and
+       * and on the inferno ramp that was unambiguous because darkness carried no
+       * data — the hot end was cream. It does now, at both ends: the hottest
+       * walls and the coldest are the darkest on a diverging ramp whose middle
+       * is pale, so a deep floor multiplied a dark red down into the shell and
        * the exact surfaces the model exists to find — hot walls in shaded
        * canyons — were the ones it made invisible. A floor of 0.62 keeps enough
        * of the form to read the geometry while leaving the darkness channel
@@ -1067,6 +1322,8 @@ export class Scene {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    // The second painted state, for the dissolve. See `fadeable`.
+    geo.setAttribute('aColorTo', new THREE.Float32BufferAttribute(col.slice(), 3));
     geo.setIndex(new THREE.Uint32BufferAttribute(idx, 1));
     geo.computeVertexNormals();
 
@@ -1076,11 +1333,38 @@ export class Scene {
     // instead comes from a fixed shading factor baked into the vertex colours
     // per panel orientation (see _shadeFor), which is constant per surface and
     // therefore cannot be mistaken for data.
-    this.facadeMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    // Opaque until something is selected: see `ghostable` and GHOST.
+    geo.setAttribute('aGhost',
+      new THREE.BufferAttribute(new Float32Array(pos.length / 3).fill(1), 1));
+
+    this.facadeMesh = new THREE.Mesh(geo, fadeable(ghostable(new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide,
-    }));
+    })), this._mixU));
     this.scene.add(this.facadeMesh);
-    this.facadeColors = geo.getAttribute('color');
+    /* `facadeColors` is the buffer a repaint WRITES, which at rest is also the
+     * buffer the GPU shows — `_mixU` sits at 1. During a dissolve it is the
+     * destination and `color` is the state being left behind. */
+    this.facadeGeo = geo;
+    this.facadeColors = geo.getAttribute('aColorTo');
+    this.facadeGhost = geo.getAttribute('aGhost');
+
+    /* The same geometry a second time, for the selected building alone.
+     *
+     * FrontSide here where the mesh below is DoubleSide, because this copy has
+     * no depth test and therefore no way to sort its own faces: drawn
+     * DoubleSide as the mesh below, so the subject looks exactly as it would
+     * with nothing in front of it — which is the whole claim the overlay makes.
+     * That is only sound because it keeps a real depth test; see `selOverlay`.
+     *
+     * This is the mesh that clears the depth buffer, and it must therefore draw
+     * before the roof copy, which shares the buffer it clears. */
+    this.facadeTop = new THREE.Mesh(geo, fadeable(selOverlay(new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide,
+    })), this._mixU));
+    this.facadeTop.renderOrder = 999;
+    this.facadeTop.visible = false;
+    this.facadeTop.onBeforeRender = (renderer) => renderer.clearDepth();
+    this.scene.add(this.facadeTop);
     this.nQuad = nQuad;
     this._buildPickIndex();
   }
@@ -1140,13 +1424,28 @@ export class Scene {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setAttribute('aColorTo', new THREE.Float32BufferAttribute(col.slice(), 3));
     geo.setIndex(idx);
     geo.computeVertexNormals();
-    this.roofMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    geo.setAttribute('aGhost',
+      new THREE.BufferAttribute(new Float32Array(pos.length / 3).fill(1), 1));
+
+    this.roofMesh = new THREE.Mesh(geo, fadeable(ghostable(new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide,
-    }));
+    })), this._mixU));
     this.scene.add(this.roofMesh);
-    this.roofColors = geo.getAttribute('color');
+    this.roofGeo = geo;
+    this.roofColors = geo.getAttribute('aColorTo');
+
+    // No depth clear of its own: it shares the one the facade copy just made,
+    // so a roof and its walls occlude each other the way they should.
+    this.roofTop = new THREE.Mesh(geo, fadeable(selOverlay(new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide,
+    })), this._mixU));
+    this.roofTop.renderOrder = 1000;
+    this.roofTop.visible = false;
+    this.scene.add(this.roofTop);
+    this.roofGhost = geo.getAttribute('aGhost');
     this.roofPosFlat = new Float32Array(pos);
     this.roofPosElev = new Float32Array(posElev);
   }
@@ -1188,9 +1487,13 @@ export class Scene {
     this.controls.zoomSpeed = 0.85;
     this.controls.screenSpacePanning = false;   // pan across the ground, not the screen
     this.controls.zoomToCursor = true;          // zoom toward what is under the pointer
-    // Left mouse is owned by _initGrabPan. Right mouse remains MapControls'
-    // orbit gesture, and the built-in one-finger touch pan is unchanged.
+    // Both mouse buttons are owned by _initGrabPan now: left pans, right turns
+    // around the building. MapControls' own rotate turns around
+    // `controls.target`, which after a pan is not the building any more — see
+    // the orbiting section. Its two-finger touch gesture is unchanged.
     this.controls.mouseButtons.LEFT = null;
+    this.controls.mouseButtons.RIGHT = null;
+    this.controls.minPolarAngle = ORBIT_MIN_PHI;
     this.controls.target.set(0, 20, 0);
     this.controls.update();
     /* How far the fly-over may roam, as metres from the centre of the study
@@ -1223,19 +1526,30 @@ export class Scene {
     // cancelling input must re-enable them before their own listener sees it.
     this.renderer.domElement.addEventListener('pointerdown', bail, { capture: true });
     this.renderer.domElement.addEventListener('wheel', bail, { capture: true, passive: true });
+    // Reaching for the wheel is reaching for the camera: the revolution stops.
+    // Keydown is deliberately not on this list, because the key that starts the
+    // revolution is a keydown.
+    this.renderer.domElement.addEventListener(
+      'wheel', () => this.setSpin(false), { passive: true });
     window.addEventListener('keydown', bail);
 
     this._initGrabPan();
     this._initZoomGestures();
   }
 
-  /** Predictable desktop map pan in the camera's horizontal frame.
+  /** Predictable desktop map pan in the camera's horizontal frame, and the
+   *  turn-around-the-building gesture that shares its plumbing.
    *
    * A literal ray/ground intersection sounds ideal, but perspective makes an
    * upward drag accelerate sharply as the pointer approaches the horizon. A
    * fixed metres-per-pixel scale for the whole gesture makes left/right and
    * up/down equally responsive. The scale still follows zoom level, as it does
    * in a normal map, and movement ends exactly when the pointer does.
+   *
+   * The right button — and shift with the left, for anyone on a trackpad or a
+   * one-button mouse — turns instead of panning, around the selected building.
+   * Both live in one handler because they are one gesture with two meanings:
+   * the same capture, the same rebasing on each move, the same end.
    */
   _initGrabPan() {
     const el = this.renderer.domElement;
@@ -1248,8 +1562,20 @@ export class Scene {
     el.addEventListener('pointerdown', (e) => {
       // Touch retains MapControls' one-finger gesture; running both handlers
       // for the same contact would double the movement.
-      if (e.pointerType === 'touch'
-          || e.button !== 0 || !this.controls.enabled) return;
+      if (e.pointerType === 'touch' || !this.controls.enabled) return;
+      if (e.button !== 0 && e.button !== 2) return;
+      // A hand on the camera ends the automatic revolution, always. The
+      // alternative is a view that keeps drifting under a drag, which reads as
+      // the model fighting back.
+      this.setSpin(false);
+      const turning = e.button === 2 || e.shiftKey;
+      if (turning) {
+        drag = { id: e.pointerId, x: e.clientX, y: e.clientY, turn: true };
+        el.setPointerCapture?.(e.pointerId);
+        el.classList.add('is-turning');
+        e.preventDefault();
+        return;
+      }
       const r = el.getBoundingClientRect();
       this.camera.updateMatrixWorld();
       right.setFromMatrixColumn(this.camera.matrixWorld, 0);
@@ -1274,6 +1600,22 @@ export class Scene {
 
     el.addEventListener('pointermove', (e) => {
       if (!drag || e.pointerId !== drag.id) return;
+      if (drag.turn) {
+        /* Radians per pixel, against the viewport height on both axes so a
+         * diagonal drag turns and tilts by the same amount per pixel. A full
+         * drag down the height of the window is one revolution, which is the
+         * convention every 3D viewer in this shape uses. */
+        const k = 2 * Math.PI * this.controls.rotateSpeed
+          / Math.max(1, el.getBoundingClientRect().height);
+        // Dragging right walks the camera anticlockwise around the building, so
+        // the near face slides left — the building turns with the hand, exactly
+        // as the ground does under a pan.
+        this.orbitBy(-(e.clientX - drag.x) * k, -(e.clientY - drag.y) * k);
+        drag.x = e.clientX;
+        drag.y = e.clientY;
+        e.preventDefault();
+        return;
+      }
       // Dragging right moves the camera left, and vice versa: the city itself
       // follows the hand, matching a normal 2D map. The same rule applies up
       // and down, with down moving the view centre forward over the ground.
@@ -1300,13 +1642,13 @@ export class Scene {
       if (!drag || (e.pointerId !== undefined && e.pointerId !== drag.id)) return;
       if (el.hasPointerCapture?.(drag.id)) el.releasePointerCapture(drag.id);
       drag = null;
-      el.classList.remove('is-panning');
+      el.classList.remove('is-panning', 'is-turning');
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
     window.addEventListener('blur', () => {
       drag = null;
-      el.classList.remove('is-panning');
+      el.classList.remove('is-panning', 'is-turning');
     });
   }
 
@@ -1348,6 +1690,7 @@ export class Scene {
 
   /** Swing round to north-up, keeping the distance and the tilt. */
   faceNorth() {
+    this.setSpin(false);
     const from = this._modePose();
     const off = this.camera.position.clone().sub(this.controls.target);
     const sph = new THREE.Spherical().setFromVector3(off);
@@ -1359,8 +1702,110 @@ export class Scene {
     this._beginTransit(from);
   }
 
+  /* ------------------------------------------------------------- orbiting
+
+     Turning around a building is not the same gesture as turning the map, and
+     the difference is the pivot. MapControls turns around `controls.target`,
+     which is wherever the last pan left it — so after walking the view across
+     two blocks, "turn right" swings the selected tower out of frame instead of
+     showing you its next wall. Everything below turns around the building
+     itself when one is selected, and around the view centre when none is.
+
+     The rotation is applied to the camera AND the target as one rigid body, so
+     a turn changes which face you are looking at without changing what is
+     centred, and nothing jumps at the start of the gesture.                  */
+
+  /** The point the view turns around: the selected building, or the centre of
+   *  the view when nothing is selected. */
+  _orbitPivot() {
+    if (this.selected !== null && this.data.buildings.attrs[this.selected]) {
+      return this._buildingAnchor(this.selected);
+    }
+    return this.controls.target.clone();
+  }
+
+  /** Turn `dTheta` around the pivot and tilt `dPhi` toward the horizon.
+   *
+   * Positive `dPhi` lowers the eye — larger polar angle, from overhead toward
+   * level — which is the direction a facade comes into view. The tilt is
+   * clamped first and the yaw derived from where the clamp landed, so a
+   * gesture that runs into the limit still turns rather than sticking.
+   */
+  orbitBy(dTheta, dPhi, { animate = false } = {}) {
+    if (!this.controls.enabled) return;
+    const from = animate ? this._modePose() : null;
+    const pivot = this._orbitPivot();
+    const off = this.camera.position.clone().sub(pivot);
+    if (off.lengthSq() < 1e-6) return;
+    const sph = new THREE.Spherical().setFromVector3(off);
+    const phi = Math.min(this.controls.maxPolarAngle,
+      Math.max(ORBIT_MIN_PHI, sph.phi + dPhi));
+    const next = new THREE.Vector3().setFromSpherical(
+      new THREE.Spherical(sph.radius, phi, sph.theta + dTheta));
+    // The same rotation that moved the eye moves the look-at point, which is
+    // what keeps the pair rigid. Deriving it from the two offsets rather than
+    // composing axis rotations by hand means the two can never disagree.
+    const q = new THREE.Quaternion().setFromUnitVectors(
+      off.clone().normalize(), next.clone().normalize());
+    const tOff = this.controls.target.clone().sub(pivot).applyQuaternion(q);
+    this.camera.position.copy(pivot).add(next);
+    this.controls.target.copy(pivot).add(tOff);
+    this.controls.update();
+    if (from) this._beginTransit(from);
+  }
+
+  /** One step round the building, flown. `dir` is +1 for clockwise from above,
+   *  which is what "turn right" means when the ground is not turning. */
+  turn(dir) {
+    this.setSpin(false);
+    this.orbitBy(-dir * ORBIT_STEP, 0, { animate: true });
+  }
+
+  /** One step of tilt. `dir` is +1 to drop toward street level and see the
+   *  facade, -1 to climb and see the roof and the shadow it throws. */
+  tilt(dir) {
+    this.setSpin(false);
+    this.orbitBy(0, dir * TILT_STEP, { animate: true });
+  }
+
+  /** Is the camera walking itself round the building? */
+  get spinning() { return !!this._spin; }
+
+  /** Circle the pivot once, hands-free.
+   *
+   * Four walls at four different temperatures is the finding this model exists
+   * to show, and reaching all four by hand means four deliberate drags. One
+   * revolution, at a speed you can read, is the version of that which needs no
+   * hands — and it stops the moment anything else touches the camera, so it can
+   * never be in the way.
+   */
+  setSpin(on) {
+    if (on && !this.controls.enabled) return;
+    /* Reduced motion is honoured everywhere else in this project — the opening
+     * film, every flown camera move — and deliberately not here. Those are
+     * motion the interface decides to add to something you asked for; this is
+     * motion that IS the thing you asked for, from a button whose only function
+     * is to produce it. Refusing would leave a control that looks broken. The
+     * flown step on the turn pad remains the still alternative. */
+    const next = on ? { dir: 1 } : null;
+    if (!!next === !!this._spin) return;
+    this._spin = next;
+    this.onSpinChange?.(this.spinning);
+  }
+
+  toggleSpin() { this.setSpin(!this._spin); }
+
+  /** One frame of the automatic revolution. */
+  _stepSpin(dt) {
+    if (!this._spin) return;
+    if (!this.controls.enabled) { this.setSpin(false); return; }
+    this.orbitBy(this._spin.dir * (2 * Math.PI / SPIN_PERIOD)
+      * Math.min(0.1, dt), 0);
+  }
+
   /** Step the fly-over's distance by a factor, flying rather than jumping. */
   zoomBy(factor, at = null) {
+    this.setSpin(false);
     const from = this._modePose();
     const t = this.controls.target;
     if (at) {
@@ -1591,6 +2036,14 @@ export class Scene {
       }
       const pr = this._ensurePhotoreal();
       if (!pr.enable(key)) return false;
+      /* A layer built after the click it has to agree with.
+       *
+       * The dissolve is pushed at the moment the selection changes, and until
+       * this line there was nothing to push it to: the Photoreal is constructed
+       * on the first switch-on, so a viewer who picked a building and then
+       * turned the photograph on got the dimming without the see-through half —
+       * the one sequence in which the two halves of a selection came apart. */
+      pr.setSubject(this._subjectSet());
     } else if (this.photoreal) {
       this.photoreal.disable();
     }
@@ -1631,6 +2084,8 @@ export class Scene {
     const hide = this.photorealOn && !this.showSolids;
     if (this.facadeMesh) this.facadeMesh.visible = !hide;
     if (this.roofMesh) this.roofMesh.visible = !hide;
+    this._hidden = hide;
+    this._syncSelOverlay();
   }
 
 
@@ -1850,14 +2305,38 @@ export class Scene {
     // camera move would select or deselect a building every time.
     let downAt = null;
     el.addEventListener('pointerdown', (e) => {
-      downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+      downAt = { x: e.clientX, y: e.clientY, max: 0 };
+    });
+    // How far the pointer has strayed since it went down, at its furthest.
+    // Its own listener rather than a line in the one above, so the variable it
+    // reads is declared before it and the gesture code stays in one place.
+    el.addEventListener('pointermove', (e) => {
+      if (!downAt) return;
+      const d = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+      if (d > downAt.max) downAt.max = d;
     });
     el.addEventListener('pointerup', (e) => {
       if (!downAt) return;
-      const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
-      const held = performance.now() - downAt.t;
+      const moved = Math.max(downAt.max,
+        Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y));
       downAt = null;
-      if (moved > 6 || held > 500) return;   // that was a drag, not a click
+      /* Distance travelled, not time held, and the peak rather than the end.
+       *
+       * This was 6 px OR half a second, and the time half was both the fragile
+       * part and the unnecessary one. A press that never moves is a click by
+       * any reading — people steady the pointer before clicking a sliver of sky
+       * between two towers, and half a second is easy to exceed — so the clock
+       * was throwing away deliberate clicks. Measured: a 700 ms press and an
+       * 8 px wobble were each discarded, and the click meant to clear the
+       * selection did nothing, which is why the selection looked stuck.
+       *
+       * The clock was only ever standing in for one case the old distance check
+       * could not see: a slow drag that wanders off and comes back, whose start
+       * and end are the same point. Tracking the FURTHEST the pointer strayed
+       * catches that directly and needs no timer, so the gesture is decided by
+       * the one thing that actually distinguishes it. Orbiting and panning move
+       * hundreds of pixels; ten is a wobble. */
+      if (moved > 10) return;   // that was a drag, not a click
       const hit = this.hitTest();
       if (this.onPick) this.onPick(hit);
     });
@@ -1897,32 +2376,21 @@ export class Scene {
 
   // ------------------------------------------------------------- colouring
 
-  /** Sampled percentile domain over a large typed array. */
-  static _domain(arr, loPct = 1, hiPct = 99, sample = 120000) {
-    const stride = Math.max(1, Math.floor(arr.length / sample));
-    const s = [];
-    for (let i = 0; i < arr.length; i += stride) if (isFinite(arr[i])) s.push(arr[i]);
-    if (!s.length) return [0, 1];
-    s.sort((a, b) => a - b);
-    return [s[Math.floor((loPct / 100) * (s.length - 1))],
-            s[Math.floor((hiPct / 100) * (s.length - 1))]];
-  }
-
+  /* The temperature scale. One scale, fixed, shared by the walls, the roofs and
+   * the air — see TEMP_DOMAIN in colors.js, which is where the argument for it
+   * and the measurements behind it live.
+   *
+   * These stay as instance fields rather than becoming direct reads of the
+   * constant because eleven call sites already destructure them, and because a
+   * scale is the kind of thing that wants exactly one place to be overridden
+   * from if it ever needs to be again. They are copies, so nothing downstream
+   * can mutate the shared constant. */
   _defaultDomains() {
-    // Wide percentiles, but over the loaded period rather than the year: a tight
-    // window clips the hottest walls, and a year-wide one spends most of the
-    // ramp on temperatures this layer never draws. See setPeriod for the
-    // measurement behind that, and for why rescaling per period does not break
-    // the comparison the instrument actually rests on.
-    this.surfaceDomain = Scene._domain(this.data.active.surface, 0.2, 99.8);
-    this.airDomain = this.data.active.air
-      ? Scene._domain(this.data.active.air, 0.5, 99.5)
-      : [this.surfaceDomain[0], this.surfaceDomain[0] + 12];
+    this.surfaceDomain = TEMP_DOMAIN.slice();
   }
 
   setDomains(d) {
     if (d?.surface) this.surfaceDomain = d.surface;
-    if (d?.air) this.airDomain = d.air;
     this._recolour();
     this._paintGround();
   }
@@ -1932,11 +2400,9 @@ export class Scene {
   //: facade dose over a single heat wave's exceedance invites the eye to read one
   //: as the cause of the other.
   static GROUND_FOR_ANNUAL = {
-    sun_hours: 'degree_hours_35',
     annual_kh35: 'degree_hours_35',
     annual_dose: 'hours_above_35',
     winter_sun: 'mean_c',
-    month_of_peak: 'max_c',
     annual_priority: 'hours_above_35',
   };
 
@@ -1948,58 +2414,211 @@ export class Scene {
     // surfaces in something observed. For the annual layers it shows the matching
     // annual tile metric instead.
     this.groundYearLayer = Scene.GROUND_FOR_ANNUAL[layer] || null;
-    this.groundLayer = (layer === 'persistence') ? 'persistence'
-                     : (layer === 'air') ? 'air'
-                     : this.groundYearLayer ? 'year'
-                     : 'exceedance';
+    this.groundLayer = this.groundYearLayer ? 'year' : 'exceedance';
     this._recolour();
     this._paintGround();
   }
 
-  setHour(h) {
+  setHour(h, { fade = 0, linear = false } = {}) {
     this.hour = h;
-    this._updateSky();
-    this._recolour();
-    this._paintGround();
+    this._repaintTime(fade, { linear });
   }
 
   /** The active period or aggregate changed under us. Repaint everything that
    *  reads it, which is the facades, the roofs and the ground.
    *
-   * The facade domain is recomputed here, and that is a deliberate change of
-   * meaning worth spelling out.
+   * The colour scale is deliberately NOT recomputed here, and that is the whole
+   * point of the method being this short.
    *
-   * main.js used to fix it once, at startup, to the widest range any period
-   * could produce — the annual t_min and t_max planes — so that loading a
-   * January week could never clip. That is a real requirement and it is why the
-   * widening existed. What it cost was measured: over −21.2 to 61.4 °C, the
-   * whole city at the peak hour of a July heat wave lands between 0.72 and 0.90
-   * of the ramp. Seventeen per cent of the scale for every wall on screen, in
-   * the amber-to-cream end of it — which is why Midtown came out a single flat
-   * cream and nothing could be told from anything else. Half the ramp was held
-   * in reserve for a January north wall that this layer never draws.
+   * It used to be. Every period got its own 0.2-99.8 percentiles, on the
+   * argument that a fixed scale spends most of the ramp on temperatures the
+   * loaded period never reaches — which is true, and measured: over the widest
+   * fixed domain then available, the whole city at the peak hour of a July heat
+   * wave landed between 0.72 and 0.90 of the ramp, and Midtown rendered as one
+   * flat cream.
    *
-   * Recomputing per period keeps the clipping guarantee, because the domain is
-   * always the period's own 0.2–99.8 percentiles, and it spends the ramp on the
-   * data actually in front of the viewer: the same peak hour now spans 0.39 to
-   * 0.89.
+   * What that argument missed is that it buys within-period contrast with the
+   * one thing the colour is for. Rescaling per period made January's scale
+   * −8.2 to 11.7 °C and July's 22.2 to 45.6 °C, so a −2 °C wall in January and a
+   * 28 °C wall in July came out the same amber. Scrubbing across the year showed
+   * a city that did not change colour, which is false: those two days are thirty
+   * kelvin apart and that is the finding. The legend's figures did move, which
+   * made it defensible, but a legend that has to be re-read on every scrub is
+   * not a legend, and nobody re-read it.
    *
-   * The invariant main.js was protecting is kept. Its comment asks that the
-   * ramp not rescale "as the clock moves", and it does not: the domain is
-   * constant across all eight hours of a period, so 03:00 and 15:00 stay
-   * directly comparable, which is the comparison the instrument is built on.
-   * Loading a different week does rescale it — but that is a deliberate act,
-   * not a scrub of the clock, and the legend's own figures move with it, so the
-   * change is visible rather than silent.
+   * So the scale is fixed at −20 to 60 °C for every period and every hour, and
+   * the flatness is accepted where it is real. A January day genuinely spans
+   * about eight kelvin and genuinely gets a narrow band of blue; a heat-wave day
+   * spans twenty-one and runs from cream through orange into red. The contrast
+   * now tracks the physics instead of the loaded file.
    */
-  setPeriod() {
-    this.surfaceDomain = Scene._domain(this.data.active.surface, 0.2, 99.8);
-    if (this.data.active.air) {
-      this.airDomain = Scene._domain(this.data.active.air, 0.5, 99.5);
+  setPeriod({ fade = 0, linear = false } = {}) {
+    this._repaintTime(fade, { linear });
+  }
+
+  /* ------------------------------------------------------------- dissolve */
+
+  /** Is a dissolve still running? Anything that wants the settled picture —
+   *  a screenshot, a pixel assertion — has to wait for this to go false. */
+  get fading() { return this._fade !== null; }
+
+  /** How long a dissolve may actually last, in seconds.
+   *
+   *  Zero for a caller that asked for a cut, and zero for a viewer who has
+   *  asked their system not to animate: a dissolve is decoration to them and a
+   *  motion trigger to some of them, and the cut loses nothing but the pleasure
+   *  of it. `?smooth=0` is the same escape hatch for a screenshot run. */
+  _fadeSeconds(want) {
+    if (!(want > 0)) return 0;
+    if (Scene._noMotion === undefined) {
+      Scene._noMotion = (() => {
+        try {
+          if (new URLSearchParams(location.search).get('smooth') === '0') return true;
+          return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+        } catch { return false; }
+      })();
     }
-    this._updateSky();
+    return Scene._noMotion ? 0 : want;
+  }
+
+  /** Repaint for a new time — an hour, a date, a period — over `fade` seconds.
+   *
+   * The repaint itself is unchanged and still costs what it always did. What
+   * changes is where its result lands: with a dissolve asked for, the state
+   * currently on screen is pinned into the `from` half of every data mesh
+   * first, the repaint fills the `to` half, and `_stepFade` walks the mix
+   * across. With no dissolve the repaint goes straight to the screen, which is
+   * what every internal caller still gets by default — only the interface asks
+   * for a dissolve, so nothing else in this file changed behaviour.
+   *
+   * `linear` matters more than it looks. A single step of a played day is one
+   * frame of a continuous sweep, and easing each of them in and out would make
+   * the clock visibly pulse eight times a day. An hour picked by hand is a
+   * discrete move and gets the smoothstep.
+   */
+  _repaintTime(fade = 0, { linear = false } = {}) {
+    const secs = this._fadeSeconds(fade);
+    if (secs > 0) this._pinFadeStart();
+    else { this._fade = null; this._mixU.value = 1; }
+
     this._recolour();
     this._paintGround();
+
+    if (secs > 0) {
+      this._skyTo = this._skyStateAt(this.hour) || this._skyNow;
+      this._fade = { t: 0, dur: secs, linear };
+      this._stepFade(0);
+    } else {
+      this._updateSky();
+    }
+  }
+
+  /** Freeze what is on screen right now into the `from` half of every dissolve.
+   *
+   * The common case is cheap and is the reason the buffers are a pair rather
+   * than a source and a scratch: a settled scene is already showing the `to`
+   * half, so the two attributes simply change places and nothing is copied.
+   *
+   * Interrupting a dissolve — scrubbing the hour strip, or a played day being
+   * paused onto another hour — is the case that costs, because the picture on
+   * screen is a blend that exists nowhere in memory. It has to be evaluated
+   * into `from` before the repaint overwrites `to`. Half a million vertices of
+   * lerp, once, only when the viewer changes their mind mid-dissolve.
+   */
+  _pinFadeStart() {
+    const mix = this._fade ? this._mixU.value : 1;
+    const settle = (geo, target) => {
+      if (!geo) return target;
+      const from = geo.getAttribute('color');
+      const to = geo.getAttribute('aColorTo');
+      if (mix >= 1) {
+        // Settled: the shown buffer becomes the one left behind. No upload —
+        // both buffers are already on the GPU and only the binding changes.
+        geo.setAttribute('color', to);
+        geo.setAttribute('aColorTo', from);
+        return from;
+      }
+      const a = from.array, b = to.array;
+      for (let i = 0; i < a.length; i++) a[i] += (b[i] - a[i]) * mix;
+      from.needsUpdate = true;
+      return to;
+    };
+    this.facadeColors = settle(this.facadeGeo, this.facadeColors);
+    this.roofColors = settle(this.roofGeo, this.roofColors);
+
+    /* The ground is a texture, so the same argument plays out in 2D. Settled,
+     * the current canvas is copied over the previous one; mid-dissolve, it is
+     * composited over it at the mix, which lands on the same blend the shader
+     * was drawing. (That composite is in sRGB where the shader's is in linear
+     * light — a fraction of a byte apart on an image that is about to be
+     * dissolved away, and not worth a second full-resolution pass to fix.) */
+    if (this.groundPrevCanvas) {
+      const pctx = this.groundPrevCanvas.getContext('2d');
+      if (mix >= 1) {
+        pctx.globalCompositeOperation = 'copy';
+        pctx.drawImage(this.groundCanvas, 0, 0);
+        pctx.globalCompositeOperation = 'source-over';
+      } else {
+        pctx.globalAlpha = mix;
+        pctx.drawImage(this.groundCanvas, 0, 0);
+        pctx.globalAlpha = 1;
+      }
+      this.groundPrevTex.needsUpdate = true;
+      this.groundPrevTex.generateMipmaps = true;
+    }
+
+    this._skyFrom = this._skyNow || this._skyStateAt(this.hour);
+    this._mixU.value = 0;
+    // The old dissolve has now been folded into the `from` half and is over.
+    // `_repaintTime` starts the new one once the repaint has landed; until then
+    // the scene is legitimately fade-free, which is what lets `_recolour` treat
+    // a live fade as evidence that something OTHER than the clock moved.
+    this._fade = null;
+  }
+
+  /** Abandon a dissolve and stand on its destination.
+   *
+   * The dissolve is only meaningful between two states of the same picture. Any
+   * repaint that changes what is being drawn rather than when — a selection, a
+   * layer, a highlight, the film's recession — writes only the destination
+   * half, so leaving the mix part-way would blend the new picture with an old
+   * one and show a city half-selected. Landing first is the honest answer, and
+   * it costs at most the tail of a half-second dissolve. */
+  _endFade() {
+    this._fade = null;
+    this._mixU.value = 1;
+    this._updateSky();
+  }
+
+  /** Advance the dissolve by one frame. Driven from `tick`, so it runs on
+   *  elapsed time and a dropped frame costs no progress. */
+  _stepFade(dt) {
+    const f = this._fade;
+    if (!f) return;
+    f.t = Math.min(f.dur, f.t + dt);
+    const u = f.dur > 0 ? f.t / f.dur : 1;
+    const e = f.linear ? u : u * u * (3 - 2 * u);
+    this._mixU.value = e;
+
+    const a = this._skyFrom, b = this._skyTo;
+    if (a && b) {
+      // Azimuth is a bearing, so it is interpolated the short way round: the
+      // sun crossing from 350 to 10 degrees must not sweep backwards through
+      // south, which is what a straight lerp would draw.
+      let d = ((b.az - a.az + 540) % 360) - 180;
+      this._applySky({
+        alt: a.alt + (b.alt - a.alt) * e,
+        az: a.az + d * e,
+        cloud: a.cloud + (b.cloud - a.cloud) * e,
+      });
+    }
+    if (u >= 1) {
+      this._fade = null;
+      this._mixU.value = 1;
+      // Land on the hour's own solar state rather than on the last lerp of it,
+      // so the settled sky is exactly what `_updateSky` would have drawn.
+      this._updateSky();
+    }
   }
 
   /** Highlight a set of building indices — what the analyst uses to point.
@@ -2009,6 +2628,48 @@ export class Scene {
    *  answer to a different kind of question. */
   setHighlight(indices) {
     this.highlighted = (indices && indices.length) ? new Set(indices) : null;
+    this._recolour();
+  }
+
+  /** How far the unselected city is pushed back, 0 (not at all) to 1 (fully).
+   *
+   *  One caller: the opening film, which ramps it up across the sentence that
+   *  introduces the building rather than letting the selection switch it on. The
+   *  interface never touches it, and it is reset to 1 by `clearSelection` — a
+   *  half-applied dim left behind by a film that was skipped mid-beat would be a
+   *  city that never quite comes back. */
+  setDimStrength(k) {
+    const v = Math.max(0, Math.min(1, k));
+    if (this.dimK === v) return;
+    this.dimK = v;
+    this._recolour();
+  }
+
+  /** Pick out a run of BANDS on one building — a floor, or a range of them.
+   *
+   * The model already answers "which building" twice over, with `select` and
+   * with `setHighlight`. It had no way to answer "which part of it", and the
+   * decision layer spends most of its time on exactly that: the schedule names
+   * one storey out of thirty-four, the prescription names a range of them on a
+   * single face, and both were being read out over a building lit uniformly
+   * from pavement to roof. A viewer told "floor twenty-five is the worst" and
+   * shown a whole tower has been told a fact and shown a shape.
+   *
+   * Bands rather than storeys, because bands are what the solve has: ten of
+   * them here, three or four storeys each. Converting is the caller's job — it
+   * needs the building's floor count, which is in the ranking rather than in
+   * the geometry — and the two ends are inclusive.
+   *
+   * The treatment is deliberately the same one `setHighlight` uses between
+   * buildings: the named part keeps its measured colour and lifts, the rest of
+   * the same building drains toward grey. Inventing a second visual language
+   * for "not the subject" would mean a facade that is dim for one reason
+   * sitting beside a facade that is dim for another.
+   */
+  setBandFocus(buildingIndex, lo = null, hi = null) {
+    this.bandFocus = (buildingIndex === null || buildingIndex === undefined || lo === null)
+      ? null
+      : { b: buildingIndex, lo: Math.min(lo, hi ?? lo), hi: Math.max(lo, hi ?? lo) };
     this._recolour();
   }
 
@@ -2031,6 +2692,8 @@ export class Scene {
   }
 
   _recolour() {
+    // Only `_repaintTime` may repaint into a live dissolve; see `_endFade`.
+    if (this._fade) this._endFade();
     const d = this.data;
     const nBand = d.facades.bands;
     const arr = this.facadeColors.array;
@@ -2046,23 +2709,21 @@ export class Scene {
     // Which annual plane, if any, this layer paints. Resolved once per repaint
     // rather than per quad: 294,150 string comparisons per frame is not free.
     const annualPlane = {
-      sun_hours: 'sun_hours', annual_kh35: 'degree_hours_35',
-      annual_dose: 'dose_kwh', winter_sun: 'winter_sun_share',
-      month_of_peak: 'month_of_max',
+      annual_kh35: 'degree_hours_35', annual_dose: 'dose_kwh',
+      winter_sun: 'winter_sun_share',
     }[layer] || null;
     const annualArr = annualPlane ? d.annual[annualPlane] : null;
     const annualDom = annualPlane ? this.annualDomain(annualPlane) : null;
 
-    const dom = layer === 'air' ? this.airDomain : this.surfaceDomain;
+    const dom = this.surfaceDomain;
     const f = (layer === 'priority' || layer === 'annual_priority') ? RAMPS.priority
       : (layer === 'winter_sun') ? RAMPS.diverging
-      : (layer === 'sun_hours' || layer === 'annual_kh35'
-         || layer === 'annual_dose') ? RAMPS.duration
+      : (layer === 'annual_kh35' || layer === 'annual_dose') ? RAMPS.duration
       : RAMPS.temperature;
     // The duration layers read their value from the tile under each address
     // rather than from the panel, and against their own domain rather than the
     // temperature one.
-    const durField = (layer === 'exceedance' || layer === 'persistence') ? layer : null;
+    const durField = (layer === 'exceedance') ? layer : null;
     const durSample = durField ? this._panelField(durField) : null;
     const durDom = durField ? this._durationDomain(durField) : null;
 
@@ -2072,6 +2733,46 @@ export class Scene {
     // point at an answer.
     const sel = this.selected;
     const hi = this.highlighted;
+    const ga = this.facadeGhost.array;
+    // The run of bands one building is currently being asked about, if any.
+    // Resolved once per repaint rather than per quad, like everything else here.
+    const bf = this.bandFocus || null;
+    /* How far the recession is taken this repaint. Interpolated toward 1
+     * rather than switched on, so the film can arrive on a city and let it step
+     * back over a sentence; everywhere else `dimK` is 1 and these are exactly
+     * the two constants. At k = 0 both reduce to the identity, so an undimmed
+     * repaint is the measured colour and not an approximation of it. */
+    const k = this.dimK === undefined ? DIM_FULL : this.dimK;
+    const dim = 1 + (DIM - 1) * k;
+    const desat = DIM_DESAT * k;
+
+    /* The ghost is rewritten only when what is being pointed AT changes.
+     *
+     * It depends on the selection, the highlighted set and the band focus, and
+     * on nothing else — not the hour, not the layer, not the ramp — while
+     * everything around it in this loop depends on all three of those. Left
+     * ungated it added a 4.7 MB attribute upload to every hour tick, which on a
+     * scrubbed timeline is sixty a second to say the same thing sixty times. */
+    const ghostKey = sel === null
+      ? '' : `${sel}|${hi ? [...hi].join(',') : ''}|${bf ? bf.b : ''}`;
+    const ghostDirty = this._ghostSel !== ghostKey;
+    this._ghostSel = ghostKey;
+    this._ghostDirty = ghostDirty;
+    /* The photograph dissolves on the same terms, and off the same key.
+     *
+     * Ghosting is a property of the selection rather than of the surface
+     * carrying the measurement, so switching to the photoreal layer must not
+     * quietly drop it — a tower picked out of the massing model and then looked
+     * at photographically is the same tower, and having it disappear behind its
+     * neighbours the moment the picture arrives is the layer contradicting the
+     * click. The dimming half already survives the switch for free, because the
+     * projected colours are read out of this very loop after it has drained
+     * them; only the see-through half has to be handed over.
+     *
+     * Sent to the layer whether or not it is currently on, so a viewer who
+     * selects a building and then enables the photograph gets a frame that
+     * already agrees with the one they were looking at. */
+    if (ghostDirty && this.photoreal) this.photoreal.setSubject(this._subjectSet());
 
     // Directional term from the *actual* solar position this hour, so the form
     // the eye reads agrees with the physics instead of contradicting it: the
@@ -2084,6 +2785,19 @@ export class Scene {
     const sx = Math.cos(altR) * Math.sin(azR);
     const sz = -Math.cos(altR) * Math.cos(azR);
 
+    /* What share of the ramp this pass actually used, on the drawn 0..1 domain.
+     *
+     * A fixed temperature scale means the legend no longer says anything about
+     * the period in front of you — it reads −20 to 60 °C in January and in July,
+     * which is the entire point and also a real loss, because the old moving
+     * legend did carry that. This hands it back without moving the scale: the
+     * interface brackets the span on the ramp, so a January city is a narrow
+     * blue slice of a scale whose hot end is visibly not being used.
+     *
+     * Accumulated here rather than measured separately because this loop already
+     * visits every quad and already has the value in hand. */
+    let tvLo = Infinity, tvHi = -Infinity;
+
     for (let q = 0; q < this.nQuad; q++) {
       const p = this.quadPanel[q], b = this.quadBand[q];
       let c;
@@ -2091,10 +2805,13 @@ export class Scene {
        *
        * Carried because the photoreal shader now decides *whether* to paint a
        * surface, not only what colour to paint it, and a threshold needs a
-       * quantity. Recovering it from the colour is nearly possible — the ramp
-       * is monotonic in lightness — and "nearly" is not a basis for a rule that
-       * silently drops surfaces. Sun and shade is categorical, so it takes the
-       * two ends of the domain it is already drawn with. */
+       * quantity. It used to be nearly recoverable from the colour, back when
+       * the ramp was monotonic in lightness, and "nearly" was already not a
+       * basis for a rule that silently drops surfaces. The blue-to-red ramp is
+       * not monotonic in lightness at all — −20 degC and +60 degC have the same
+       * luminance — so it is not recoverable even in principle now. Sun and
+       * shade is categorical, so it takes the two ends of the domain it is
+       * already drawn with. */
       let tv;
       if (layer === 'priority' || layer === 'annual_priority') {
         const bi = this.quadBuilding[q];
@@ -2107,9 +2824,6 @@ export class Scene {
         // says, which is why the time controls grey out while one is showing.
         tv = norm(annualArr[p * nBand + b], annualDom[0], annualDom[1]);
         c = f(tv);
-      } else if (layer === 'air') {
-        tv = norm(d.airAt(this.hour, p, b), dom[0], dom[1]);
-        c = f(tv);
       } else if (layer === 'sun') {
         const lit = d.sunlitAt(this.hour, p, b);
         tv = lit ? 1 : 0;
@@ -2121,6 +2835,8 @@ export class Scene {
         tv = norm(d.surfaceAt(this.hour, p, b), dom[0], dom[1]);
         c = f(tv);
       }
+      if (tv < tvLo) tvLo = tv;
+      if (tv > tvHi) tvHi = tv;
       let sh = this.quadAO[q];
       /* The directional lift applies only where the value on the wall is this
          hour's value.
@@ -2135,7 +2851,7 @@ export class Scene {
          sun-and-shade it was also simply redundant: the colour there is already
          categorical. Those layers keep the baked ambient occlusion, which is
          geometry rather than a claim about the hour. */
-      if (sunUp && (layer === 'surface' || layer === 'air')) {
+      if (sunUp && layer === 'surface') {
         const facing = Math.max(0, this.quadNX[q] * sx + this.quadNZ[q] * sz);
         const lit = d.sunlitAt(this.hour, p, b) ? 1 : 0;
         sh *= 1.0 + 0.38 * facing * lit;
@@ -2150,30 +2866,80 @@ export class Scene {
       // 1.0, so an unclamped index ran off the end of the 256-entry table and
       // returned undefined, which propagated as NaN into the colour buffer.
       r = CONTRAST[curve(r)]; g = CONTRAST[curve(g)]; bl = CONTRAST[curve(bl)];
-      const dimmed = (sel !== null && this.quadBuilding[q] !== sel)
-        || (sel === null && hi && !hi.has(this.quadBuilding[q]));
+      /* A band focus is a THIRD reason a quad can be pushed back, and it is the
+       * only one that can push back part of the very building the camera is
+       * pointed at. It applies on top of the other two rather than instead of
+       * them: a storey outside the named run is not the subject whether or not
+       * its building is. */
+      const qb = this.quadBuilding[q];
+      const offBand = bf && qb === bf.b && (b < bf.lo || b > bf.hi);
+      /* Selected OR highlighted is the subject; everything else steps back.
+       *
+       * The `or` is the part worth stating. A highlight used to be ignored
+       * entirely while anything was selected — the rule was "dim everything
+       * that is not the selection", so a set of fourteen buildings picked out by
+       * the analyst while one of them was open in the dossier came out as one
+       * building and thirteen dimmed ones. It is most visible in the
+       * walkthrough, where the beat that says the heat comes off the tower
+       * opposite marks both towers and used to render one: the tower being
+       * blamed was drained to grey by the fact that the tower being heated was
+       * selected, which is precisely backwards. */
+      const isHi = !!hi && hi.has(qb);
+      const isSel = sel !== null && qb === sel;
+      const subject = hi ? (isHi || isSel) : (sel === null || isSel);
+      const dimmed = offBand || !subject;
       if (dimmed) {
         /* Pushed back by draining the colour, not by darkening it.
          *
          * A multiply toward black was right while the ramp's hot end was cream:
-         * dark meant "not the subject" and nothing else. With red as the hot end
-         * darkness is the measurement, so dimming by darkening made every
-         * unselected building read as hotter, and a dimmed hot one vanish into
-         * the shell entirely. Desaturating says "not the subject" using a
-         * channel the data is not speaking on. */
+         * dark meant "not the subject" and nothing else. With deep red at the
+         * hot end and deep blue at the cold one, darkness is the measurement at
+         * both extremes, so dimming by darkening pushed every unselected
+         * building away from 20 degC in whichever direction it already leaned,
+         * and made a dimmed hot or freezing one vanish into the shell entirely.
+         * Desaturating says "not the subject" using a channel the data is not
+         * speaking on. */
         const y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-        r += (y - r) * DIM_DESAT; g += (y - g) * DIM_DESAT; bl += (y - bl) * DIM_DESAT;
-        r *= DIM; g *= DIM; bl *= DIM;
-      } else if (hi && hi.has(this.quadBuilding[q])) {
+        r += (y - r) * desat; g += (y - g) * desat; bl += (y - bl) * desat;
+        r *= dim; g *= dim; bl *= dim;
+      } else if (isHi || (bf && qb === bf.b)) {
         // Lift the highlighted set rather than only dimming the rest: on a dark
         // scene a set of fourteen buildings picked out by dimming five thousand
-        // others is a set nobody can find.
+        // others is a set nobody can find. The same argument holds a storey at a
+        // time — a band lit only by the thirty-three around it going grey is a
+        // band you have to be told about to see.
         r = Math.min(1, r * 1.18 + 0.05);
         g = Math.min(1, g * 1.14 + 0.05);
         bl = Math.min(1, bl * 1.05);
       }
       const o = q * 12;
       for (let k = 0; k < 4; k++) { arr[o + k * 3] = r; arr[o + k * 3 + 1] = g; arr[o + k * 3 + 2] = bl; }
+
+      /* See-through only for a single selection, and never for a highlight set
+       * or a band focus.
+       *
+       * Those two answer "which of these", and their members are scattered
+       * across the whole model — making everything else see-through would put
+       * the entire city into stipple to pick out fourteen buildings that are
+       * already lifted, and stipple everywhere is just a noisier city. One
+       * selected building is the case where something specific is being hidden
+       * by something specific, and it is the case this is for. */
+      /* Everything the view is pointing at stays solid, not only the selection.
+       *
+       * A highlighted set and a band focus are the other two ways this model
+       * says "look here", and they routinely run WITH a selection — the
+       * walkthrough selects one building and lights the tower opposite in the
+       * same beat. Ghosting on the selection alone put that tower into stipple
+       * while the lift meant to pick it out was still being applied to it, so
+       * the one building being argued about came out blown-out and half
+       * dissolved. Whatever is being pointed at is the subject; the ghost is
+       * for everything else. */
+      if (ghostDirty) {
+        const b0 = this.quadBuilding[q];
+        const subject = b0 === sel || (hi && hi.has(b0)) || (bf && b0 === bf.b);
+        ga[q * 4] = ga[q * 4 + 1] = ga[q * 4 + 2] = ga[q * 4 + 3] =
+          (sel !== null && !subject) ? GHOST : 1;
+      }
 
       // Accumulate the projection lookup from the very same numbers. Deriving
       // it here rather than in a second pass is deliberate: a separate
@@ -2196,7 +2962,12 @@ export class Scene {
         }
       }
     }
+    // Clamped to the ramp, because a value off the end of a fixed scale is drawn
+    // at the end of it and the bracket has to agree with what is on screen.
+    this.paintedRange = (tvLo <= tvHi)
+      ? [Math.max(0, tvLo), Math.min(1, tvHi)] : null;
     this.facadeColors.needsUpdate = true;
+    if (ghostDirty) this.facadeGhost.needsUpdate = true;
     if (lutSum !== null) {
       this.photoreal.commitLut();
       this._commitAggregate(pr, f);
@@ -2222,53 +2993,90 @@ export class Scene {
   _commitAggregate(pr, f) {
     const buf = pr.aggBuf, peak = pr.aggPeak;
 
-    /* Stretched across the buildings, not against the panel domain.
+    /* On the same absolute scale as everything else, and NOT ranked.
      *
-     * This is the difference between a choropleth that says something and one
-     * that is a single flat colour over the whole city, and it was measured
-     * rather than guessed. On the peak hour of the surface layer, the peak
-     * facade value of 5,294 buildings spans 0.767 to 0.921 on the panel domain,
-     * with the middle half inside 0.855 to 0.883. The panel domain is set by the
-     * range of *panels* — which includes every shaded low band on every north
-     * wall — and the buildings, taken at their peaks, all sit in a narrow strip
-     * near the top of it. Rendering that strip through the full ramp puts every
-     * building in the same pale cream and the far view says nothing at all.
+     * This used to contrast-stretch each building's peak across the city's own
+     * 2nd-98th percentiles, so the colour was a building's POSITION AMONG ITS
+     * NEIGHBOURS rather than a temperature. That was done for a real reason —
+     * at the peak hour of a heat wave the peaks crowd into a strip a few per
+     * cent wide near the top of the domain, and a fixed scale renders them all
+     * the same deep orange. Ranking spread them out and the far view said
+     * something again.
      *
-     * Switching statistic does not help: the mean over a building's facades
-     * spans 0.061 and the mean of its hottest face spans 0.116, both narrower
-     * than the peak's 0.154. Nothing about the choice of aggregate is the
-     * problem. The scale is.
+     * It was still the wrong trade, for two reasons that only show up away from
+     * that one hour.
      *
-     * So the far regime ranks buildings against each other, on robust
-     * percentiles of the city's own distribution, exactly as the air layer is
-     * already contrast-stretched to its own hour. Two consequences worth being
-     * explicit about: the colour here is a position in the city, not a reading
-     * off the legend beside it, and the threshold slider therefore becomes
-     * "show me the hottest such-and-such per cent", which is the more useful
-     * control at this altitude anyway.
+     * A rank cannot be compared with itself across time. On a February day the
+     * hottest wall in Midtown is about five degrees, and a stretch puts it at
+     * the top of the ramp — so the city came out the same red in winter as at
+     * the peak of a heat wave, and the tooltip beside it said 5.4 degC. A scale
+     * that means something different on every date is not a scale.
+     *
+     * And it disagreed with the rest of the frame. The facade field this same
+     * shader paints up close is absolute, so one building changed colour as you
+     * flew toward it, with nothing on screen to say why.
+     *
+     * So: the raw position on the domain, the same number the panels are drawn
+     * from. The crowding at the peak hour is real and is now shown as what it
+     * is — at the worst hour of a heat wave most walls in Midtown ARE near the
+     * top, and a picture that says so is more honest than one that manufactures
+     * a spread. Discrimination at that hour is what the threshold slider is
+     * for, and it now means what its label says: show me everything above this
+     * position on the legend.
      */
-    const vals = [];
-    for (let i = 0, n = peak.length; i < n; i++) if (peak[i] >= 0) vals.push(peak[i]);
-    let lo = 0, hi = 1;
-    if (vals.length > 20) {
-      vals.sort((a, b) => a - b);
-      lo = vals[Math.floor(vals.length * 0.02)];
-      hi = vals[Math.floor(vals.length * 0.98)];
-    }
-    // A city where every building agrees is a real possibility — one hour of one
-    // annual layer could be flat — and stretching it would manufacture contrast
-    // out of rounding noise. Fall back to the honest, undiscriminating scale.
-    const span = hi - lo;
-    const stretch = span > 1e-3 ? (t) => Math.min(1, Math.max(0, (t - lo) / span))
-                                : (t) => t;
+    /* The selection drains this table too, on the same terms as the geometry.
+     *
+     * The facade LUT gets it for free — those colours are accumulated inside
+     * the repaint loop, after it has desaturated everything that is not the
+     * subject — and it was tempting to assume this table did as well. It does
+     * not: a building's aggregate is written here, straight off the ramp at its
+     * peak, and the ramp knows nothing about what is selected.
+     *
+     * The frame that showed it is the far view with a tower selected. Every
+     * other building went see-through, exactly as asked, and stayed a fully
+     * saturated red while doing it — so the context turned into a field of
+     * bright red noise, which is the loudest thing that can be put on a screen
+     * next to the one building it is supposed to be stepping back from. The
+     * dissolve was working and the frame still pointed at the wrong thing.
+     *
+     * Two halves, both needed: the dissolve says "you can see past this", the
+     * drain says "and it is not what you are looking at". */
+    const sel = this.selected;
+    const hi = this.highlighted;
+    const bf = this.bandFocus || null;
+    const k = this.dimK === undefined ? DIM_FULL : this.dimK;
+    const dim = 1 + (DIM - 1) * k;
+    const desat = DIM_DESAT * k;
 
     for (let i = 0, n = peak.length; i < n; i++) {
       const o = i * 4;
       const t = peak[i];
       if (!(t >= 0)) { buf[o + 3] = 0; continue; }
-      const st = stretch(t);
+      const st = t;
       const c = f(st);
-      buf[o] = c[0]; buf[o + 1] = c[1]; buf[o + 2] = c[2];
+      let r = c[0], g = c[1], b = c[2];
+      // Selected OR highlighted is the subject, exactly as in `_recolour`.
+      const isHi = !!hi && hi.has(i);
+      const isSel = sel !== null && i === sel;
+      const subject = hi ? (isHi || isSel) : (sel === null || isSel);
+      if (!subject) {
+        const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        r = (r + (y - r) * desat) * dim;
+        g = (g + (y - g) * desat) * dim;
+        b = (b + (y - b) * desat) * dim;
+      } else if (isHi || (bf && i === bf.b)) {
+        // The same lift the geometry gets: a set picked out only by everything
+        // else receding is a set nobody can find on a dark scene.
+        r = Math.min(255, r * 1.18 + 13);
+        g = Math.min(255, g * 1.14 + 13);
+        b = Math.min(255, b * 1.05);
+      }
+      buf[o] = r | 0; buf[o + 1] = g | 0; buf[o + 2] = b | 0;
+      /* Alpha is untouched by any of this, and that is deliberate: it carries
+       * the measured value the threshold slider compares against, not the
+       * colour. Draining a building must not also change whether it is above
+       * the cut, or the threshold would move every time something was
+       * selected. */
       buf[o + 3] = 1 + Math.min(254, Math.round(st * 254));
     }
     pr.commitAgg();
@@ -2277,26 +3085,33 @@ export class Scene {
   _recolourRoofs() {
     const d = this.data;
     const arr = this.roofColors.array;
+    const rga = this.roofGhost.array;
     const sel = this.selected;
-    const dom = this.layer === 'air' ? this.airDomain : this.surfaceDomain;
-    const rDurField = (this.layer === 'exceedance' || this.layer === 'persistence')
-      ? this.layer : null;
+    // Set by _recolour, the only caller. See the note there.
+    const ghostDirty = this._ghostDirty;
+    const dom = this.surfaceDomain;
+    const rDurField = (this.layer === 'exceedance') ? this.layer : null;
     const rDurSample = rDurField ? this._buildingField(rDurField) : null;
     const rDurDom = rDurField ? this._durationDomain(rDurField) : null;
 
     const annualPlane = {
-      sun_hours: 'sun_hours', annual_kh35: 'degree_hours_35',
-      annual_dose: 'dose_kwh', winter_sun: 'winter_sun_share',
-      month_of_peak: 'month_of_max',
+      annual_kh35: 'degree_hours_35', annual_dose: 'dose_kwh',
+      winter_sun: 'winter_sun_share',
     }[this.layer] || null;
     const annualArr = annualPlane ? d.annual[annualPlane] : null;
     const annualDom = annualPlane ? this.annualDomain(annualPlane) : null;
     const annualRamp = (this.layer === 'winter_sun') ? RAMPS.diverging
-      : (this.layer === 'sun_hours' || this.layer === 'annual_kh35'
-         || this.layer === 'annual_dose') ? RAMPS.duration
+      : (this.layer === 'annual_kh35' || this.layer === 'annual_dose') ? RAMPS.duration
       : RAMPS.temperature;
     const hi = this.highlighted;
+    const bf = this.bandFocus || null;
+    // The same interpolated strength the facades use — see `_recolour`. Roofs
+    // and walls have to recede together or the city half-fades.
+    const k = this.dimK === undefined ? DIM_FULL : this.dimK;
+    const dim = 1 + (DIM - 1) * k;
+    const desat = DIM_DESAT * k;
     const nBand = d.facades.bands;
+    const nBandTop = nBand - 1;
 
     for (let i = 0; i < this.roofRange.length; i++) {
       const [start, n] = this.roofRange[i];
@@ -2332,9 +3147,7 @@ export class Scene {
         if (ps && ps.length) {
           let sum = 0, cnt = 0;
           for (const p of ps) {
-            const v = this.layer === 'air'
-              ? d.airAt(this.hour, p, d.facades.bands - 1)
-              : d.surfaceAt(this.hour, p, d.facades.bands - 1);
+            const v = d.surfaceAt(this.hour, p, d.facades.bands - 1);
             if (isFinite(v)) { sum += v; cnt++; }
           }
           if (cnt) t = sum / cnt;
@@ -2346,24 +3159,38 @@ export class Scene {
       // against the occluded facades below.
       const rs = 0.94;
       let r = (c[0] / 255) * rs, g = (c[1] / 255) * rs, bl = (c[2] / 255) * rs;
-      const dimmed = (sel !== null && i !== sel) || (sel === null && hi && !hi.has(i));
+      // A roof belongs to the top band, so it joins the focus only when the top
+      // band is inside it. A lit roof over a building whose lit storeys are all
+      // near the pavement points at the wrong end of the tower.
+      const offBand = bf && i === bf.b && bf.hi < nBandTop;
+      // Selected OR highlighted, exactly as in `_recolour` — see the note there.
+      const isHi = !!hi && hi.has(i);
+      const isSel = sel !== null && i === sel;
+      const dimmed = offBand || !(hi ? (isHi || isSel) : (sel === null || isSel));
       if (dimmed) {
         // Desaturate then dim, for the reason given in _recolour: darkness now
         // carries the measurement and cannot also carry "not the subject".
         const y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-        r += (y - r) * DIM_DESAT; g += (y - g) * DIM_DESAT; bl += (y - bl) * DIM_DESAT;
-        r *= DIM; g *= DIM; bl *= DIM;
-      } else if (hi && hi.has(i)) {
+        r += (y - r) * desat; g += (y - g) * desat; bl += (y - bl) * desat;
+        r *= dim; g *= dim; bl *= dim;
+      } else if (isHi || (bf && i === bf.b)) {
         r = Math.min(1, r * 1.18 + 0.05);
         g = Math.min(1, g * 1.14 + 0.05);
         bl = Math.min(1, bl * 1.05);
       }
+      const subject = i === sel || (hi && hi.has(i)) || (bf && i === bf.b);
+      const gv = (sel !== null && !subject) ? GHOST : 1;
       for (let k = 0; k < n; k++) {
         const o = (start + k) * 3;
         arr[o] = r; arr[o + 1] = g; arr[o + 2] = bl;
+        if (ghostDirty) rga[start + k] = gv;
       }
     }
     this.roofColors.needsUpdate = true;
+    if (ghostDirty) {
+      this.roofGhost.needsUpdate = true;
+      this._syncSelOverlay();
+    }
   }
 
   /* ------------------------------------------------- ground-field samples
@@ -2414,7 +3241,44 @@ export class Scene {
     return st ? [st.min, st.max] : [0, 1];
   }
 
+  /** Show the never-occluded copy of the subject only while there is one.
+   *
+   * With nothing selected every vertex carries full alpha, so the overlay's
+   * "keep the full-alpha fragments" test would let the entire city through and
+   * draw it over itself with no depth test — the one state in which this mesh
+   * must not be on. It also follows the massing's own visibility, so switching
+   * to the photoreal layer does not leave one building hanging in the air. */
+  /** The buildings the view is pointing at, or null when nothing is selected.
+   *
+   * The same rule the repaint applies quad by quad, in one place: a selection,
+   * whatever is highlighted alongside it, and any building under a band focus.
+   * Read by the photoreal layer, which cannot re-derive it — it has no vertex
+   * to hang the answer on and would otherwise be a second copy of a rule that
+   * has already changed once (see the note on `subject` in `_recolour`). */
+  _subjectSet() {
+    if (this.selected === null) return null;
+    const hi = this.highlighted, bf = this.bandFocus;
+    return new Set([this.selected, ...(hi || []), ...(bf ? [bf.b] : [])]);
+  }
+
+  _syncSelOverlay() {
+    const on = this.selected !== null && !this._hidden;
+    if (this.facadeTop) this.facadeTop.visible = on;
+    if (this.roofTop) this.roofTop.visible = on;
+  }
+
   select(buildingIndex) {
+    // Nothing left to walk around once the selection is gone.
+    if (buildingIndex === null) this.setSpin(false);
+    // A band focus belongs to the building it was set on. Carrying it across a
+    // selection would drain a run of storeys on a building nobody asked about,
+    // which reads as a rendering fault rather than as an answer.
+    if (this.bandFocus && this.bandFocus.b !== buildingIndex) this.bandFocus = null;
+    // A partial dim is a thing the film sets up and takes down across one beat.
+    // Deselecting is the end of that, and of every other reason to be dimmed, so
+    // the strength goes back to full here — a film skipped part way through its
+    // ramp must not leave the city permanently half-drained.
+    if (buildingIndex === null) this.dimK = DIM_FULL;
     this.selected = buildingIndex;
     this._placePin(buildingIndex);
     this._recolour();
@@ -2432,8 +3296,136 @@ export class Scene {
     // use because nobody clicks during the three seconds the flight lasts; it
     // is not invisible in the walkthrough, whose third chapter selects a
     // building the instant the descent hands over.
+    this.setSpin(false);
     this._abortFly(true);
     const from = this._modePose();
+    const c = this._buildingAnchor(buildingIndex);
+    const h = a.h;
+    // No transition from setView: it would fly to the pose the view implies,
+    // which is not the pose this method is about to set. The flight is started
+    // here instead, once the camera is where the building wants it.
+    this.setView(null, { animate: false });
+    this.controls.target.copy(c);
+    const dist = Math.max(150, h * 2.4);
+    this.camera.position.set(c.x + dist * 0.75, h * 1.05 + 90, c.z + dist * 0.75);
+    this.controls.update();
+    this._beginTransit(from);
+  }
+
+  /* Frame ONE FACE of one building, at ONE HEIGHT on it.
+   *
+   * `focus` frames a whole building from a fixed corner, which is the right
+   * answer to a click: it does not know which wall you meant, so it takes the
+   * three-quarter view that shows two of them. The walkthrough always knows.
+   * It says "the north-west face takes the late sun" and then "the north-east
+   * face never sees the sun at all", and those are two sentences about two
+   * walls that a single corner view either shows badly or does not show at all
+   * — the second of them is round the back.
+   *
+   * `bearing` is where the CAMERA STANDS, as a compass bearing from the
+   * building, so a north-west face is read from 315 and a north-east one from
+   * 45. Scene x is east and scene −z is north, so a bearing lands the eye at
+   * (sin, −cos), which is the one line here worth checking against the
+   * projection note at the top of this file.
+   *
+   * `height` is metres above the pavement, and it is what makes the floor
+   * beats mean anything: told the twenty-fifth storey of a thirty-four storey
+   * tower is the worst one, the camera should be level with it rather than
+   * looking down on the whole building from the height of its roof.
+   */
+  frameFacade(buildingIndex, { bearing = 225, height = null, dist = null,
+                               rise = 0.72 } = {}) {
+    const a = this.data.buildings.attrs[buildingIndex];
+    if (!a) return;
+    // A frame is a deliberate composition; an automatic revolution would start
+    // turning out of it on the next frame. The caller turns the spin back on
+    // when it wants the shot to move.
+    this.setSpin(false);
+    this._abortFly(true);
+    const from = this._modePose();
+    const c = this._buildingAnchor(buildingIndex);
+    const y = height === null ? c.y : Math.max(12, height);
+    /* Standoff and eye height, and the two of them together are the whole
+     * problem this method has.
+     *
+     * A wall in Midtown is almost never visible from in front of it. Stand a
+     * camera at street level at the bearing the wall faces and what fills the
+     * frame is whatever is built on the other side of that street — which on
+     * this block is a forty-five-storey tower, and it is the tower the chapter
+     * is about to blame for the heat. Backing further off makes this worse, not
+     * better: every extra metre of standoff is another building between the eye
+     * and the wall. The first two attempts here both did that, at 1.55 and then
+     * 2.5 heights, and produced a shot of a pale box with a small orange stripe
+     * behind it.
+     *
+     * So the eye goes UP instead of back. `rise` is the height gained per metre
+     * of standoff, and at 0.72 the camera clears the roofline of the block in
+     * front and looks down the face at about forty degrees — which is both the
+     * angle from which a whole wall is visible at once, and the angle an aerial
+     * unit would actually shoot it from.
+     *
+     * These two numbers are tighter than they look. 0.62 and 1.8 heights was
+     * tried, to show more wall and less roof, and put the neighbouring block's
+     * roof straight back across the middle of the frame. There is not much room
+     * between "too low to see over the street" and "too high to see the wall". */
+    const d = dist === null ? Math.max(210, a.h * 2.0) : dist;
+    const az = (bearing * Math.PI) / 180;
+    this.setView(null, { animate: false });
+    this.controls.target.set(c.x, y, c.z);
+    this.camera.position.set(
+      c.x + Math.sin(az) * d,
+      y + d * rise,
+      c.z - Math.cos(az) * d);
+    this._clampOrbitView();
+    this.controls.update();
+    this._orbitFog();
+    this._beginTransit(from);
+  }
+
+  /** Frame two buildings at once, from the side that has both in it.
+   *
+   * Chapter three's turn is that the shaded wall is hot because of the tower
+   * standing opposite it, and a claim about two buildings needs a shot with two
+   * buildings in it. Pulling back from one of them by a fixed factor does not
+   * reliably produce that — whether the other is in frame depends on which way
+   * the camera happened to be pointing — so this stands the camera off along
+   * the perpendicular to the line between them, which is the one bearing from
+   * which neither hides the other.
+   */
+  framePair(aIndex, bIndex, { rise = 0.42, pad = 2.3 } = {}) {
+    const A = this._buildingAnchor(aIndex);
+    const B = this._buildingAnchor(bIndex);
+    const ha = this.data.buildings.attrs[aIndex]?.h || 60;
+    const hb = this.data.buildings.attrs[bIndex]?.h || 60;
+    this.setSpin(false);
+    this._abortFly(true);
+    const from = this._modePose();
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    mid.y = Math.max(ha, hb) * 0.5;
+    // Perpendicular, in plan, to the line joining them.
+    const dx = B.x - A.x, dz = B.z - A.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const px = -dz / len, pz = dx / len;
+    const d = Math.max(220, (len * 0.5 + Math.max(ha, hb) * 0.5) * pad);
+    this.setView(null, { animate: false });
+    this.controls.target.copy(mid);
+    this.camera.position.set(mid.x + px * d, mid.y + d * rise, mid.z + pz * d);
+    this._clampOrbitView();
+    this.controls.update();
+    this._orbitFog();
+    this._beginTransit(from);
+  }
+
+  /** The point a building is looked at, and turned around: the centre of its
+   *  footprint at a little over half its height.
+   *
+   *  Half height rather than ground, because a pivot on the pavement swings the
+   *  tower through the top of the frame as soon as the camera tilts; and the
+   *  centroid of the facade panels rather than of the footprint polygon,
+   *  because the panels are what is being read. The 140 m ceiling keeps the
+   *  pivot on the part of a very tall tower that fits on screen. */
+  _buildingAnchor(buildingIndex) {
+    const a = this.data.buildings.attrs[buildingIndex];
     const ps = this.data.panelsOfBuilding.get(buildingIndex);
     let x = 0, y = 0;
     if (ps && ps.length) {
@@ -2441,16 +3433,7 @@ export class Scene {
       for (const p of ps) { x += xy[p * 4]; y += xy[p * 4 + 1]; }
       x /= ps.length; y /= ps.length;
     }
-    const h = a.h;
-    // No transition from setView: it would fly to the pose the view implies,
-    // which is not the pose this method is about to set. The flight is started
-    // here instead, once the camera is where the building wants it.
-    this.setView(null, { animate: false });
-    this.controls.target.set(x, Math.min(h * 0.55, 140), -y);
-    const dist = Math.max(150, h * 2.4);
-    this.camera.position.set(x + dist * 0.75, h * 1.05 + 90, -y + dist * 0.75);
-    this.controls.update();
-    this._beginTransit(from);
+    return new THREE.Vector3(x, Math.min((a ? a.h : 0) * 0.55, 140), -y);
   }
 
   /** Back to the opening view.
@@ -2464,6 +3447,7 @@ export class Scene {
    * progress, which would otherwise carry on and overwrite it a frame later.
    */
   resetView() {
+    this.setSpin(false);
     this._abortFly(true);
     const from = this._modePose();
     this.setView(null, { animate: false });
@@ -2628,7 +3612,31 @@ export class Scene {
     this.camera.updateProjectionMatrix();
   }
 
+  /* Stream Google's tiles without drawing the city.
+   *
+   * The opening film parks `tick` entirely — the application is a
+   * full-resolution render behind an opaque overlay for those twenty-five
+   * seconds, which is pure waste and, on a weak GPU, the difference between the
+   * film playing at speed and playing in slow motion. Parking it also parked
+   * the tileset, because that is updated from inside `tick`, so the layer began
+   * streaming from nothing at the exact moment the film handed the screen over
+   * and the first shot of the city was the detail ramp opening: blurry, then
+   * popping into focus over the better part of a minute.
+   *
+   * This is the part of `tick` the film can afford. `update()` moves the camera
+   * matrix, re-reads the screen-space error and asks the tileset to refine —
+   * network and parsing, no draw call — so the warm-up happens against the pose
+   * the app is already holding while the globe has the screen. What the pause
+   * exists to prevent is the render, and that stays prevented. */
+  warmPhotoreal() {
+    if (this.photorealOn && this.photoreal) this.photoreal.update();
+  }
+
   tick(dt) {
+    // The dissolve between two clock states runs on the frame clock rather than
+    // on a timer, so it keeps time with the render and a stalled frame costs it
+    // no progress. It touches uniforms only — see `fadeable`.
+    if (this._fade) this._stepFade(dt);
     // A flight owns the camera outright while it runs, so it is checked before
     // anything else: the orbit controls' update would otherwise drag the camera
     // back to their end of the move on the very frame it started.
@@ -2649,6 +3657,7 @@ export class Scene {
       // so it must not run while the flight owns the transform.
       this._stepFly();
     } else {
+      this._stepSpin(dt);
       this.controls.update();
       // Touch pan and cursor zoom still pass through MapControls, so apply the
       // same boundary invariant after its update.

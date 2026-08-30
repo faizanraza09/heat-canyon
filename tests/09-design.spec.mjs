@@ -48,9 +48,7 @@ test('the palette is the designed one, and the old one is gone', async ({ page }
   expect(t['--good'].toLowerCase()).toBe('#7fa66a');
   expect(t['--panel']).toContain('13, 12, 11');
 
-  // The shell is the warm near-black, not the cool blue-black it replaced — and
-  // the 3D view clears and fogs to the same colour, so there is no seam where a
-  // panel's blur meets the model behind it.
+  // The shell is the warm near-black, not the cool blue-black it replaced.
   const body = await styleOf(page, 'body', ['background-color']);
   expect(body['background-color']).toBe('rgb(10, 9, 8)');
 
@@ -62,8 +60,15 @@ test('the palette is the designed one, and the old one is gone', async ({ page }
       fog: s.scene.fog.color.getHexString(),
     };
   });
-  expect(scene.clear).toBe('0a0908');
-  expect(scene.fog).toBe('0a0908');
+  /* Clear colour and fog must be the SAME colour, so there is no seam where a
+   * panel's blur meets the model behind it. That is the invariant; the value is
+   * not. Both used to be the shell's own #0A0908 and both were asserted as that
+   * literal, which stopped being true when the sky started driving them — the
+   * fog now takes the horizon of whatever hour is showing, at 30%, so it is a
+   * warm grey at three in the afternoon and near-black at three in the morning.
+   * See `_updateSky` in scene.js. Asserting they agree is what this test was
+   * actually for. */
+  expect(scene.clear).toBe(scene.fog);
 });
 
 test('one heat ramp carries every quantity, and it is the designed one', async ({ page }) => {
@@ -78,19 +83,29 @@ test('one heat ramp carries every quantity, and it is the designed one', async (
       // place, and the viewer learns to read it once.
       sameDuration: at('duration', 0.45) === at('temperature', 0.45),
       samePriority: at('priority', 0.68) === at('temperature', 0.68),
-      // The stops are uneven on purpose — the hot end is stretched, because that
-      // is where the finding is.
+      // The stops are uneven on purpose — the warm half is stretched, because
+      // that is where the finding is.
       mid: at('temperature', 0.45),
       css: m.CANYON_CSS,
+      // Read against TEMP_DOMAIN the ramp's landmarks fall on round numbers,
+      // which is the whole reason the scale is fixed at −20..60 rather than at
+      // whatever the loaded period happens to span.
+      domain: m.TEMP_DOMAIN.join(','),
     };
   });
-  expect(ramp.cold).toBe('18,16,30');
-  expect(ramp.hot).toBe('247,231,190');
-  expect(ramp.mid).toBe('136,46,60');
+  // Cold is blue and hot is red, in that order. Both ends are deliberately the
+  // same distance from the #0A0908 shell — 2.58:1 — so neither is the one that
+  // disappears into it.
+  expect(ramp.cold).toBe('44,82,145');
+  expect(ramp.hot).toBe('163,26,34');
+  // The hinge: a near-neutral pale, not a saturated green. A ramp that crosses
+  // blue to red through green throws false edges wherever it passes the middle.
+  expect(ramp.mid).toBe('192,207,212');
   expect(ramp.sameDuration).toBe(true);
   expect(ramp.samePriority).toBe(true);
   // The legend swatch is the authored stops, not a resampling of them.
-  expect(ramp.css).toContain('rgb(136,46,60) 45%');
+  expect(ramp.css).toContain('rgb(186,205,214) 44%');
+  expect(ramp.domain).toBe('-20,60');
 });
 
 /* --------------------------------------------------------------------- type */
@@ -138,8 +153,11 @@ test('three regions, and the rail is clear of both panels', async ({ page }) => 
   expect(boxes.left.l).toBe(24);
   expect(boxes.left.t).toBe(24);
   expect(boxes.side.r).toBe(boxes.vw - 24);
-  // The ranking stops short of the rail rather than running behind it.
-  expect(boxes.side.b).toBe(boxes.vh - 128);
+  // The ranking runs to the same 24px inset as everything else. It used to stop
+  // 128px short, to clear a rail that spanned the full width; the rail is inset
+  // between the panels now, so the reason for the gap went with it. What still
+  // has to hold is the assertion below: the rail is clear of both panels.
+  expect(boxes.side.b).toBe(boxes.vh - 24);
 
   // The rail sits in the gap, not under a panel — the whole reason its margins
   // are derived from the panel widths rather than hand-copied.
@@ -171,11 +189,21 @@ test('the metric list is the designed row, unit and all', async ({ page }) => {
     height: Math.round(b.getBoundingClientRect().height),
   })));
 
+  /* Eight rows, and this list is meant to be edited by hand when a layer is
+   * added or cut. That is the job of a design spec: a change to the instrument's
+   * front door should have to be typed out somewhere a reviewer will read.
+   *
+   * It was thirteen. Four were cut as redundant — see the note above LAYERS in
+   * ui.js for which and why — and one, "Where to act first", was split into a
+   * heat-wave and an annual version that deliberately disagree. */
   expect(rows.map((r) => r.name)).toEqual([
     'Façade temperature', 'Sun and shade', 'Hours above 35 °C',
-    'Longest unbroken run', 'Air temperature', 'Where to act first',
+    'Where to act — heat wave',
+    'Where to act — the year', 'Annual heat dose', 'Annual solar dose',
+    'Winter sun share',
   ]);
-  expect(rows.map((r) => r.unit)).toEqual(['°C', '', 'h', 'h', '°C', 'score']);
+  expect(rows.map((r) => r.unit)).toEqual(
+    ['°C', '', 'h', 'score', 'score', 'K·h', 'kWh/m²', '']);
   for (const r of rows) {
     expect(r.inside, `"${r.name}" unit is outside the panel`).toBe(true);
     // 13px of padding either side of an 18px line: the design's 44px row.
@@ -201,10 +229,18 @@ test('the ranking keeps its whole meta line and colours the score by the ramp',
       expect(r.meta).toMatch(/homes|floors/);
       expect(r.colour, `row "${r.score}" has no ramp colour`).toMatch(/^rgb\(/);
     }
-    // A high score is at the pale end of the ramp, a low one is not.
+    /* A high score is further up the ramp than a low one.
+     *
+     * Measured as red minus blue rather than as total brightness. Brightness
+     * was the right test while the ramp ended pale, and it is the wrong one on
+     * a diverging ramp: the blue end and the red end have the same luminance by
+     * construction, so a sum over the channels can order them either way round
+     * or not at all. Red minus blue runs −101 at the cold end through +20 at
+     * the hinge to +129 at the hot end, monotonically, which is the property
+     * this assertion actually wants. */
     const top = rows[0].colour.match(/\d+/g).map(Number);
     const bottom = rows[rows.length - 1].colour.match(/\d+/g).map(Number);
-    expect(top[0] + top[1] + top[2]).toBeGreaterThan(bottom[0] + bottom[1] + bottom[2]);
+    expect(top[0] - top[2]).toBeGreaterThan(bottom[0] - bottom[2]);
   });
 
 test('picking a building opens a card on the left and keeps the ranking',
@@ -237,7 +273,9 @@ test('picking a building opens a card on the left and keeps the ranking',
 
     await page.click('#selcard .more');
     await expect(page.locator('#selcard .selmore')).toBeVisible();
-    await expect(page.locator('#selcard .selmore .chart')).toBeVisible();
+    // Two charts now — the monthly bars and the vertical height profile — so this
+    // has to name one rather than resolving to both and failing strict mode.
+    await expect(page.locator('#selcard .selmore .chart').first()).toBeVisible();
 
     // And the model marks it: dimmed neighbours plus a pin over the roof.
     const pin = await page.evaluate(() => {
@@ -256,11 +294,16 @@ test('the rail carries the clock, the hours and the sun line', async ({ page }) 
     [...document.querySelectorAll('#hours button')].map((b) => b.textContent));
   expect(hours).toEqual(['03', '06', '09', '12', '15', '18', '21', '00']);
 
+  /* The clock, the air, the sun. The zone suffix and the word BEARING both went
+   * from this line — it reads "2026-07-02 15:00 · AIR 38.7 °C · SUN 53.9° · AZ
+   * 252.4° · BEAM 743 W/m²" now. The date carries the day and the hour chips
+   * carry the zone, so repeating EDT on every readout was three characters
+   * spent saying what nothing else in the interface contradicts. */
   const line = await page.locator('#time-meta').textContent();
-  expect(line).toMatch(/EDT/);
+  expect(line).toMatch(/\d{4}-\d{2}-\d{2}\s+\d{2}:00/);
   expect(line).toMatch(/AIR/);
   expect(line).toMatch(/SUN/);
-  expect(line).toMatch(/BEARING/);
+  expect(line).toMatch(/AZ/);
 
   // Space runs the day, and the arrows walk it.
   await page.keyboard.press('ArrowRight');
@@ -325,10 +368,11 @@ test('RESET VIEW puts the camera back where it started', async ({ page }) => {
 test('What if ends on the wall temperature the intervention actually buys',
   async ({ page }) => {
     await openApp(page);
-    await setTab(page, 'whatif');
+    // What if is a pane inside the Decide tab; it used to be a tab of its own.
+    await setTab(page, 'decide');
 
     const rows = await page.evaluate(() =>
-      [...document.querySelectorAll('#tab-whatif tbody tr')].map((r) => r.cells[0].textContent));
+      [...document.querySelectorAll('#tab-decide tbody tr')].map((r) => r.cells[0].textContent));
     expect(rows).toEqual(['Cool roofs', 'Cool pavement', 'Street trees',
                           'Façade shading', 'Everything at once']);
 
@@ -414,10 +458,10 @@ test('the film runs under a real transport bar', async ({ page }) => {
   await page.click('#film-begin');
   await page.waitForTimeout(1500);
 
-  // Four segments, each sized by its own chapter's length.
+  // Five segments, each sized by its own chapter's length.
   const segs = await page.evaluate(() => [...document.querySelectorAll('#film-segs .seg')]
     .map((s) => ({ label: s.querySelector('.n').textContent, w: Math.round(s.getBoundingClientRect().width) })));
-  expect(segs.map((s) => s.label)).toEqual(['I', 'II', 'III', 'IV']);
+  expect(segs.map((s) => s.label)).toEqual(['I', 'II', 'III', 'IV', 'V']);
   expect(new Set(segs.map((s) => s.w)).size).toBeGreaterThan(1);
 
   // The clock runs, chapter stepping seeks, and pause holds.

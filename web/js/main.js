@@ -1,6 +1,6 @@
 /* Wiring. */
 
-import { load, domain } from './data.js';
+import { load } from './data.js';
 import { Scene } from './scene.js';
 import { UI, boot, bootDone } from './ui.js';
 import { Film } from './film.js';
@@ -107,44 +107,45 @@ async function start() {
   // optimisation, and the film must not wait on it.
   if (film) scene.loadBasemap().then(() => scene.prime());
 
-  // ONE COLOUR SCALE FOR THE WHOLE YEAR, not for the day.
+  // ONE COLOUR SCALE FOR THE WHOLE YEAR, AND FOR EVERY YEAR.
   //
-  // The ramp has to mean the same thing at 03:00 as at 15:00, or playing the day
-  // reads as the legend rescaling rather than the city changing. Once the platform
-  // covered a year that requirement got stronger, not weaker: scrubbing from July
-  // to January with a per-period scale would show an identical-looking city in
-  // both, and the entire point is that they are 30 K apart. So the domain is taken
-  // from the ANNUAL extremes — the minimum of the annual minima and the maximum of
-  // the annual maxima across every facade band — and it never moves again.
+  // The scale used to be computed here, from the loaded data, and handed to the
+  // scene. It is now a constant — TEMP_DOMAIN in colors.js — that the scene
+  // holds from the moment it is constructed, so there is nothing to hand it and
+  // nothing that can arrive too late.
   //
-  /* The percentiles are wide on purpose: a 1-99 window over one day came out at
-   * 28-45 degC while peak-hour surfaces sit at 40-45, which crushed the hour of
-   * interest into the top of the ramp and clipped the hottest 3% to flat white —
-   * the sunlit walls that are the whole point. 0.2-99.8 over the period keeps
-   * them.
-   *
-   * This used to widen the surface domain further, to the annual t_min and t_max
-   * planes, so that loading any of the thirteen periods could never clip. The
-   * guarantee was worth having; the price was not. Measured over the resulting
-   * -21.2 to 61.4 degC span, every wall in Midtown at the peak hour of the heat
-   * wave fell between 0.72 and 0.90 of the ramp — seventeen per cent of the
-   * scale, all of it in the amber-to-cream end — and the city rendered as one
-   * flat cream with nothing distinguishable from anything else. Half the ramp
-   * was reserved for a January north wall this layer never draws.
-   *
-   * The clipping guarantee now comes from Scene.setPeriod recomputing the domain
-   * against whichever period is loaded, which is both safe and far better spent.
-   * The annual planes keep their own per-plane domains and are unaffected. */
-  scene.setDomains({
-    surface: domain(data.active.surface, 0.2, 99.8),
-    air: domain(data.hourly.t_air_c, 0.5, 99.5),
-  });
+  // The requirement this file was always protecting is unchanged and now
+  // stronger. The ramp has to mean the same thing at 03:00 as at 15:00, or
+  // playing the day reads as the legend rescaling rather than the city changing.
+  // Once the platform covered a year that requirement got stronger, not weaker:
+  // scrubbing from July to January with a per-period scale showed an
+  // identical-looking city in both, and the entire point is that they are 30 K
+  // apart. The scale it computed here was per-period all the same, because
+  // Scene.setPeriod recomputed it on every scrub; fixing the constant is what
+  // finally makes the invariant hold across days as well as across hours.
+  //
+  // See colors.js for the bounds, the measurements behind them, and the
+  // within-day contrast the fixed scale gives up in exchange.
 
   setLoad(0.9, 'ready');
   const ui = new UI(data, scene);
 
   scene.onPick = (hit) => {
     if (!hit) { ui.clearSelection(); return; }
+    /* Clicking the selected building again lets it go.
+     *
+     * Clearing a selection had three routes and all three were awkward: Escape,
+     * a CLOSE button folded into the card, and clicking empty space — which
+     * sounds fine until you measure it. Once the camera has framed a building,
+     * 96% of the view IS building, so "click away" means hunting the 4% of
+     * pixels showing sky or street. There was no reliable place to click, and
+     * the honest reading of that is that you could not put a building down.
+     *
+     * The subject is the one target always in frame and always on top, so it is
+     * the one target this gesture can rely on. Clicking a DIFFERENT building
+     * still selects it, which is what a click on a building has always meant;
+     * only clicking the one already chosen is read as letting go of it. */
+    if (scene.selected === hit.building) { ui.clearSelection(); return; }
     ui.showBuilding(hit.building);
   };
 
@@ -164,6 +165,8 @@ async function start() {
     const dt = Math.min(0.2, (t - last) / 1000);
     last = t;
     if (!paused) scene.tick(dt);
+    // Parked for the render, not for the tileset. See Scene.warmPhotoreal.
+    else scene.warmPhotoreal();
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
@@ -279,7 +282,7 @@ function runFilm(film, data, scene, ui, resume) {
     begin.disabled = false;
     // The runtime is on the button, so the choice to watch is an informed one.
     const runtime = (t) => {
-      begin.innerHTML = `Watch the film&nbsp;&nbsp;·&nbsp;&nbsp;${t}`;
+      begin.innerHTML = `Watch the walkthrough&nbsp;&nbsp;·&nbsp;&nbsp;${t}`;
     };
     // ...and it is re-printed if it changes. It can change exactly once: the
     // film asks the server for its narration while this card is up, and a beat

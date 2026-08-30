@@ -56,9 +56,25 @@ async function stubGoogle(page) {
   return escaped;
 }
 
-/** Bring the layer up against the stub and hand back the live tileset. */
+/** Bring the layer up against the stub and hand back the live tileset.
+ *
+ * Through the toggle rather than through the scene API. This called
+ * `setPhotoreal` directly, which was harmless while the layer opened itself on
+ * load — the button had already run and shown the look controls by the time any
+ * test looked. Now that the suite loads with `?photoreal=0`, reaching past the
+ * button leaves a live tileset behind a hidden panel, which is not a state a
+ * viewer can ever be in, and the reach-control test failed on a slider that a
+ * real user would have been looking at.
+ *
+ * The wait is for the key rather than a fixed pause: it arrives from
+ * /api/config asynchronously, and a click that lands first opens the key box
+ * instead of the layer. */
 async function enable(page) {
-  await page.evaluate(() => window.HC.scene.setPhotoreal(true, 'AIzaSTUB-intercepted-never-sent'));
+  await page.waitForFunction(
+    () => /server/i.test(document.getElementById('pr-status')?.textContent || ''),
+    null, { timeout: 30_000 },
+  );
+  await page.click('#pr-toggle');
   await page.waitForFunction(() => !!window.HC.scene.photoreal?.tiles, null, { timeout: 30_000 });
 }
 
@@ -155,6 +171,168 @@ test('the detail budget is spent by distance, not spread over the frustum', asyn
    * in for its children while they are in flight. */
   expect(cfg.loadSiblings).toBe(false);
   expect(cfg.loadAncestors).toBe(true);
+});
+
+test('the world ends at the study area, and the cut is the library\'s own veto',
+  async ({ page }) => {
+    await stubGoogle(page);
+    const { errors } = await openApp(page);
+    await enable(page);
+
+    /* Driven through `calculateTileViewErrorWithPlugin` rather than by calling
+     * the plugin directly, because the thing under test is not the distance
+     * comparison — it is the aggregation contract around it. A plugin that
+     * returns `true` with `inView: false` must veto the tile even though the
+     * frustum calculation put it in view; a plugin that returns `false` must
+     * leave that calculation untouched. Both halves are the library's, and
+     * both are what the cull is standing on.
+     *
+     * The tiles are duck-typed for the same reason the tileset is stubbed: the
+     * only two things either calculation asks of a bounding volume are these,
+     * and building a real one would mean streaming real geometry. */
+    const seen = await page.evaluate(() => {
+      const pr = window.HC.scene.photoreal;
+      const t = pr.tiles;
+      /* One real frame first: the base calculation reads per-camera state that
+       * `update()` fills in, and a scene whose render loop is idle has none. */
+      pr.update();
+      const at = (metres) => ({
+        geometricError: 100,
+        engineData: {
+          boundingVolume: {
+            distanceToPoint: () => metres,
+            intersectsFrustum: () => true,
+          },
+        },
+      });
+      const view = (tile) => {
+        const target = { inView: false, error: 0, distanceFromCamera: Infinity };
+        t.calculateTileViewErrorWithPlugin(tile, target);
+        return target.inView;
+      };
+
+      pr.setContextRadius(4000);
+      const near = view(at(500));
+      const far = view(at(30000));
+      pr.setContextRadius(Infinity);
+      const lifted = view(at(30000));
+      pr.setContextRadius(4000);
+      return { near, far, lifted, radius: pr.contextRadiusM };
+    });
+
+    // Inside the radius the cull abstains and the frustum decides as before.
+    expect(seen.near).toBe(true);
+    /* Outside it, the tile is out of view — and being out of view is what stops
+     * the traversal descending, so the entire subtree beneath it is never
+     * preprocessed, queued, parsed or drawn. Coarsening it would have done none
+     * of that; see CONTEXT_RADIUS_M. */
+    expect(seen.far).toBe(false);
+    // And the cap can be lifted for a fly-over that wants the horizon in it.
+    expect(seen.lifted).toBe(true);
+
+    /* The distance is only as good as the point it is measured from, and that
+     * point lives in a frame that is neither the scene's nor the ellipsoid's:
+     * ReorientationPlugin writes `group.matrix` to bring the AOI to the scene
+     * origin, and the cull has to undo exactly that. Checked against the
+     * ellipsoid rather than against the inverse of our own arithmetic, so the
+     * assertion is independent of the composition it is guarding. */
+    const drift = await page.evaluate(async () => {
+      const { WGS84_ELLIPSOID } = await import('3d-tiles-renderer');
+      const THREE = await import('three');
+      const pr = window.HC.scene.photoreal;
+      const m = pr.o.meta.projection;
+      const want = new THREE.Vector3();
+      WGS84_ELLIPSOID.getCartographicToPosition(
+        m.lat0 * Math.PI / 180, m.lon0 * Math.PI / 180, pr._ellipsoidHeight(), want,
+      );
+      pr._syncCullCentre();
+      return pr._cull.centre.distanceTo(want);
+    });
+    // Metres, against an earth radius of 6,371 km.
+    expect(drift).toBeLessThan(1);
+
+    expect(errors).toEqual([]);
+  });
+
+test('the panel\'s reach control is wired to the cap it names', async ({ page }) => {
+  await stubGoogle(page);
+  await openApp(page);
+  await enable(page);
+
+  const slider = page.locator('#pr-radius');
+  await expect(slider).toBeVisible();
+
+  await slider.evaluate((el) => {
+    el.value = '2';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(await page.evaluate(() => window.HC.scene.photoreal.contextRadiusM)).toBe(2000);
+  await expect(page.locator('#pr-radius-out')).toHaveText('2.0 KM');
+
+  /* The top stop is not 12.5 km, it is no cap at all, and it has to say so:
+   * a slider that reads "12.5 KM" at the end of its travel tells a viewer the
+   * horizon is still being cut when it is not. */
+  await slider.evaluate((el) => {
+    el.value = el.max;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(await page.evaluate(() => window.HC.scene.photoreal.contextRadiusM)).toBe(Infinity);
+  await expect(page.locator('#pr-radius-out')).toHaveText('NO LIMIT');
+});
+
+test('a rate limit is reported as one, and the toggle is the retry', async ({ page }) => {
+  await stubGoogle(page);
+  await openApp(page);
+  await enable(page);
+
+  /* Synthesised rather than provoked: the only way to make Google answer 429
+   * is to actually exceed the quota, which costs the very root requests the
+   * quota is counting. The event carries exactly what the library dispatches —
+   * `tile: null` for the root manifest, and the status buried in the error
+   * text rather than exposed as a field. */
+  const raise = (code) => page.evaluate((c) => {
+    const pr = window.HC.scene.photoreal;
+    pr.tiles.dispatchEvent({
+      type: 'load-error',
+      tile: null,
+      url: 'https://tile.googleapis.com/v1/3dtiles/root.json',
+      error: new Error(`GoogleCloudAuth: Failed to load data with error code ${c}`),
+    });
+  }, code);
+
+  await raise(429);
+  /* The message this replaces sent you to check billing for every failure,
+   * including the one where billing is perfectly fine and the answer is to
+   * wait a minute. */
+  await expect(page.locator('#pr-status')).toContainText(/rate-limit/i);
+  await expect(page.locator('#pr-status')).not.toContainText(/billing/i);
+
+  /* And it has to survive the frame loop. A dead tileset still reports a
+   * settled progress figure, so the status line used to overwrite the
+   * explanation with 'ready' within 400 ms of it appearing. */
+  await page.waitForTimeout(1200);
+  await expect(page.locator('#pr-status')).toContainText(/rate-limit/i);
+
+  /* A root failure leaves rootLoadingState at -1 and nothing in the library
+   * ever resets it, while enable() skips the rebuild because a TilesRenderer
+   * already exists — so the toggle silently did nothing and the layer was dead
+   * for the rest of the session. */
+  const states = await page.evaluate(async () => {
+    const pr = window.HC.scene.photoreal;
+    pr.tiles.rootLoadingState = -1;
+    const afterFailure = pr.tiles.rootLoadingState;
+    pr.disable();
+    pr.enable('AIzaSTUB-intercepted-never-sent');
+    return { afterFailure, afterRetry: pr.tiles.rootLoadingState, failed: pr._rootFailed };
+  });
+  expect(states.afterFailure).toBe(-1);
+  // 0 is "ask for the root again", which the next update() acts on.
+  expect(states.afterRetry).toBe(0);
+  expect(states.failed).toBe(false);
+
+  // A 401 still tells the story that actually is about the key.
+  await raise(401);
+  await expect(page.locator('#pr-status')).toContainText(/billing/i);
 });
 
 test('the detail ramp only ever walks one way: down', async ({ page }) => {

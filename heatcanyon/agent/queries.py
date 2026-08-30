@@ -97,6 +97,72 @@ def area_summary(d: Dataset) -> dict:
     }
 
 
+# Every field on a building record, one description each.
+#
+# This was a single prose sentence listing about twenty names, and the pipeline
+# outgrew it: eighteen fields were reaching the data with nothing here saying
+# they existed — MRT, WBGT, sky view, facade peak and spread, exceedance and
+# persistence hours, the cooling loads. An agent does not use what it is not
+# told about, so undocumented columns are columns that get used by accident.
+#
+# Split one to a key so `_undescribed_attrs` can diff it against the records
+# themselves. That diff is served alongside, which is the point: the next field
+# the pipeline adds announces itself here instead of going quiet.
+ATTR_FIELDS = {
+    "i": "index into buildings.attrs, and the key every other array is in",
+    "bin": "NYC Building Identification Number, the join key to city data",
+    "bbl": "borough-block-lot, the tax lot the building stands on",
+    "h": "height, metres above its own pavement",
+    "base": "ground elevation at the footprint, metres NAVD88",
+    "floors": "storey count",
+    "floors_src": "where the storey count came from: measured or inferred",
+    "year": "year built",
+    "mat": "index into the materials table",
+    "in_aoi": "1 if inside the study area, 0 if a completing ring building",
+    "lon": "longitude", "lat": "latitude",
+    "addr": "street address", "use": "land use class", "units": "dwelling units",
+    "zip": "ZIP code",
+    "ex": "event-day exposure score, 0-100",
+    "vu": "vulnerability score, 0-100",
+    "pr": "event-day priority score, 0-100 (exposure against vulnerability)",
+    "pr_rank": "rank by `pr` across every scored building, 1 = worst",
+    "aex": "annual exposure score, 0-100",
+    "apr": "annual priority score, 0-100",
+    "apr_rank": "rank by `apr` across every scored building, 1 = worst",
+    "mop": "month of the annual facade peak, 1-12",
+    "swing": "summer mean minus winter mean facade temperature, K",
+    "sunh": "sunlit hours per year on the building's facades",
+    "akh": "annual degree-hours above 35 C on the facades, K.h",
+    "adose": "annual incident shortwave on the facades, kWh/m2",
+    "svf": "sky view factor at the facade, 0-1",
+    "air_c": "peak air temperature at the address on the event day, degC",
+    "fac_c": "peak facade surface temperature, degC",
+    "fac_k": "spread between the hottest and coolest facade, K",
+    "fac_kwh": "facade solar dose on the event day, kWh/m2",
+    "mrt_c": "peak mean radiant temperature, degC",
+    "wbgt_c": "peak wet-bulb globe temperature, degC",
+    "exc_h": "hours above the event threshold across the heat wave",
+    "per_h": "longest unbroken run above the threshold, hours",
+    "pkw": "peak cooling load, kW — MIDPOINT of an assumed range, see floors.json",
+    "amwh": "annual cooling energy, MWh — MIDPOINT of an assumed range",
+    "dom": "dominant driver: 0 solar-driven, 1 trap-driven, 2 unsolved",
+    "nrec": "night recovery: 0 none, 1 partial, 2 good",
+}
+
+
+def _undescribed_attrs(d: Dataset) -> list[str]:
+    """Field names present on the records that ATTR_FIELDS does not describe.
+
+    Served rather than raised: a build that has run ahead of this table is still
+    a usable build, and the agent is better told "these exist and I cannot
+    explain them" than left to discover them by luck.
+    """
+    seen: set[str] = set()
+    for a in (d.buildings.get("attrs") or []):
+        seen.update(a)
+    return sorted(k for k in seen if k not in ATTR_FIELDS)
+
+
 def data_dictionary(d: Dataset) -> dict:
     """Everything that exists, where, in what units, and how to reach it.
 
@@ -138,10 +204,8 @@ def data_dictionary(d: Dataset) -> dict:
             "monthly_sun_hours": "(12, panel, band) sunlit hours per month",
         },
         "building_fields": {
-            "attrs": ("i, bin, bbl, h (height m), base, floors, year, mat, in_aoi, "
-                      "lon, lat, addr, use, units, zip, ex/vu/pr (event-day exposure, "
-                      "vulnerability, priority 0-100), aex/apr (annual exposure and "
-                      "priority), mop (month of peak), swing (K), sunh (sunlit h/yr)"),
+            "attrs": ATTR_FIELDS,
+            "attrs_undescribed": _undescribed_attrs(d),
             "ranked_items": ("full dossier per building: measured{} modelled{} "
                              "components{} reasons[] actions[] annual{}"),
         },

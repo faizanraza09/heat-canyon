@@ -241,6 +241,7 @@
 /* ---- a map action, and a chart */
 
 .mapact {
+  flex: 0 0 auto; max-width: 100%; box-sizing: border-box;
   font-family: var(--mono); font-size: 10px; color: var(--text-3);
   padding: 4px 8px; border-radius: var(--r1);
   border: 1px dashed rgba(217, 84, 46, .35);
@@ -312,7 +313,85 @@
 
 .transcript { gap: 16px; }
 
-.workings { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 5px; }
+/* ---- one closed drawer, holding the whole turn's working
+
+   Fifty-six chips above the answer is a panel about the machinery. Shut, this
+   is a single line that says how many steps the turn took and what kinds of
+   work they were, and the answer sits directly beneath it. Open, it is the
+   record unchanged: every call, every burst of reasoning, every map move and
+   every note the analyst made to itself, in the order they happened.        */
+
+.workblock {
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: rgba(237, 231, 220, .015);
+  transition: border-color 200ms ease, background 200ms ease;
+}
+.workblock:hover { border-color: var(--line-ctl); }
+.workblock[open] {
+  border-color: var(--line-ctl); background: rgba(237, 231, 220, .028);
+}
+.workblock > summary {
+  cursor: pointer; list-style: none;
+  display: flex; align-items: baseline; gap: 12px; padding: 8px 13px;
+}
+.workblock > summary::-webkit-details-marker { display: none; }
+.workblock[open] > summary { border-bottom: 1px solid var(--line); }
+
+.wlabel {
+  flex: none; font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--t7);
+  transition: color 200ms ease;
+}
+.workblock:hover .wlabel, .workblock[open] .wlabel { color: var(--t5); }
+
+/* The digest is one line and stays one line: it is a caption on a closed
+   drawer, and a caption that wraps to three lines is the thing it was meant to
+   replace. */
+.wdigest {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 11.5px; line-height: 1.55; color: var(--t6);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color 200ms ease;
+}
+.workblock:hover .wdigest { color: var(--t4); }
+.workblock[open] .wdigest { white-space: normal; }
+
+.workblock > summary::after {
+  content: 'SHOW'; flex: none;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em; color: var(--t8);
+  transition: color 200ms ease;
+}
+.workblock[open] > summary::after { content: 'HIDE'; }
+.workblock:hover > summary::after { color: var(--t5); }
+
+.workings {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 5px;
+  padding: 12px 13px;
+}
+
+/* A paragraph the analyst wrote on its way to the answer. It is working, so it
+   is set as working: quiet, italic, against a rule, at the width of the row. */
+.aside {
+  flex: 1 1 100%; min-width: 0; margin: 2px 0;
+  border-left: 1px solid var(--line); padding-left: 11px;
+  font-size: 11.5px; line-height: 1.65; font-style: italic; color: var(--t6);
+}
+.aside p { margin: .3em 0; }
+.aside p:first-child { margin-top: 0; }
+.aside p:last-child { margin-bottom: 0; }
+.aside b { font-weight: 400; color: var(--t5); }
+.aside .ah1, .aside .ah2, .aside .ah3, .aside .ah4 {
+  font: inherit; margin: .4em 0 .2em; color: var(--t5); letter-spacing: 0;
+  text-transform: none;
+}
+.aside code { font-family: var(--mono); font-size: 10.5px; font-style: normal; }
+/* If a note the analyst made to itself happens to carry a table, it is still
+   evidence and it still gets to be read. Quieter than the answer's, upright,
+   and no wider than the row it sits in; never hidden. */
+.aside .atable { margin: .6em 0; font-style: normal; }
+.aside .atable table { font-size: 11px; }
+.aside .atable th, .aside .atable td { padding: 5px 9px; }
+.aside .acode, .aside .acallout { font-style: normal; margin: .6em 0; }
 
 .toolcall, .thinkblock {
   flex: 0 0 auto; max-width: 100%;
@@ -369,6 +448,14 @@
    The analyst structures its answers, so the panel has to render the structure:
    headings that step down, a table that reads as a table, a caveat that reads as
    a caveat.                                                                   */
+
+/* The analyst is required to open with one sentence a busy person could act on
+   having read nothing else. Now that the working is a closed drawer, that
+   sentence is the first thing in the window, so it is set as the thing it is:
+   a lede, a size up and a shade brighter than the evidence under it. */
+.bubble.agent > p:first-child {
+  font-size: 15px; line-height: 1.6; color: var(--t1); margin-bottom: .9em;
+}
 
 .bubble .ah1, .bubble .ah2, .bubble .ah3, .bubble .ah4 {
   margin: 1.5em 0 .5em; font-weight: 400; color: var(--t0);

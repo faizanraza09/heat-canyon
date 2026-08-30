@@ -331,6 +331,18 @@ hour in different months, and one slider cannot ask it. **Day / Month / Season /
 Year** changes what is averaged. Press play on the year row and the shadow line
 swings: December's noon sun is 26° lower than June's.
 
+Both axes move the city rather than cutting to it. Stepping the clock used to
+replace 294,150 painted quads in one frame, which is a hard edit in the middle of
+a continuous physical process and costs the viewer the thing the axis exists to
+show — which walls warm first, and how the shadow line travels. Repainting at a
+fractional hour every frame is not affordable (that repaint is about 40 ms, so it
+would cap the whole scene at 25 fps), so the mesh carries both states at once:
+the hour it came from and the hour it is going to, with one uniform sliding
+between them, and the sun's altitude and azimuth interpolated alongside. A frame
+of the dissolve costs a single float. A played day is then one continuous sweep
+rather than eight cuts, and a played year one continuous swing of the shadow
+line. `prefers-reduced-motion` — and `?smooth=0` — put the cuts back.
+
 Plus a ranked building list with **two orderings that disagree**, and a scenario panel
 that re-solves the physics per site — at the hour, and at every month's peak, so
 the seasonal cost of a shading measure is a number rather than a caveat.
@@ -755,6 +767,58 @@ event this library has never dispatched — the names are `load-root-tileset` an
 `load-tileset` — so a session streaming perfectly looked exactly like one whose
 key had been refused. It now reports `loadProgress` as a percentage and settles
 only when both queues are idle.
+
+**The world ends at the study area.** The frustum was the only thing bounding
+this layer, and from a kilometre up the frustum holds the whole metropolitan
+area — Newark to the west, Jamaica Bay to the east, every tile of it selected,
+queued, decoded and drawn. None of it is the subject. `errorFalloff` looks like
+the answer and is not: it is subtractive on the error, so the far city arrives
+*coarser* but it still arrives, still costs a download slot and still costs a
+parse slot. Coarsening the horizon reduces bytes; it does not reduce contention.
+
+A `ContextRadiusPlugin` cuts it instead. Any tile whose bounding volume lies
+wholly outside 4 km of the AOI centre is reported out of view, and
+`determineFrustumSet` returns at the first such tile without descending, so the
+subtree beneath it is never preprocessed, never marked used, never queued and
+never drawn. The test is against the bounding volume rather than its centre so
+that an ancestor spanning half the eastern seaboard still intersects the disc
+and still refines; only the children that leave it are dropped, which puts the
+boundary at tile granularity instead of taking the root out with everything
+else. Four kilometres is chosen for what is at that distance rather than for any
+budget — both rivers, the lower half of Central Park, the near shores of Hoboken
+and Long Island City — so the edge mostly falls on water, which is the one place
+a cut in a photogrammetry mesh does not read as damage. The CONTEXT REACH slider
+moves it, and its top stop lifts the cap entirely for a fly-over that wants the
+horizon in the frame.
+
+The hook is `calculateTileViewError`, whose contract is worth stating because it
+is unusual: returning `true` means *this plugin has an opinion*, and the
+renderer intersects those opinions, so one plugin reporting `inView: false`
+takes the tile out of view whatever the frustum said. Returning `false` abstains.
+A plugin cannot make a tile coarser this way — the aggregation takes the maximum
+error, so it can only ask for more refinement — which is the other half of why
+this is a cut and not a taper.
+
+**Reading a failed request.** The layer said one thing for every failure —
+check billing, check the Map Tiles API — which is the 401/403 story told over
+the top of every other one. A 429 is a different story entirely: the key is
+fine, the API is on, and the project has simply started more tile sessions than
+its quota allows in the window. Sent to check billing you check billing, find
+nothing wrong, and conclude the layer is broken. The status code is now read out
+of the error text (the library reports it there rather than as a field) and the
+three cases are told apart.
+
+The distinction matters for what happens next as well. A root failure leaves
+`rootLoadingState` at -1, nothing in the library ever resets it, and `enable()`
+skips `_build` when a TilesRenderer already exists — so the tileset was inert
+for the rest of the session and switching the layer off and on again silently
+did nothing. A root failure is now recorded and cleared by `enable()`, which
+calls `resetFailedTiles()`. Deliberately not retried on a timer: a root request
+is the billable unit, and the standing rule is that nothing costs anything
+without someone asking for it. The toggle is the retry, and now it is one. The
+error also has to outlast the frame that found it — a dead tileset still reports
+a settled `loadProgress`, so the frame loop was overwriting the explanation with
+a cheerful "ready" inside 400 ms.
 
 **The detail ramp.** `errorTarget` drops from 14 to 5 on entering street mode: a
 pedestrian needs depth where a fly-over needs breadth, and the loose overhead

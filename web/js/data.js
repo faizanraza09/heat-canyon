@@ -624,7 +624,7 @@ export async function load(onProgress = () => {}) {
      OPTIONAL BY CONSTRUCTION. Every one of these is fetched with `optional`,
      which resolves to null on any failure rather than rejecting. A build that
      has not run the decision stage still produces a working atlas: the Diagnose
-     pane says the schedule is not in this build and the twelve layers, the year
+     pane says the schedule is not in this build and the eight layers, the year
      strip, the street camera and the analyst are all untouched. That is a
      deliberate property and it is asserted in the tests — a data product whose
      absence takes the application down is not optional, whatever the loader
@@ -648,6 +648,32 @@ export async function load(onProgress = () => {}) {
       .some((p) => p && p.fixture === true);
     return out.decision;
   });
+
+  /* One building's schedule, fetched when somebody asks for that building.
+   *
+   * `floors.json` bundles the ranked 150 so the buildings most likely to be
+   * opened are already in hand. Every other scored building has its own ~24 KB
+   * shard, written one to a file by the pipeline, and it is fetched on the
+   * select that needs it — the only moment the answer is wanted.
+   *
+   * Cached by BIN, including the misses: a building with no shard is a fact
+   * about the build, and re-asking the network for it on every reselect would
+   * turn one honest empty state into a request per click. In flight requests
+   * are cached too, so the double render a select can produce makes one fetch
+   * rather than two. */
+  const shards = new Map();
+  out.decision.floorsFor = (bin) => {
+    const key = String(bin);
+    const bundled = out.decision.floors?.items?.[key];
+    if (bundled) return Promise.resolve({ loads: bundled,
+      prescriptions: out.decision.prescriptions?.items?.[key] || [] });
+    if (shards.has(key)) return shards.get(key);
+    const p = fetch(`${BASE}/floors/${encodeURIComponent(key)}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    shards.set(key, p);
+    return p;
+  };
 
   return out;
 }
@@ -723,17 +749,4 @@ function monthlyLevel(out, hour) {
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN;
   }
   return out.airAtDayHour(p.date, out.tiles.hours[hour].edt);
-}
-
-/** Domain (min/max) of a field across the whole dataset, for a stable legend.
- *  Percentiles, so a single extreme panel cannot flatten the ramp. */
-export function domain(arr, loPct = 1, hiPct = 99, sample = 200000) {
-  const n = arr.length;
-  const stride = Math.max(1, Math.floor(n / sample));
-  const s = [];
-  for (let i = 0; i < n; i += stride) if (isFinite(arr[i])) s.push(arr[i]);
-  s.sort((a, b) => a - b);
-  if (!s.length) return [0, 1];
-  return [s[Math.floor(loPct / 100 * (s.length - 1))],
-          s[Math.floor(hiPct / 100 * (s.length - 1))]];
 }

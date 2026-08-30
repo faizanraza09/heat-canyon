@@ -1157,6 +1157,14 @@ def _finish(**kw) -> dict:
             # were the thing. Cheap to carry, so it is carried.
             rec["akh"] = round(e.annual_facade_kh35, 1)
             rec["adose"] = round(e.annual_dose_kwh, 1)
+            # Two more for the same reason, found the same way. The building
+            # brief composes its three findings from these fields, and on a
+            # scored building outside the ranked 150 it was dropping the clause
+            # that says what the facade peaks at across the year, and the one
+            # that says how the city rates the block its residents live on.
+            # Two numbers per building against a section of the document.
+            rec["afac_c"] = round(e.annual_facade_max_c, 1)
+            rec["hvi"] = e.hvi
 
     (OUT / "buildings.json").write_text(json.dumps({
         "n": len(b_out), "materials": MATS,
@@ -1397,10 +1405,27 @@ def _finish(**kw) -> dict:
     # that cannot produce them still ships twelve layers, two time axes, a street
     # camera and an analyst. See docs/DECISIONS.md.
     #
-    # Only the ranked 150 get a full schedule. The other 3,894 scored buildings
-    # carry the four compact fields below, which is what the portfolio table and
-    # the map need; a full schedule for every building would be 38 MB of JSON to
-    # answer a question nobody asks about 3,894 buildings at once.
+    # EVERY building gets a full schedule; only the ranked 150 are bundled.
+    #
+    # This used to stop at the ranked 150, on the grounds that a schedule for
+    # every building would be tens of megabytes of JSON to answer a question
+    # nobody asks about four thousand buildings at once. The second half of that
+    # is right and the first half was the wrong conclusion: it is an argument
+    # about one FILE, not about the work. Solving a building costs about a
+    # quarter of a second, so the whole scored population is a quarter of an
+    # hour on one core — while the interface was telling 97% of the city that
+    # their address was "outside that set", which reads as a half-built model
+    # rather than as a download budget.
+    #
+    # So the schedule is solved for all of them and written one building to a
+    # file, the way the months already are. `floors.json` keeps the ranked 150
+    # for the instant path, and everything else is a 24 KB fetch made when
+    # somebody actually selects that building — which is the only moment the
+    # answer is wanted, and the moment the old design had nothing to give.
+    #
+    # It also fixes the four compact fields below. They are documented as being
+    # on every scored building and were in fact on 150, because they are derived
+    # from this loop's output and the loop stopped early.
     try:
         from . import decide as DECIDE
 
@@ -1417,15 +1442,52 @@ def _finish(**kw) -> dict:
             presc_out: dict[str, list] = {}
             attrs_by_bin = {str(a.get("bin")): a for a in b_out if a.get("bin")}
             failed = 0
-            for rec in ranked:
-                bn = str(rec["bin"])
+
+            # One file per building, held open nowhere: the shard is written and
+            # the loads dropped, so peak memory stays flat across four thousand
+            # buildings instead of carrying a hundred megabytes of dicts to the
+            # end of the loop. Only the compact fields and the ranked 150 are
+            # kept, because only those go into a bundled file.
+            shard_dir = OUT / "floors"
+            shard_dir.mkdir(parents=True, exist_ok=True)
+            ranked_bins = {str(r["bin"]) for r in ranked}
+            compact: dict[str, dict] = {}
+            shards = 0
+
+            # Ranked first, so a run that is interrupted still leaves the set the
+            # bundled file needs.
+            order = [str(r["bin"]) for r in ranked]
+            order += [b for b in (str(a.get("bin")) for a in b_out if a.get("bin"))
+                      if b not in ranked_bins]
+
+            for bn in order:
                 try:
                     one = DECIDE.prescriptions_for(d_agent, bn, max_canyons=6)
                 except Exception:  # noqa: BLE001 — one building must not lose the set
                     failed += 1
                     continue
-                floors_out[bn] = one["loads"]
-                presc_out[bn] = one["prescriptions"]
+                loads, pres = one["loads"], one["prescriptions"]
+                (shard_dir / f"{bn}.json").write_text(json.dumps(
+                    {"bin": bn, "loads": loads, "prescriptions": pres},
+                    separators=(",", ":"), allow_nan=False))
+                shards += 1
+                # Only the four derived numbers are kept, never the loads they
+                # came from: holding every building's schedule to the end of the
+                # loop would be the hundred megabytes this sharding exists to
+                # avoid, just in RAM instead of in a file.
+                doms = [r.get("dominant") for r in loads.get("floors", [])]
+                recs = [r.get("night_recovery") for r in loads.get("floors", [])]
+                compact[bn] = {
+                    "pkw": round(sum(loads["peak_kw"]) / 2, 1),
+                    "amwh": round(sum(loads["annual_mwh"]) / 2, 1),
+                    "dom": (0 if doms.count("solar") >= doms.count("trap")
+                            else 1) if doms else 2,
+                    "nrec": (2 if recs.count("good") > len(recs) / 2
+                             else (0 if recs.count("none") > len(recs) / 2 else 1)),
+                }
+                if bn in ranked_bins:
+                    floors_out[bn] = loads
+                    presc_out[bn] = pres
 
             (OUT / "floors.json").write_text(json.dumps({
                 "n": len(floors_out), "bands": N_BANDS,
@@ -1471,23 +1533,15 @@ def _finish(**kw) -> dict:
             # score for the quantity it was asked about is a turn that reports a
             # proxy as if it were the thing.
             for rec_b in b_out:
-                fl = floors_out.get(str(rec_b.get("bin")))
-                if not fl:
-                    continue
-                rec_b["pkw"] = round(sum(fl["peak_kw"]) / 2, 1)
-                rec_b["amwh"] = round(sum(fl["annual_mwh"]) / 2, 1)
-                doms = [r.get("dominant") for r in fl.get("floors", [])]
-                rec_b["dom"] = (0 if doms.count("solar") >= doms.count("trap")
-                                else 1) if doms else 2
-                recs = [r.get("night_recovery") for r in fl.get("floors", [])]
-                rec_b["nrec"] = (2 if recs.count("good") > len(recs) / 2
-                                 else (0 if recs.count("none") > len(recs) / 2 else 1))
+                fl = compact.get(str(rec_b.get("bin")))
+                if fl:
+                    rec_b.update(fl)
             (OUT / "buildings.json").write_text(json.dumps({
                 "n": len(b_out), "materials": MATS,
                 "attrs": b_out, "rings": b_rings,
             }, separators=(",", ":"), allow_nan=False))
 
-            log(f"decision layer: {len(floors_out)} schedules, "
+            log(f"decision layer: {shards} schedules ({len(floors_out)} bundled), "
                 f"{sum(len(v) for v in presc_out.values())} measures, "
                 f"{len(cands)} candidates, {unverified} unverified constants"
                 + (f", {failed} buildings failed" if failed else "")

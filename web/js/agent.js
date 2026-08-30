@@ -63,7 +63,69 @@ const WORKINGS = {
   methodology: 'Checked how that was computed',
   run_python: 'Wrote and ran a script',
   chart: 'Drew a chart',
+  building_schedule: 'Went through a building floor by floor',
+  prescribe_building: 'Worked out what to do about it',
+  programme_allocation: 'Spread a budget across the portfolio',
+  economic_constants: 'Checked the money table',
+  WebSearch: 'Searched the web',
+  WebFetch: 'Read a page off the web',
+  Bash: 'Ran a command',
+  Read: 'Read a file it had written',
+  Write: 'Wrote a file',
+  Edit: 'Edited a file',
+  Glob: 'Looked through its workspace',
+  Grep: 'Searched its workspace',
 };
+
+/* The same calls again, phrased for the one line the collapsed working shows.
+ *
+ * A digest is a list of the KINDS of work a turn was made of, so these carry no
+ * article and no singular: four of them have to read as one sentence about the
+ * turn, not as four sentences about four calls. "Wrote and ran a script" is the
+ * right caption for one chip and the wrong third of a sentence that also has to
+ * say the analyst did it nineteen times.                                      */
+const DIGESTS = {
+  area_summary: 'took in the study area',
+  data_dictionary: 'checked what the model holds',
+  query_buildings: 'searched the buildings',
+  get_building: 'pulled building files',
+  canyon_stats: 'measured the street canyons',
+  year_series: 'followed it through the year',
+  climatology: 'went to the climatology',
+  compare_periods: 'set periods against each other',
+  panel_field: 'read the facade panels',
+  tile_field: 'read the ground tiles',
+  scenario_results: 'looked up solved scenarios',
+  spatial_pattern: 'tested whether the pattern is real',
+  run_intervention: 're-solved the physics',
+  intervention_catalogue: 'consulted the catalogue of measures',
+  allocate_budget: 'allocated the budget',
+  map_control: 'moved the map',
+  consult_specialist: 'called in specialists',
+  methodology: 'checked how things were computed',
+  run_python: 'wrote and ran scripts',
+  chart: 'drew charts',
+  building_schedule: 'went through buildings floor by floor',
+  prescribe_building: 'worked out what to do about them',
+  programme_allocation: 'spread budgets across the portfolio',
+  economic_constants: 'checked the money table',
+  WebSearch: 'searched the web',
+  WebFetch: 'read pages off the web',
+  Bash: 'worked in the shell',
+  Read: 'read files back',
+  Write: 'wrote files',
+  Edit: 'edited files',
+  Glob: 'looked through its workspace',
+  Grep: 'searched its workspace',
+};
+
+/** A call's kind, phrased for the digest line. */
+function digest(name) {
+  const bare = String(name || '').replace(/^mcp__[a-z0-9_]+__/i, '');
+  if (DIGESTS[bare]) return DIGESTS[bare];
+  const w = working(bare);
+  return w.charAt(0).toLowerCase() + w.slice(1);
+}
 
 /** A call's name on the record. Anything unlisted is de-jargonised rather than
  *  dropped, so a new tool reads as a sentence on the day it is added. */
@@ -113,6 +175,27 @@ const INLINE = (t) => t
 
 /** Split a table row on unescaped pipes. */
 const cells = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+
+/** Does line `j` open a block, and so end the paragraph running into it?
+ *
+ *  A paragraph ends at a blank line, not at a line break, and that is not a
+ *  detail. The renderer used to close a `<p>` on every newline, so a sentence
+ *  the model had soft-wrapped arrived as two paragraphs and the second one
+ *  started with whatever word the wrap happened to fall on: a lower-case
+ *  fragment sitting where a paragraph should be. The block openers are listed
+ *  here rather than guessed at, and a table only counts as one when the
+ *  delimiter row underneath it is actually there.                            */
+const OPENS_BLOCK = (lines, j) => {
+  const l = lines[j];
+  if (/^\s*```/.test(l)) return true;
+  if (/^\s*#{1,4}\s/.test(l)) return true;
+  if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) return true;
+  if (/^\s*&gt;\s?/.test(l)) return true;
+  if (/^\s*[-*+]\s+/.test(l)) return true;
+  if (/^\s*\d+[.)]\s+/.test(l)) return true;
+  return /\|/.test(l) && j + 1 < lines.length && /\|/.test(lines[j + 1])
+    && /^\s*\|?[\s:-]*-[\s:|-]*\|?\s*$/.test(lines[j + 1]);
+};
 
 function md(text) {
   const lines = esc(String(text ?? '')).split('\n');
@@ -194,8 +277,18 @@ function md(text) {
       continue;
     }
 
+    // ---- paragraph, which runs on until a blank line or another block
     closeList();
-    if (line.trim()) out.push(`<p>${INLINE(line)}</p>`);
+    if (line.trim()) {
+      const para = [line.trim()];
+      i++;
+      while (i < lines.length && lines[i].trim() && !OPENS_BLOCK(lines, i)) {
+        para.push(lines[i].trim());
+        i++;
+      }
+      out.push(`<p>${INLINE(para.join(' '))}</p>`);
+      continue;
+    }
     i++;
   }
   closeList();
@@ -218,6 +311,10 @@ export class AgentConsole {
     this.stream = null;
     this.toolNodes = new Map();
     this.mode = 'agent';
+    this.work = null;       // this turn's working, one block for the whole turn
+    this.pending = null;    // the last text block, until a call demotes it
+    this.workKinds = new Map();
+    this.workSteps = 0;
 
     host.innerHTML = '';
     host.classList.add('agentconsole');
@@ -265,6 +362,8 @@ export class AgentConsole {
     this.newThread.onclick = () => {
       this.sessionId = null;
       this.transcript.innerHTML = '';
+      this.work = null;
+      this.pending = null;
       this._syncEmpty();
       this._note('New thread. The analyst has forgotten the conversation; the model '
                  + 'itself is unchanged.');
@@ -385,6 +484,10 @@ export class AgentConsole {
     if (!question || this.runId) return;
     this.empty.hidden = true;
     this.input.value = '';
+    // One working per turn, so the next question opens a fresh one rather than
+    // reopening the last turn's drawer and appending to it.
+    this.work = null;
+    this.pending = null;
     this._bubble('you', md(question));
 
     if (this.mode === 'single-shot') return this._askSingleShot(question);
@@ -434,6 +537,8 @@ export class AgentConsole {
     this.stream = null;
     this.transcript.innerHTML = '';
     this.empty.hidden = true;
+    this.work = null;
+    this.pending = null;
     // The question first, so the transcript reads as a turn rather than as an
     // answer that arrived on its own.
     if (question) this._bubble('you', md(question));
@@ -491,7 +596,10 @@ export class AgentConsole {
           this._note(`Refused: ${f.reason}`, 'warn');
           break;
         case 'usage':
-          status.textContent = `${f.turns} step${f.turns === 1 ? '' : 's'}`;
+          // The count belongs to the working, which is already showing it and
+          // showing what the steps were. Two counts on adjacent lines, taken
+          // from two different tallies, read as an inconsistency rather than as
+          // progress, so the status line keeps only the state.
           break;
         case 'turn_complete':
           if (f.session_id) this.sessionId = f.session_id;
@@ -580,33 +688,98 @@ export class AgentConsole {
 
   /* ------------------------------------------------------- rendering */
 
-  /* The working, as a row of chips rather than a column of rows.
+  /* THE WORKING, AS ONE CLOSED DRAWER
    *
-   * A turn can be twenty calls. Stacked one to a line that is twenty lines of
-   * apparatus above the answer they support, and the answer is what the person
-   * came for. So consecutive calls collect into a wrapping row of small chips,
-   * each one clickable: the shape of the working is legible at a glance, and the
-   * arguments and the result are one click away inside it.
+   * A turn can be fifty-six calls. As a wrapping row of chips that was six
+   * lines of apparatus; as two rows split by a note the analyst made to itself
+   * mid-run it was the whole panel, and the answer — the thing the person
+   * opened the window for — began somewhere below the fold. The evidence has to
+   * stay, because an untraceable figure is the one failure this project cannot
+   * have. It does not have to be the first thing on screen.
    *
-   * The row ends whenever anything that is not a call arrives — a paragraph of
-   * answer, a chart, a map move — so the chips stay grouped with the step of the
-   * work they belong to instead of running together into one undifferentiated
-   * band from the start of the turn to the end. */
-  _workings() {
-    const last = this.transcript.lastElementChild;
-    if (last && last.classList.contains('workings')) return last;
+   * So a turn has exactly one working: a single closed block, carrying a line
+   * that says how many steps it took and what kinds of work they were, holding
+   * every chip, every burst of reasoning, every map move and every aside. Shut,
+   * it is one line and the answer sits directly under it. Open, it is the same
+   * record it always was, in the same order it happened.                      */
+  _work() {
+    if (this.work && this.work.isConnected) return this.work;
+    const d = el('details', 'workblock');
+    const sum = el('summary');
+    sum.innerHTML = '<span class="wlabel">The working</span>'
+      + '<span class="wdigest"></span>';
+    d.appendChild(sum);
     const row = el('div', 'workings');
-    this.transcript.appendChild(row);
-    return row;
+    d.appendChild(row);
+    this.transcript.appendChild(d);
+    this.work = d;
+    this.workKinds = new Map();
+    this.workSteps = 0;
+    this._syncWork();
+    return d;
   }
 
-  /** Anything that is not a call closes the current row. */
-  _endWorkings() { this._workRowClosed = true; }
+  /** The chip row inside this turn's working. */
+  _workings() { return this._work().querySelector('.workings'); }
+
+  /* What the closed drawer says it contains.
+   *
+   * Not "42 tool calls", which is a fact about the machinery and tells a reader
+   * nothing they can use. The count, and then the four kinds of work the turn
+   * was mostly made of, in the analyst's own register: "56 steps: wrote and ran
+   * scripts, worked in the shell, pulled building files, re-solved the physics".
+   * That is a description of an afternoon's work, and it is enough to decide
+   * whether you want to open it. It is rebuilt on every step, so a turn still
+   * running reads as a live account of what it is doing.                      */
+  _syncWork() {
+    if (!this.work) return;
+    const line = this.work.querySelector('.wdigest');
+    const n = this.workSteps;
+    if (!n) { line.textContent = 'getting its bearings'; return; }
+    const kinds = [...this.workKinds.entries()].sort((a, b) => b[1] - a[1]);
+    const lead = kinds.slice(0, 4).map(([k]) => k);
+    const rest = kinds.length - lead.length;
+    line.textContent = `${n} step${n === 1 ? '' : 's'}: ${lead.join(', ')}`
+      + (rest > 0 ? `, and ${rest} other kind${rest === 1 ? '' : 's'} of work` : '');
+  }
+
+  /** Count one step towards the digest. */
+  _step(name) {
+    const k = digest(name);
+    this.workKinds.set(k, (this.workKinds.get(k) || 0) + 1);
+    this.workSteps += 1;
+    this._syncWork();
+  }
+
+  /* A paragraph the analyst wrote on its way to the answer is working, not
+   * answer, and the difference is only knowable in hindsight: text that turns
+   * out to be followed by more calls was a note to itself. So every text block
+   * arrives as the answer and is demoted the moment the next call proves it was
+   * not one. That is what keeps "Good, index 3412 = building. Now find panels
+   * of this building" out of the same typeface as the finding it led to.      */
+  _demote() {
+    const b = this.pending;
+    this.pending = null;
+    if (!b || !b.isConnected) return;
+    b.classList.remove('bubble', 'agent');
+    b.classList.add('aside');
+    this._workings().appendChild(b);
+  }
 
   _bubble(who, html) {
+    // Two text blocks with nothing between them are one answer arriving in two
+    // pieces, and printing them as two bubbles puts a gap through the middle of
+    // it and sets the second half's opening line as a second lede.
+    if (who === 'agent' && this.pending
+        && this.pending === this.transcript.lastElementChild) {
+      this.pending.insertAdjacentHTML('beforeend', html);
+      this._scroll();
+      return this.pending;
+    }
     const b = el('div', `bubble ${who}`);
     b.innerHTML = html;
     this.transcript.appendChild(b);
+    if (who === 'agent') this.pending = b;
     this._scroll();
     return b;
   }
@@ -627,6 +800,7 @@ export class AgentConsole {
   _thinking(text) {
     // Collapsed by default and one node per burst: the reasoning is worth having
     // available and not worth pushing the answer off screen.
+    this._demote();
     const row = this._workings();
     let node = row.lastElementChild;
     if (!node || !node.classList.contains('thinkblock')) {
@@ -643,6 +817,9 @@ export class AgentConsole {
       this.toolNodes.set(f.id, null);
       return;
     }
+    this._demote();
+    this._work();
+    this._step(f.name);
     const node = el('details', 'toolcall');
     const sum = el('summary');
     // The face of the chip is what was done. The arguments are real evidence and
@@ -661,7 +838,10 @@ export class AgentConsole {
   _toolResult(f) {
     if (this.toolNodes.has(f.tool_use_id) && !this.toolNodes.get(f.tool_use_id)) return;
     const row = this.toolNodes.get(f.tool_use_id);
-    const target = row ? row.querySelector('.toolbody') : this.transcript;
+    // A result whose call never arrived — a console that connected mid-run, a
+    // frame lost — still belongs with the working rather than loose in the
+    // transcript, where it would sit between the working and the answer.
+    const target = row ? row.querySelector('.toolbody') : this._workings();
     const pre = el('pre', `out ${f.is_error ? 'err' : ''}`, esc(pretty(f.content)));
     target.appendChild(pre);
     if (row && f.is_error) row.classList.add('failed');
@@ -675,7 +855,10 @@ export class AgentConsole {
     const n = el('div', 'mapact');
     n.innerHTML = `<b>map</b> ${esc(parts.join(' · '))}`
       + (action.note ? `<span class="mnote">${esc(action.note)}</span>` : '');
-    this.transcript.appendChild(n);
+    // A map move is something the analyst did, not something it said: it belongs
+    // in the record with the calls, and its effect is already on the city.
+    this._demote();
+    this._workings().appendChild(n);
     try { this.onMapAction(action); } catch (e) { console.warn('map action', e); }
   }
 

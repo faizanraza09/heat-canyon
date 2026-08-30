@@ -54,13 +54,17 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage();
 
+let reply = null;
 let lines = null;
+let linesAt = 0;
 // Intercepted rather than read out of the page, because this is the exact array
 // the film sends — including its empty entries for the silent beats of the
 // descent, which have to keep their places or the reply stops being positional.
 await page.route('**/api/voice/lines', async (route) => {
   const body = JSON.parse(route.request().postData() || '{}');
   lines = body.lines || [];
+  linesAt = Date.now();
+  reply = null;      // this request's verdict, not the previous one's
   // A dry run is not a request that never happens — it is the film's own
   // request, unmodified. That costs nothing (the endpoint reads the cache unless
   // told otherwise) and it is the only way to find out which lines are actually
@@ -70,7 +74,6 @@ await page.route('**/api/voice/lines', async (route) => {
   return route.continue({ postData: JSON.stringify(post) });
 });
 
-let reply = null;
 page.on('response', async (r) => {
   if (!r.url().includes('/api/voice/lines') || !r.ok()) return;
   reply = await r.json().catch(() => null);
@@ -83,6 +86,28 @@ await page.waitForFunction(() => window.__hcVoiceSeen || true, null, { timeout: 
   .catch(() => {});
 const deadline = Date.now() + 180_000;
 while (!lines && Date.now() < deadline) await page.waitForTimeout(250);
+
+/* THE FILM ASKS TWICE, AND THE FIRST SCRIPT IS NOT THE ONE IT SAYS.
+ *
+ * `_prepare` runs while the title card is up, which is before floors.json,
+ * prescriptions.json and portfolio.json have landed. Every sentence built out of
+ * the decision layer is still its own fallback at that moment: "Then it spends a
+ * budget, and says where it went", where the film will actually say "$57
+ * million, 91 buildings, 292 measures". The script is rebuilt when those files
+ * arrive, and that second one is the film.
+ *
+ * Baking the first is how the cache fills with recordings of sentences the film
+ * never says, and the beats carrying the figures drop to the browser voice on
+ * the night while the test that would have caught it reports them as recorded.
+ * It used to depend on which request happened to arrive first, which is a race
+ * this had been winning and lost as soon as the data got slower.
+ *
+ * So take the last thing it asked for, not the first: wait until the film has
+ * gone quiet, then bake that. */
+const QUIET_MS = 12_000;
+while (Date.now() < deadline && Date.now() - linesAt < QUIET_MS) {
+  await page.waitForTimeout(250);
+}
 while (lines && !reply && Date.now() < deadline) await page.waitForTimeout(250);
 await browser.close();
 

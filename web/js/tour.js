@@ -2,7 +2,7 @@
  *
  * The film explains why the city is hot. It says nothing about the instrument,
  * and someone who has just watched ninety seconds of cinema is looking at three
- * panels, twelve layers, two time scrubbers and two camera modes, with no idea
+ * panels, eight layers, two time scrubbers and two camera modes, with no idea
  * which one to touch first. This walks them through it: one spotlight and one
  * card per control, in the order you would actually use them.
  *
@@ -70,8 +70,11 @@ const STEPS = [
     dim: 'light',
     place: 'center',
     title: 'The model itself',
-    body: `<b>Drag in any direction</b> to slide across the city, <b>scroll</b> to zoom,
-      <b>right-drag</b> to tilt and turn. <b>Click any building</b> and its file
+    body: `<b>Drag in any direction</b> to slide across the city, <b>scroll</b> to zoom.
+      <b>Right-drag</b> — or hold shift — turns and tilts around whichever building
+      is selected, which is how you get at the three walls facing away from you;
+      the pad by the compass does the same in steps, and the button under it walks
+      right round. <b>Click any building</b> and its file
       opens at the top of this panel — the ranking on the right stays put.
       <br /><br />
       Nothing here is decoration: wall colour is modelled surface temperature at
@@ -85,18 +88,22 @@ const STEPS = [
     tab: 'view',
     enter: (ui) => ui.setLayer('surface'),
     title: 'What is drawn',
-    body: `Twelve views of the same block, in two groups. The first six are one
-      moment: how hot each wall is, which walls the sun is on, the seven-day wave,
-      the air, and where to act during that wave.
+    body: `Eight views of the same block, in two groups. The first four are one
+      moment: how hot each wall is, which walls the sun is on, how long the
+      seven-day wave holds it over the threshold, and where to act during it.
       <br /><br />
-      The six below the rule are the <b>whole year</b> — sunlit hours, accumulated
-      dose, the swing between summer and winter, the month each wall peaks in.
-      None of those depends on the clock, so the time controls grey out while one
-      is showing.
+      The four below the rule are the <b>whole year</b> — accumulated heat dose,
+      the solar energy shading would remove, and what that shading costs you back
+      in January. None of those depends on the clock, so the time controls grey
+      out while one is showing.
       <br /><br />
-      The colour scale is fixed across the entire year, so scrubbing from July to
-      January reads as the city changing rather than the legend rescaling
-      underneath it.`,
+      Blue is cold and red is hot, on one scale &minus;20&nbsp;to&nbsp;60&nbsp;&deg;C
+      that never moves — not between hours, not between days, not between months.
+      So scrubbing from July to January reads as the city changing rather than as
+      the legend rescaling underneath it, and a colour you learn once keeps its
+      meaning. The bracket on the ramp marks where the hour on screen falls, which
+      is how you can see that a January morning uses a narrow blue slice of a
+      scale whose red end it never reaches.`,
   },
   {
     id: 'year',

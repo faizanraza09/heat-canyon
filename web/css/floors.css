@@ -366,6 +366,11 @@
 }
 .fsch .fs-brief:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 
+/* At the top of the pane the button is a way in, not a conclusion, so it is
+   tighter to the address above it and does not push the headline figure down
+   as far as the 16px it used at the foot of the prescriptions. */
+.fsch .fs-brief.top { margin-top: 14px; }
+
 /* ---------------------------------------------------------------- motion */
 
 @media (prefers-reduced-motion: reduce) {

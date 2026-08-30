@@ -56,6 +56,28 @@ export default defineConfig({
     // server by matching the command it spawned, and while both were identical
     // every test run also killed whatever dev server happened to be open.
     command: `${PYTHON} -m heatcanyon.cli serve --port ${PORT}`,
+    /* The suite runs against a server that has no Google key, whatever the
+     * developer's .env says.
+     *
+     * The photoreal layer now opens itself whenever a key is available, which
+     * is the right default for a visitor and a very expensive one for a test
+     * suite: a root tileset request is the billable unit, one is spent per page
+     * session, and this suite opens the application in a fresh page for every
+     * test. On a machine with a real key in .env a single run therefore started
+     * some thirty-five tile sessions — against a project quota of fifty a day —
+     * and the failure did not look like a test problem at all. It looked like
+     * the layer being broken for everyone, for the rest of the day.
+     *
+     * `?photoreal=0` in `openApp` is the same guard said in the page, and both
+     * are kept: the URL flag is what the specs read, and this is what makes the
+     * guarantee independent of any spec remembering to ask for it. An empty
+     * value rather than a deleted one, because `load_dotenv()` does not
+     * override a variable that is already set — so this wins over .env, which
+     * a deletion would not.
+     *
+     * A spec that needs a key stubs /api/config in the page (see 04 and 12),
+     * which never leaves the machine and cannot cost anything. */
+    env: { GOOGLE_MAPS_API_KEY: '' },
     url: `http://127.0.0.1:${PORT}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,

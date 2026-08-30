@@ -21,12 +21,21 @@
  *
  * Cost
  * ----
- * Billing is per *root tileset request*, roughly one per session, not per
- * tile — a visitor streaming hundreds of megabytes for an hour is one billable
- * event, against a free allowance of 1,000/month. That is why the layer
- * defaults to off and constructs no TilesRenderer until enabled: with the
- * toggle untouched, no root request is ever issued and the session costs
- * nothing. Callers should still set a quota cap on root tile requests.
+ * Billing is per *root tileset request*, one per page session, not per tile — a
+ * visitor streaming hundreds of megabytes for an hour is one billable event.
+ * What bounds it in practice is not the price but the project quota: `3D Tiles
+ * root requests per day per project` ships at **50**, which is fifty page
+ * sessions a day across everything using the key, and the fifty-first visitor
+ * gets a 429 rather than a photograph.
+ *
+ * That number is why the layer was built to construct no TilesRenderer until
+ * enabled, and it is worth keeping in view now that it opens by default
+ * wherever a key is found: with the toggle untouched and a key present, every
+ * page load spends one. Raise the quota to match the audience (Cloud console →
+ * Quotas → tile.googleapis.com), and keep the automated suites out of it — an
+ * automated browser test opens a page per case, so a single run can spend a
+ * day's worth. See playwright.config.mjs, which starts the test server with no
+ * key at all for exactly that reason.
  *
  * Terms that shape the code below
  * -------------------------------
@@ -69,6 +78,31 @@ const GEOID_NAVD88_M = -32.4;
  * east-morning / west-evening asymmetry the model exists to show lives in the
  * difference between opposite buckets. */
 const N_BUCKETS = 8;
+
+/* How much of a building the photograph keeps when it is not what the view is
+ * pointing at.
+ *
+ * The massing view dissolves the city around a selection so the chosen tower is
+ * visible through whatever stands in front of it (see GHOST in scene.js), and
+ * that is a property of the *selection*, not of which surface happens to be
+ * carrying the data — so it has to survive the switch to the photograph.
+ * Hashed alpha for the same reason it is used there: it keeps the tiles in the
+ * opaque pass with the depth buffer doing the sorting, and spends alpha as a
+ * fraction of pixels rather than as a blend the streamed geometry cannot sort.
+ *
+ * Lower than the massing view's 0.42, and the difference is forced rather than
+ * a matter of taste. There the subject is guaranteed by a second draw of the
+ * same merged mesh with a cleared depth buffer, which is what makes 0.42 safe
+ * even three ghosted layers deep. Nothing equivalent is affordable here: the
+ * subject's surface arrives inside several hundred streamed tile meshes with
+ * their own textures, so a second pass means re-drawing the whole tileset. The
+ * ghost therefore has to carry the guarantee on its own, and pixels compound —
+ * at 0.42 a tower behind two ghosted neighbours reaches the screen through 34%
+ * of their holes, which is less than the nearest neighbour keeps for itself. At
+ * 0.30 it reaches through 49%, so the subject is the densest thing along that
+ * line of sight, which is the whole claim a selection makes.
+ */
+const PR_GHOST = 0.30;
 
 /* Screen-space error target, in pixels: how much geometric error, projected to
  * the screen, is acceptable before a tile is refined.
@@ -117,6 +151,81 @@ const ERROR_TARGET = 3;
  * study area without touching the middle distance the fly-over actually frames.
  */
 const ERROR_FALLOFF = { fraction: 0.8, density: 1 / 3500 };
+
+/* How far from the study area the photographic world extends, in metres.
+ *
+ * The frustum is the only thing that bounded this layer before, and from a
+ * kilometre up the frustum contains the whole metropolitan area: Newark to the
+ * west, Jamaica Bay to the east, and every tile in between selected, queued,
+ * decoded and drawn. None of it is the subject. The AOI is 2.1 by 2.2 km, and
+ * a viewer who cannot find Midtown in the frame is not going to be helped by a
+ * sharper Elizabeth, New Jersey.
+ *
+ * `errorFalloff` above is the wrong tool for this and it is worth being clear
+ * why, because it looks like the right one. It is *subtractive on the error*:
+ * it makes a distant tile coarser, so the far city arrives at a lower level of
+ * detail — but it still arrives. The traversal still visits it, the download
+ * queue still fetches it, the parse queue still decodes it, and every one of
+ * those is a slot Midtown is not getting. Coarsening the horizon reduces bytes;
+ * it does not reduce contention.
+ *
+ * Culling it does both. A tile whose bounding volume lies wholly outside this
+ * radius is reported out of view, and `determineFrustumSet` returns at the
+ * first such tile without descending — so the entire subtree below it is never
+ * preprocessed, never marked used, never queued and never drawn. What is left
+ * is the near half of the frame competing with nothing.
+ *
+ * Four kilometres is chosen because of what happens to be at that distance
+ * rather than because of any budget: it reaches both rivers, the lower half of
+ * Central Park, and the near shores of Hoboken and Long Island City. The edge
+ * therefore mostly falls on water, which is the one place a cut in a
+ * photogrammetry mesh does not read as damage.
+ *
+ * Infinity restores the old behaviour, and the panel offers it, because the
+ * fly-over from altitude is a different picture with the horizon in it.
+ */
+const CONTEXT_RADIUS_M = 4000;
+
+/* The cull itself, as a tileset plugin.
+ *
+ * The hook's contract is worth stating because it is unusual: returning `true`
+ * means "this plugin has an opinion", and the renderer then intersects those
+ * opinions — one plugin reporting `inView: false` takes the tile out of view
+ * whatever the frustum said. Returning `false` abstains and leaves the base
+ * calculation alone, which is what this does for every tile inside the radius.
+ * A plugin cannot make a tile *coarser* this way (the aggregation takes the
+ * maximum error, so it can only ask for more refinement), which is the other
+ * half of why this is a cut rather than a taper.
+ *
+ * The test is against the tile's bounding volume, not its centre, so an
+ * ancestor spanning half the eastern seaboard still intersects the disc and is
+ * still refined. Only the children that leave it are dropped, which is what
+ * makes the boundary land at tile granularity instead of taking the root out
+ * along with everything else.
+ */
+class ContextRadiusPlugin {
+  constructor(radiusM) {
+    this.name = 'CONTEXT_RADIUS_PLUGIN';
+    this.radius = radiusM;
+    /* The AOI centre, expressed in the tileset's own frame — which is neither
+     * the scene's nor the ellipsoid's, because ReorientationPlugin writes
+     * `group.matrix` to put the AOI at the scene origin. Kept here and
+     * refreshed by the frame loop rather than recomputed per tile. */
+    this.centre = new THREE.Vector3();
+  }
+
+  calculateTileViewError(tile, target) {
+    if (!Number.isFinite(this.radius)) return false;
+    const bv = tile.engineData?.boundingVolume;
+    if (!bv) return false;
+    if (bv.distanceToPoint(this.centre) <= this.radius) return false;
+    target.inView = false;
+    return true;
+  }
+}
+
+/* Scratch for the frame loop, so the cull centre costs no allocation. */
+const _CULL_M4 = new THREE.Matrix4();
 
 /* Google Photorealistic Tiles are designed for a hardware WebGL renderer. A
  * software renderer (SwiftShader, WARP, llvmpipe, etc.) can still show the
@@ -296,6 +405,15 @@ export class Photoreal {
     this.tiles = null;
     this.enabled = false;
     this.nudgeM = 0;
+    /* How far the photographic world is allowed to reach. Held on the instance
+     * rather than on the plugin because the plugin is rebuilt with the tileset
+     * on a CPU/GPU profile switch and a key change, and a viewer who moved this
+     * slider should not have it silently spring back. */
+    this.contextRadiusM = CONTEXT_RADIUS_M;
+    this._cull = null;
+    /* Set when the root manifest request failed, cleared when someone asks for
+     * the layer again. See `_onLoadError`. */
+    this._rootFailed = false;
     /* The live error target the ramp is walking down toward the profile's
      * floor. Kept on the instance rather than read off the tileset each frame
      * so the ramp survives a rebuild mid-flight. */
@@ -336,8 +454,26 @@ export class Photoreal {
      * at every altitude without anyone having to tune it per view.
      *
      * It is the same idea as a thermal fusion mode on a real camera: greyscale
-     * visible everywhere, colour only where the sensor says hot. */
-    this.threshold = 0.55;
+     * visible everywhere, colour only where the sensor says hot.
+     *
+     * It opens at zero all the same — every surface the model covers is
+     * painted, and the slider is there to spend the colour more narrowly rather
+     * than to be discovered. At 0.55 a fifth of the buildings and three fifths
+     * of the wall cells were left as bare photograph, and nothing on screen
+     * distinguished "this building is below the cut" from "this building is
+     * missing from the model" — so the layer looked broken next to the massing
+     * view, where the same building is plainly coloured. Agreeing with the
+     * other view by default, and letting the threshold be asked for, is the way
+     * round that costs nobody an explanation. */
+    this.threshold = 0;
+    /* Which buildings the view is pointing at, and how much of the rest
+     * survives. `subject` is null whenever nothing is selected, which is also
+     * when `ghost` sits at 1 and the dissolve costs nothing but a comparison.
+     * Held on the instance because the selection long outlives any individual
+     * tile: a material patched three minutes into a session has to open in the
+     * state the rest of the frame is already in. */
+    this.subject = null;
+    this.ghost = 1;
     this._credits = [];
     this._mats = new Set();
 
@@ -360,10 +496,12 @@ export class Photoreal {
     this.lutSum = null;
     this.lutCount = null;
     /* Mean normalised value per LUT cell, 0..1 on the same domain the panel was
-     * drawn against. The colour alone cannot answer "how hot is this" — the
-     * ramp is monotonic in lightness, so luminance nearly recovers it, but
-     * "nearly" is not a basis for a threshold that decides whether a surface is
-     * painted at all. Carried explicitly and packed into the LUT's alpha. */
+     * drawn against. The colour alone cannot answer "how hot is this". Luminance
+     * nearly recovered it while the ramp was monotonic in lightness, and
+     * "nearly" was already not a basis for a threshold that decides whether a
+     * surface is painted at all; on the blue-to-red ramp it does not recover it
+     * even nearly, because the pale middle is the *lightest* part of the scale.
+     * Carried explicitly and packed into the LUT's alpha. */
     this.lutT = null;
     /* One aggregate per building: the peak value anywhere on its facades, and
      * the ramp colour at that value. This is what the far regime paints on
@@ -468,7 +606,15 @@ export class Photoreal {
     return tex;
   }
 
-  /** Per-building ground elevation (relative to the scene datum) and wall height. */
+  /** Per-building ground elevation (relative to the scene datum), wall height,
+   *  and whether the building is the subject of the current selection.
+   *
+   * The subject flag rides along in the third channel rather than in a texture
+   * of its own because the fragment that needs it has just fetched this row for
+   * the other two, and a selection changes about as often as a viewer clicks —
+   * a whole extra sampler bound into several hundred streamed materials to
+   * carry one bit per building is the more expensive answer by both measures.
+   */
   _buildParams() {
     const attrs = this.o.data.buildings.attrs;
     const nB = attrs.length;
@@ -477,7 +623,9 @@ export class Photoreal {
       const a = attrs[i];
       buf[i * 4] = (a && typeof a.base === 'number' ? a.base : 0) - this.o.datumM;
       buf[i * 4 + 1] = Math.max(a && a.h ? a.h : 1, 1);
+      buf[i * 4 + 2] = 1;
     }
+    this.paramsBuf = buf;
     const tex = new THREE.DataTexture(buf, 1, nB, THREE.RGBAFormat, THREE.FloatType);
     tex.minFilter = THREE.NearestFilter;
     tex.magFilter = THREE.NearestFilter;
@@ -608,6 +756,12 @@ export class Photoreal {
         return false;
       }
     }
+    /* A root request that failed left the tileset inert; this is the one place
+     * a viewer has asked for another, so spend it. See `_onLoadError`. */
+    if (this._rootFailed) {
+      this._rootFailed = false;
+      this.tiles.resetFailedTiles();
+    }
     this.enabled = true;
     this.root.visible = true;
     this._borrowPixelRatio();
@@ -729,6 +883,11 @@ export class Photoreal {
       height: this._ellipsoidHeight(),
     }));
 
+    /* And the horizon cap. Registered after the reorientation because it works
+     * in the frame that plugin establishes; see CONTEXT_RADIUS_M. */
+    this._cull = new ContextRadiusPlugin(this.contextRadiusM);
+    tiles.registerPlugin(this._cull);
+
     /* Screen-space error target, in pixels, and its distance falloff. Google's
      * recommended setting is tuned for a map-like overhead view; at street
      * level it leaves root-level slabs filling the frame, which is far worse
@@ -807,17 +966,71 @@ export class Photoreal {
      * event: what a viewer wants to know is how much of the city has arrived,
      * not that a manifest parsed. */
     tiles.addEventListener('load-root-tileset', () => this._pushCredits());
-    tiles.addEventListener('load-error', (e) => {
-      // A 401/403 here is nearly always the key: missing billing, or the Map
-      // Tiles API not enabled on the project.
-      this.o.onStatus?.('error',
-        'Tile request failed — check the key has billing enabled and the Map Tiles API turned on.');
-      if (typeof console !== 'undefined') console.warn('[photoreal]', e);
-    });
+    tiles.addEventListener('load-error', (e) => this._onLoadError(e));
 
     this.root.add(tiles.group);
     this.tiles = tiles;
     this.setDetail();
+  }
+
+  /** What a failed tile request means, and whether the layer can come back.
+   *
+   * This said one thing for every failure — check billing, check the Map Tiles
+   * API — which is the 401/403 story told over the top of every other one. A
+   * 429 is not that story at all: the key is fine, the API is on, and the
+   * project has simply started more tile sessions than its quota allows in the
+   * window. Told to go and check billing, you check billing, find nothing
+   * wrong, and conclude the layer is broken.
+   *
+   * The 429 text then said "wait a minute and switch it on again", which was a
+   * guess at which quota had been hit, and the wrong one. There are two, and
+   * the one that actually bites is the daily cap: `3D Tiles root requests per
+   * day per project`, fifty by default. Waiting a minute against that does
+   * nothing at all — the window is a day — so the advice sent a developer round
+   * a loop of switching the layer on, watching it fail, and waiting again, for
+   * as long as their patience lasted. The library reports the status code and
+   * not the response body, so which of the two it was cannot be known from
+   * here; the message therefore names both and points at the quota page rather
+   * than promising a wait that may be pointless.
+   *
+   * The distinction matters for what happens next as well as for what is said.
+   * A root failure leaves `rootLoadingState` at -1, and nothing in the library
+   * ever resets it, so the tileset is inert for the rest of the session — and
+   * `enable()` skips `_build` when a TilesRenderer already exists, so switching
+   * the layer off and on again silently did nothing at all. That is the wrong
+   * behaviour for the one error a viewer can actually clear by waiting.
+   *
+   * So a root failure is recorded, and `enable()` clears it. Deliberately not
+   * retried on a timer: a root request is the billable unit, and this layer's
+   * standing rule is that nothing costs anything without someone asking for it.
+   * The toggle is the retry, and now it is one.
+   */
+  _onLoadError(e) {
+    if (typeof console !== 'undefined') console.warn('[photoreal]', e);
+
+    // The library reports the status in the error text rather than as a field.
+    const msg = String(e?.error?.message || e?.error || '');
+    const code = Number((msg.match(/error code (\d{3})/) || [])[1] || 0);
+    // `tile: null` is the root manifest; anything else is one tile of many, and
+    // a single tile failing is not worth taking the status line over.
+    const isRoot = !e || e.tile === null || e.tile === undefined;
+    if (!isRoot && code !== 429) return;
+
+    if (isRoot) this._rootFailed = true;
+
+    if (code === 429) {
+      this.o.onStatus?.('error',
+        "Google is rate-limiting this key: the project's 3D Tiles root-request "
+        + 'quota is spent. The per-minute cap clears in a minute; the daily one '
+        + '(50 requests by default) clears when the day resets, or when the '
+        + 'quota for tile.googleapis.com is raised.');
+    } else if (code === 401 || code === 403) {
+      this.o.onStatus?.('error',
+        'Google refused the key — check it has billing enabled and the Map Tiles API turned on.');
+    } else {
+      this.o.onStatus?.('error',
+        `Tile request failed${code ? ` (${code})` : ''} — switch the layer on again to retry.`);
+    }
   }
 
   _ellipsoidHeight() {
@@ -848,6 +1061,10 @@ export class Photoreal {
       this.params = this._buildParams();
       this.lut = this._buildLut();
       this.agg = this._buildAgg();
+      // A building may already be selected when the first tile lands — the
+      // layer can be switched on with the dossier open — so the tables open in
+      // the state the rest of the scene is in rather than one click behind.
+      if (this.subject) this._writeSubjects();
       this.o.onLutReady?.();
     }
     const g = data.meta.massing_grid;
@@ -871,6 +1088,7 @@ export class Photoreal {
         uDesat: { value: this.desaturate },
         uWash: { value: fieldTex ? this.fieldWash : 0 },
         uThreshold: { value: this.threshold },
+        uGhost: { value: this.ghost },
         uHasGrid: { value: this.grid ? 1 : 0 },
         uEyeHeight: { value: this.eyeHeight },
         uAgg: { value: this.agg },
@@ -909,6 +1127,7 @@ export class Photoreal {
              uniform float uDesat;
              uniform float uWash;
              uniform float uThreshold;
+             uniform float uGhost;
              uniform float uHasGrid;
              uniform float uEyeHeight;
              uniform sampler2D uField;
@@ -941,6 +1160,56 @@ export class Photoreal {
                float b = g.r * 255.0 + g.g * 255.0 * 256.0;
                float h = ( g.b * 255.0 + g.a * 255.0 * 256.0 ) * 0.1;
                return ( b < 65535.0 && h > 2.0 ) ? 1.0 : 0.0;
+             }
+
+             /* Stochastic alpha, anchored in world space.
+              *
+              * Three's own hashed-alpha threshold, written out here rather than
+              * switched on: material.alphaHash also injects a discard against
+              * diffuseColor.a early in the fragment shader, and the decision
+              * this needs — which building a fragment belongs to — is not known
+              * until the massing grid has been probed further down. Same
+              * function, one caller, at the point where the answer exists.
+              *
+              * The scale comes from the derivative of world position, so the
+              * holes stay a roughly constant size on screen while the pattern
+              * itself is fixed to the surface: a ghosted wall reads as a
+              * stippled wall rather than as a screen door the city slides
+              * behind. The two power-of-two scales are blended for the same
+              * reason three blends them — a single snapped scale visibly pops
+              * as the camera closes on a surface. */
+             /* How much of the heat wash a building that is NOT the subject
+              * keeps. See the note at the blend: the dissolve alone left the
+              * surroundings as saturated red speckle that out-shouted the solid
+              * subject standing in the middle of it. A fifth reads as warm
+              * without competing, and keeps the neighbouring tower legible as
+              * the thing the chapter blames for the shaded wall. */
+             const float PR_GHOST_PAINT = 0.2;
+
+             float prHash2D( vec2 v ) {
+               return fract( 1.0e4 * sin( 17.0 * v.x + 0.1 * v.y )
+                             * ( 0.1 + abs( sin( 13.0 * v.y + v.x ) ) ) );
+             }
+             float prHash3D( vec3 v ) {
+               return prHash2D( vec2( prHash2D( v.xy ), v.z ) );
+             }
+             float prHashThreshold( vec3 p ) {
+               float maxDeriv = max( length( dFdx( p ) ), length( dFdy( p ) ) );
+               float pixScale = 1.0 / ( 0.05 * maxDeriv );
+               vec2 scales = vec2( exp2( floor( log2( pixScale ) ) ),
+                                   exp2( ceil( log2( pixScale ) ) ) );
+               vec2 a2 = vec2( prHash3D( floor( scales.x * p ) ),
+                               prHash3D( floor( scales.y * p ) ) );
+               float lf = fract( log2( pixScale ) );
+               float x = mix( a2.x, a2.y, lf );
+               float a = min( lf, 1.0 - lf );
+               vec3 cases = vec3(
+                 x * x / ( 2.0 * a * ( 1.0 - a ) ),
+                 ( x - 0.5 * a ) / ( 1.0 - a ),
+                 1.0 - ( ( 1.0 - x ) * ( 1.0 - x ) / ( 2.0 * a * ( 1.0 - a ) ) ) );
+               float t = ( x < ( 1.0 - a ) ) ? ( ( x < a ) ? cases.x : cases.y )
+                                             : cases.z;
+               return clamp( t, 1.0e-6, 1.0 );
              }`)
           .replace('#include <dithering_fragment>',
             `#include <dithering_fragment>
@@ -1014,6 +1283,14 @@ export class Photoreal {
                // amount, where the old screen only needed a sum.
                vec3 glow = vec3( 0.0 );
                float wSum = 0.0;
+               /* Whether this fragment belongs to the building the view is
+                * pointing at. Hoisted to the same scope as glow because that
+                * is where it is read: the params lookup that knows the answer
+                * happens two blocks in, and a fragment that resolves to no
+                * building at all — road, river, a tile outside the study area —
+                * keeps the default and is treated as subject, which leaves the
+                * street exactly as it was. */
+               float prSubj = 1.0;
 
                if ( uHasGrid > 0.5 ) {
                  vec2 cellF = prCell( vWorldPR );
@@ -1044,10 +1321,35 @@ export class Photoreal {
                      vec2( 0.5, ( bidx + 0.5 ) / uLutSize.y ) );
                    float baseRel = bp.r;
                    float hWall = max( bp.g, 1.0 );
+                   prSubj = bp.b;
                    // Height above this building's own pavement. A 2 m sill
                    // clears kerbs, parked cars and shrubs without excluding any
                    // wall or roof we mean to paint.
                    float above = vWorldPR.y - baseRel;
+
+                   /* ---- the dissolve, for everything the view is not about
+                    *
+                    * Gated on the same above > 2.0 sill the paint uses, so
+                    * exactly the surfaces the model claims are the surfaces
+                    * that can be taken away. The sill is doing real work here
+                    * and not only tidiness: the massing raster is dilated two
+                    * cells outward so that walls probe onto their own
+                    * footprint, which means the pavement, kerb and parked cars
+                    * within about six metres of a building also resolve its
+                    * index. Ghosting on the index alone punched holes in the
+                    * road around every unselected building. Below the sill the
+                    * photograph is left whole, which costs a two-metre solid
+                    * skirt at the foot of a dissolved tower and buys a street
+                    * that still reads as a street.
+                    *
+                    * A discard rather than a blend, and placed before the two
+                    * regimes rather than after them: a fragment that is not
+                    * going to reach the screen has no business fetching the
+                    * aggregate or the facade LUT for a colour nobody will
+                    * see. */
+                   if ( uGhost < 0.999 && bp.b < 0.5 && above > 2.0 ) {
+                     if ( uGhost < prHashThreshold( vWorldPR ) ) discard;
+                   }
 
                    /* ---- far: the city as marks rather than surfaces
                     *
@@ -1090,8 +1392,33 @@ export class Photoreal {
                        float overAgg = smoothstep( uThreshold,
                                                    min( 1.0, uThreshold + 0.20 ),
                                                    tAgg );
-                       float amt = wFar * overAgg;
-                       glow += ag.rgb * amt;
+
+                       /* A mark on the building, not a slab over it.
+                        *
+                        * This regime paints one flat colour across a whole
+                        * silhouette, so it is the one place in the shader where
+                        * nothing else varies within a building — and painted at
+                        * full weight that is literally a coloured cut-out: the
+                        * setbacks, window rows, roof plant and the edge between
+                        * two overlapping towers all disappear, and a frame of
+                        * them reads as untextured cardboard rather than as a
+                        * city. It also destroys the one thing the far view is
+                        * for, which is telling these towers from those: two
+                        * adjacent buildings at the same value merge into a
+                        * single red mass with no seam.
+                        *
+                        * The photograph carries that structure in its
+                        * luminance, so the flat colour is modulated by it, on
+                        * the same terms the facade path below uses — and the
+                        * mix is capped short of opaque so the picture's own
+                        * texture survives underneath. Neither number touches
+                        * the hue: which colour a building takes is still the
+                        * ramp's answer at its aggregate value, and the
+                        * threshold still decides whether it is marked at all.
+                        * They only stop the mark from being paint. */
+                       float shadeAgg = clamp( l * 2.2 + 0.15, 0.45, 1.4 );
+                       float amt = wFar * overAgg * 0.72;
+                       glow += ag.rgb * ( amt * shadeAgg );
                        wSum += amt;
                      }
                    }
@@ -1154,9 +1481,8 @@ export class Photoreal {
                           * gentle from the air.
                           *
                           * The old shader multiplied the heat colour by the
-                          * photograph's luminance outright, which threw away the
-                          * one property the ramp is built on — it is monotonic
-                          * in lightness, so lightness *is* the measurement.
+                          * photograph's luminance outright, which crushed the
+                          * lightness the ramp carries part of its signal in.
                           * Oblique photogrammetry is largely in its own baked
                           * shadow, so that multiply pinned most of the frame at
                           * the bottom of its clamp and two facades eight degrees
@@ -1195,6 +1521,36 @@ export class Photoreal {
                 * city grey and took the photograph's one job — recognition —
                 * away from it. */
                float paint = clamp( wSum, 0.0, 1.0 );
+
+               /* THE CITY AROUND THE SUBJECT KEEPS THE PHOTOGRAPH AND LOSES THE
+                * MEASUREMENT, and that is the whole of the fix for a frame
+                * nobody could read.
+                *
+                * The dissolve above already thins unselected buildings by
+                * hashed discard, and on the massing model that is enough: what
+                * survives is flat grey geometry, and a half-dissolved grey box
+                * plainly recedes. Over photogrammetry it was not enough and was
+                * arguably worse than nothing. Every surviving fragment still
+                * took the full heat wash, so the surroundings came back as
+                * several hundred thousand speckles of saturated red — brighter,
+                * busier and higher-contrast than the solid subject standing in
+                * the middle of them. The dissolve was doing its job and the
+                * colour was undoing it.
+                *
+                * So the wash is faded out on everything that is not the
+                * subject. prSubj is the subject flag, written into the params
+                * texture's third channel by _writeSubjects; it is 1 for every
+                * building whenever nothing is selected, so with no selection
+                * this term is 1 and the frame is exactly what it was.
+                *
+                * PR_GHOST_PAINT rather than zero, because the surroundings
+                * are the evidence for the claim being made about the subject —
+                * the tower opposite is the reason the shaded wall runs at 41 —
+                * and a neighbour with no heat on it at all cannot carry that.
+                * A fifth of the wash is enough to read as warm and not enough
+                * to compete. */
+               paint *= mix( PR_GHOST_PAINT, 1.0, step( 0.5, prSubj ) );
+
                float desatW = uDesat * mix( 0.35, 1.0, clamp( paint * 1.5, 0.0, 1.0 ) );
                c = mix( c, vec3( l ), desatW );
 
@@ -1327,6 +1683,41 @@ export class Photoreal {
     }
   }
 
+  /** Dissolve the city around a selection, as the massing view does.
+   *
+   * `subject` is the set of buildings the view is pointing at — the selection,
+   * any highlighted set, and any building under a band focus — or null when
+   * nothing is selected and the photograph should be left whole. The scene owns
+   * that judgement and passes the answer, rather than this layer re-deriving it
+   * from a selection index it would then have to keep in step.
+   *
+   * @param {Set<number>|null} subject
+   */
+  setSubject(subject) {
+    const next = subject && subject.size ? subject : null;
+    // Same set, same frame: this is called from every repaint, and a repaint
+    // happens on every hour tick.
+    if (!next && !this.subject) return;
+    this.subject = next;
+    this.ghost = next ? PR_GHOST : 1;
+    this._writeSubjects();
+    for (const mat of this._mats) {
+      const u = mat.userData.uniforms;
+      if (u && u.uGhost) u.uGhost.value = this.ghost;
+    }
+  }
+
+  /** Push the subject flags into the params texture's third channel. */
+  _writeSubjects() {
+    const buf = this.paramsBuf;
+    if (!buf) return;
+    const sub = this.subject;
+    for (let i = 0, n = buf.length / 4; i < n; i++) {
+      buf[i * 4 + 2] = (!sub || sub.has(i)) ? 1 : 0;
+    }
+    this.params.needsUpdate = true;
+  }
+
   /** Apply the detail settings and re-open the ramp at its ceiling.
    *
    * This took a mode argument — `orbit` or `street` — because a pedestrian and
@@ -1385,6 +1776,12 @@ export class Photoreal {
   _pushProgress() {
     const t = this.tiles;
     if (!t) return;
+    /* A dead tileset still reports a progress figure — with nothing queued and
+     * nothing loading the ratio settles at 1 — so without this the frame loop
+     * overwrote the error explaining *why* nothing is arriving with a cheerful
+     * 'ready' inside 400 ms. The failure has to outlast the frame that found
+     * it, or the viewer never reads it. */
+    if (this._rootFailed) return;
     const p = Math.round(Math.max(0, Math.min(1, t.loadProgress)) * 100);
     /* Settle on "ready" only once the queues are genuinely empty, not merely
      * once the percentage rounds to a hundred — and watch that emptiness as
@@ -1402,6 +1799,35 @@ export class Photoreal {
         ? `Streaming lighter tiles for this machine — ${p}%`
         : `Streaming Google’s mesh — ${p}%`);
     }
+  }
+
+  /** How far from the study area the photographic world extends, in metres.
+   *
+   * `Infinity` lifts the cap. No rebuild: the cull is evaluated during the
+   * traversal, so widening it simply lets the next frame ask for tiles it had
+   * been declining, and narrowing it stops the requests mid-flight. Tiles
+   * already resident stay in the cache until the LRU gets to them, which is
+   * why a narrow radius frees the *queues* immediately and the memory shortly
+   * afterwards.
+   */
+  setContextRadius(m) {
+    this.contextRadiusM = m;
+    if (this._cull) this._cull.radius = m;
+  }
+
+  /** Put the AOI centre into the tileset's frame, for the cull to measure from.
+   *
+   * Composed by hand from the two matrices rather than by calling
+   * `updateMatrixWorld()` on either, because `tiles.group` is the parent of
+   * every loaded tile scene and a recursive update would walk several hundred
+   * of them once a frame to learn something that changes only when the
+   * vertical nudge moves.
+   */
+  _syncCullCentre() {
+    if (!this._cull || !this.tiles) return;
+    this.root.updateMatrix();
+    _CULL_M4.multiplyMatrices(this.root.matrix, this.tiles.group.matrix).invert();
+    this._cull.centre.set(0, 0, 0).applyMatrix4(_CULL_M4);
   }
 
   /** Vertical nudge, metres. Dials out the residual geoid/datum mismatch. */
@@ -1430,6 +1856,7 @@ export class Photoreal {
     // against last frame's viewpoint, which at walking speed means it is always
     // refining where the eye just was.
     this.o.camera.updateMatrixWorld();
+    this._syncCullCentre();
     this.setEyeHeight(this.o.camera.position.y - this.groundY);
     this.tiles.setResolutionFromRenderer(this.o.camera, this.o.renderer);
     this.tiles.update();

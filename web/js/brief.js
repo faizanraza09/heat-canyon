@@ -91,6 +91,54 @@ function isoDate(s) {
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
+/* A scored building that is not one of the ranked 150, in the shape the ranked
+ * ones arrive in.
+ *
+ * NOT A SECOND COMPUTATION, AND THAT IS THE WHOLE POINT
+ *
+ * `buildings.json`'s compact record carries the same quantities as
+ * `ranked.json`, rounded identically, under short names — pipeline.py writes
+ * both from the same `Exposure` in the same pass, and added the nine event
+ * figures to the compact one precisely so a building outside the top 150 would
+ * not open to nothing. This renames them back. Every figure a reader sees still
+ * came off the pipeline; nothing here derives anything.
+ *
+ * Four fields have no compact equivalent: the Heat Vulnerability Index, the
+ * annual facade maximum, and the pipeline's own `reasons` sentences. The
+ * findings compose clause by clause and drop a clause whose field is missing, so
+ * their absence costs those buildings one sentence each rather than a section.
+ */
+function scoredFromAttrs(a) {
+  if (!a || !isNum(a.pr_rank)) return null;      // genuinely outside the scored set
+  return {
+    bin: a.bin, bbl: a.bbl, addr: a.addr, lon: a.lon, lat: a.lat,
+    h: a.h, floors: a.floors, year: a.year, units: a.units, zip: a.zip,
+    use: a.use, hvi: a.hvi, material: a.mat,
+    exposure: a.ex, vulnerability: a.vu, priority: a.pr,
+    measured: {
+      exceedance_h: a.exc_h, persistence_h: a.per_h,
+      peak_air_c: a.air_c, svf: a.svf,
+    },
+    modelled: {
+      facade_peak_c: a.fac_c, facade_spread_k: a.fac_k,
+      mrt_peak_c: a.mrt_c, wbgt_peak_c: a.wbgt_c,
+      facade_solar_kwh: a.fac_kwh,
+    },
+    annual: {
+      facade_kh35: a.akh, sun_hours: a.sunh, dose_kwh: a.adose,
+      facade_max_c: a.afac_c, month_of_peak: a.mop, swing_k: a.swing,
+      exposure: a.aex, priority: a.apr,
+      basis: 'whole year, ERA5 bias-corrected anchor, analytic canyon shading '
+        + '— see heatcanyon/tiers.py',
+    },
+    // The prose the ranked 150 carry is not on the compact record. The findings
+    // fall back to it only when fewer than two composed clauses survive, and on
+    // a scored building they do survive, so this is empty rather than absent.
+    reasons: [],
+    actions: [],
+  };
+}
+
 /** 1st, 2nd, 3rd, 158th. A rank written "1th" is the kind of detail that costs
  *  a document its authority in the first paragraph. */
 function ord(n) {
@@ -283,6 +331,45 @@ export class Brief {
     if (back && typeof back.focus === 'function' && document.contains(back)) back.focus();
   }
 
+  /* Point at a storey, or a run of them, in the floor chart.
+   *
+   * A cursor, not an encoding — the same distinction the worst-floor marker
+   * already makes, and the reason both are allowed to be the accent while
+   * nothing else data-adjacent is. It says "this is the row being talked
+   * about"; it says nothing about the row's value.
+   *
+   * Drawn behind the bars rather than over them. A wash on top would tint three
+   * measured colours, and a reader comparing a marked row against an unmarked
+   * one below it would be comparing two different inks.
+   *
+   * Called with no argument it takes the cursor away. It is safe to call at any
+   * time: a brief that has not rendered a chart yet has nothing to mark, which
+   * is not an error, because the walkthrough asks for a floor on the same beat
+   * that opens the document.
+   */
+  markFloors(lo = null, hi = null) {
+    const svg = this.root?.querySelector('.brf-chart');
+    const g = this._chartGeom;
+    if (!svg) return;
+    let m = svg.querySelector('.brf-cursor');
+    if (lo === null || lo === undefined || !g) { m?.remove(); return; }
+    const a = Math.min(lo, hi ?? lo), b = Math.max(lo, hi ?? lo);
+    // The chart draws the top floor first, so a row's y is counted from the end.
+    const iLo = g.floors.indexOf(a), iHi = g.floors.indexOf(b);
+    if (iLo < 0 || iHi < 0) { m?.remove(); return; }
+    const yTop = g.mt + (g.n - 1 - iHi) * g.rowH;
+    const yBot = g.mt + (g.n - 1 - iLo) * g.rowH + g.rowH;
+    if (!m) {
+      m = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      m.setAttribute('class', 'brf-cursor');
+      svg.insertBefore(m, svg.firstChild);
+    }
+    m.setAttribute('x', '0');
+    m.setAttribute('width', String(g.W));
+    m.setAttribute('y', String(yTop));
+    m.setAttribute('height', String(Math.max(g.rowH, yBot - yTop)));
+  }
+
   /** The print control, and the answer to the obvious "why not generate a PDF".
    *  A viewer-initiated file download is blocked outright in several of the
    *  contexts this application is embedded in, so a Save button that produced a
@@ -348,13 +435,45 @@ export class Brief {
     // card states comes from here, so reading the same object is how the two
     // surfaces are kept from disagreeing.
     const idx = (d.ranked?.items || []).findIndex((x) => String(x.bin) === bin);
-    const b = idx >= 0 ? d.ranked.items[idx] : null;
     const bi = d.binToIndex?.get?.(bin);
     const attr = (bi !== undefined && d.buildings?.attrs) ? d.buildings.attrs[bi] : null;
+    // `ranked.json` carries the top 150 and no more, because widening it to all
+    // 4,044 scored buildings would be a 16 MB payload for prose almost nobody
+    // opens. The other 3,894 scored buildings are not unscored: they carry the
+    // same figures on the compact record, which is exactly what those nine
+    // numbers were added to buildings.json for. Reading only `ranked` here is
+    // what had section 2 telling the owner of a scored building that there was
+    // "no scored record, so no findings" over a page of its own measured data.
+    const b = idx >= 0 ? d.ranked.items[idx] : scoredFromAttrs(attr);
     this._b = b || attr;
 
-    const sched = dec.floors?.items?.[bin] || null;
-    const rx = dec.prescriptions?.items?.[bin] || null;
+    /* The schedule, bundled or fetched.
+     *
+     * Only the ranked 150 are in `dec.floors`; every other building keeps its
+     * own shard. Read from the bundle when it is there and render immediately —
+     * the ranked buildings are the ones a reader opens most, and a document
+     * that flickers on the way in is worse than one that is simply there. For
+     * the rest, this pass renders the document without its schedule and then
+     * re-renders once the shard lands, which is a repaint of a panel nobody has
+     * begun reading yet.
+     *
+     * `_shardFor` guards against the re-render racing a second selection; see
+     * below. */
+    let sched = dec.floors?.items?.[bin] || null;
+    let rx = dec.prescriptions?.items?.[bin] || null;
+    if (!sched && this._shard?.bin === bin) {
+      sched = this._shard.loads; rx = this._shard.rx;
+    }
+    if (!sched && typeof dec.floorsFor === 'function' && this._shardFor !== bin) {
+      this._shardFor = bin;
+      dec.floorsFor(bin).then((got) => {
+        // Only if this is still the building on screen, and only if the fetch
+        // actually found one — a miss must not loop us back through here.
+        if (!got || this.bin !== bin || this._shard?.bin === bin) return;
+        this._shard = { bin, loads: got.loads, rx: got.prescriptions || null };
+        this._render(bin);
+      });
+    }
 
     this.standing.textContent = `BUILDING BRIEF · ${(b?.addr || attr?.addr || `BIN ${bin}`).toUpperCase()}`;
 
@@ -967,6 +1086,13 @@ export class Brief {
         ${parts.join('\n')}
       </svg>`;
 
+    /* The chart's own geometry, kept so `markFloors` can find a storey in it
+     * later. Recomputing it there would mean duplicating the row height rule
+     * and the top-floor-first inversion, and two copies of an inversion is one
+     * copy too many: the day the chart changes its row height, the cursor
+     * silently points three storeys off. */
+    this._chartGeom = { mt, rowH, n, W, floors: rows.map((r) => r.f) };
+
     const legend = el('figcaption', 'brf-legend');
     legend.innerHTML = `
       <span class="brf-key"><i style="background:var(--brf-term-solar)"></i>DIRECT SOLAR</span>
@@ -1051,6 +1177,35 @@ export class Brief {
     return s;
   }
 
+  /* The reasoning for a measure, in the parts it was written in.
+   *
+   * prescribe.py composes this out of four or five separate claims — how hot
+   * this floor runs and what is driving it, which face carries the load, how the
+   * device was sized, what simpler device was rejected on the way, and what
+   * overrode the geometry's own choice — and it used to arrive here as a single
+   * paragraph with every one of them run together. At 65ch that is a dozen
+   * unbroken lines in which the projection a contractor came for is
+   * indistinguishable from the argument around it, and the reader has to hold
+   * five threads at once to find the one they want.
+   *
+   * They are five answers to five questions, so they are set as five. The prose
+   * is kept as the fallback: a brief rendered against a prescriptions.json built
+   * before the parts existed still has to say something.                      */
+  _why(p) {
+    const parts = (Array.isArray(p.why_parts) ? p.why_parts : [])
+      .filter((x) => Array.isArray(x) && x[1]);
+    if (!parts.length) return p.why ? `<p class="brf-p">${esc(p.why)}</p>` : '';
+    return `<div class="brf-why">${parts.map(([label, text]) => {
+      // The sizing part is an equation. Set in the body face it reads as a
+      // sentence that happens to contain symbols; the label says which part it
+      // is, so nothing here has to guess from the text.
+      const kind = String(label).toLowerCase() === 'sizing' ? ' brf-wsum' : '';
+      return `<div class="brf-wpart${kind}">`
+        + `<p class="brf-lab brf-wlab">${esc(label)}</p>`
+        + `<p class="brf-p">${esc(text)}</p></div>`;
+    }).join('')}</div>`;
+  }
+
   _presc(p, n) {
     const F = this.f;
     const blk = el('div', 'brf-presc');
@@ -1091,7 +1246,7 @@ export class Brief {
       ${fixrun}
       <h3 class="brf-ph"><span class="brf-pn">${n}</span>${esc(p.title || p.key || 'Measure')}</h3>
       <p class="brf-spec">${esc(spec.join('  ·  '))}</p>
-      ${p.why ? `<p class="brf-p">${esc(p.why)}</p>` : ''}`;
+      ${this._why(p)}`;
 
     // --- what it buys.
     const eff = [];
@@ -1330,7 +1485,7 @@ export class Brief {
         + `${this.f.num(m.counts?.buildings_scored || 0)} buildings scored`);
     }
     if (m.surface_model?.source) bits.push(`Surface model: ${m.surface_model.source}`);
-    if (m.generated) bits.push(`Atlas generated ${longDate(m.generated)}`);
+    if (m.generated) bits.push(`Model generated ${longDate(m.generated)}`);
     const fix = this.ctx.decision?.fixture
       ? '<p class="brf-lab brf-fixfoot">PLACEHOLDER DATA — NOT FOR CIRCULATION</p>' : '';
     f.innerHTML = `

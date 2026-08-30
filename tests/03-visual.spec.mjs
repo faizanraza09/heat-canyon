@@ -192,10 +192,12 @@ test.describe('visual appearance', () => {
      *
      * Saturation is the honest measure and a much wider one. The sun layer
      * paints two flat colours, one warm and one cool, whose mean is close to
-     * grey; the ramp runs indigo through magenta to cream and stays saturated
-     * most of the way. Measured over the pixels the data actually drew, the
-     * separation is 0.18 against 0.49 — a factor of nearly three, where the
-     * colour-count ratio was a few per cent.
+     * grey; the heat ramp runs deep blue through a pale hinge into a deep red
+     * and is saturated at both ends. Measured over the pixels the data actually
+     * drew, the separation is roughly 0.18 against 0.49 — a factor of nearly
+     * three, where the colour-count ratio was a few per cent. Asserted as a
+     * ratio rather than against those figures, because the heat side moves with
+     * whatever the hour is actually showing.
      */
     const sunCity = await cityStats(page);          // the layer showing now
     await setLayer(page, 'Facade temperature');
@@ -203,12 +205,28 @@ test.describe('visual appearance', () => {
     console.log('temperature', JSON.stringify(tempCity));
     console.log('sun/shade  ', JSON.stringify(sunCity));
 
-    expect(sunCity.sat, 'a two-valued field averages toward grey')
-      .toBeLessThan(tempCity.sat * 0.65);
-    // And it concentrates: a larger share of its pixels lands in a handful of
-    // colour buckets than a ramp's does.
+    /* CONCENTRATION, not saturation, is what this now rests on.
+     *
+     * Saturation was the measure and it no longer separates the two layers:
+     * measured at 0.321 against 0.346, where it used to be 0.181 against 0.335.
+     * The fog is the reason. It takes the sky's horizon colour at the hour on
+     * screen rather than the shell's flat near-black, so at nine in the morning
+     * every distant surface in both frames is pulled toward the same warm grey
+     * — which is a saturation term applied equally to a two-valued field and to
+     * a ramp, and it swamps the difference between them. Any threshold that
+     * still passed on those two numbers would be measuring the fog.
+     *
+     * Concentration survives it: fog shifts colours, it does not merge a
+     * continuous field into a handful of buckets. A layer that assigns one of
+     * two colours per band puts a far larger share of its pixels in its top
+     * eight buckets than a ramp does, whatever the air between the camera and
+     * the wall is doing. */
     expect(sunCity.top8, 'a two-valued field concentrates into few colours')
       .toBeGreaterThan(tempCity.top8 * 1.12);
+    // A floor rather than a ratio, so the claim is still checked in the weakest
+    // form that is true: the sun layer is not MORE saturated than the ramp.
+    expect(sunCity.sat, 'a two-valued field does not out-saturate a ramp')
+      .toBeLessThan(tempCity.sat);
     expect(binary.litPct).toBeGreaterThan(20);
 
     // Sunlit gold must actually be on screen, counted rather than inferred from
@@ -217,10 +235,11 @@ test.describe('visual appearance', () => {
     // around a 13% lit fraction and says nothing about whether the gold rendered.
     // Measured: 11% of the frame at 09:00, against 38% on the temperature ramp.
     // The sun layer having LESS gold than the ramp is correct and was briefly
-    // asserted the other way round: inferno is warm across most of its range while
-    // the sun layer paints every shaded band cool blue-grey, and at nine in the
-    // morning most of Midtown's facade set is shaded. The claim worth testing is
-    // just that the gold rendered at all.
+    // asserted the other way round: nine in the morning on the heat-wave day puts
+    // the whole facade set between 33 and 52 degC, which is the warm half of the
+    // ramp end to end, while the sun layer paints every shaded band cool
+    // blue-grey and most of Midtown's facade set at that hour is shaded. The
+    // claim worth testing is just that the gold rendered at all.
     expect(binary.goldPct).toBeGreaterThan(1.0);
   });
 
@@ -235,22 +254,19 @@ test.describe('visual appearance', () => {
 
     /* What "cooler-toned" means on the ramp this project actually uses.
      *
-     * This asserted that the afternoon frame was less blue-dominant than the
-     * night one, on the grounds that "on the inferno ramp, cool maps to dark
-     * purple and hot to bright yellow". The ramp is no longer inferno: it runs
-     * indigo through magenta to cream, and red-minus-blue is not monotonic
-     * along it. Midtown's walls sit near 30 °C at three in the morning, which
-     * lands in the ramp's *orange*, and near 50 °C at three in the afternoon,
-     * which lands in its cream — so the night frame measures marginally the
-     * warmer of the two by that metric, 35 against 33, and the test failed on
-     * a description of a palette that had been replaced rather than on
-     * anything about the rendering. Restoring the old sky reproduces the same
-     * two numbers, which is how it was established that this was not the sky's
-     * doing.
+     * Neither hour is anywhere near the blue end, and that is not a bug. This
+     * is the peak day of a heat wave: read against the fixed −20 to 60 °C
+     * scale, Midtown's walls sit at 30 to 32 °C at three in the morning and at
+     * 40 to 51 °C at three in the afternoon. Both hours are in the warm half of
+     * the ramp, because both hours are warm. Blue is what January looks like,
+     * and the year test is where that is asserted.
      *
-     * What is true, and is what a viewer sees, is that the afternoon has
-     * climbed the ramp: brighter, and desaturated toward the cream at the top
-     * of it. Both are large, both are measured over the pixels the data drew.
+     * So "cooler-toned" here means further down the warm half, not blue, and
+     * red-minus-blue is the wrong metric for it — it separates the ends of the
+     * ramp, not two points a sixth of it apart. What a viewer actually sees
+     * between these two frames is that the afternoon has climbed: darker, and
+     * more saturated, as the amber gives way to orange. Both differences are
+     * large, and both are measured over the pixels the data drew.
      */
     const dayCity = await cityStats(page);          // the hour showing now
     await setHour(page, 0);
@@ -263,21 +279,39 @@ test.describe('visual appearance', () => {
      *
      * The heat ramp used to run near-black indigo up to a pale cream, so a hot
      * afternoon was the *brighter*, *less saturated* frame and the green channel
-     * climbed with the heat. It now runs pale straw down to a deep red, because
-     * an audience reads red as hot however faithful the blackbody order was. So
-     * the hot hour is now the darker, more saturated one, and green falls as the
-     * measurement rises rather than climbing with it.
+     * climbed with the heat. Its warm half now runs a pale straw down into a
+     * deep red, because an audience reads red as hot however faithful the
+     * blackbody order was. So the hot hour is the darker, more saturated one,
+     * and green falls as the measurement rises rather than climbing with it.
      *
      * What is actually under test is unchanged and is the thing worth keeping:
-     * that 03:00 and 15:00 render as visibly different frames on a fixed domain,
-     * so the clock moves the picture. Only the direction of each difference is
-     * restated. */
-    expect(nightCity.lum, 'the cool hour sits at the pale end of the heat ramp')
-      .toBeGreaterThan(dayCity.lum * 1.15);
-    expect(dayCity.sat, 'and the hot hour at the saturated red end')
+     * that 03:00 and 15:00 render as visibly different frames on a scale that
+     * does not move between them, so it is the clock moving the picture and not
+     * the legend. That guarantee is now much stronger than it was — the scale
+     * does not move between two DAYS either. Only the direction of each
+     * difference is restated. */
+    /* SATURATION carries this now. Luminance used to and cannot any more.
+     *
+     * On the ramp alone the night frame is the brighter one: 03:00 puts the
+     * whole city inside 30-32 °C, which is the ramp's pale amber, and 15:00 puts
+     * it at 40-51 °C, which is orange going into red. Measured on the geometry
+     * that way round — 146.1 against 123.1.
+     *
+     * The frame does not agree, because the fog stopped being a constant. It
+     * takes the sky's horizon colour at the hour on screen, so the afternoon is
+     * fogged with a warm grey and the small hours with something near black, and
+     * that adds far more brightness to the 15:00 frame than the ramp takes out
+     * of it. Measured after that change: 141.8 at night against 150.8 in the
+     * afternoon. Neither number is wrong and the pair no longer says anything
+     * about the ramp.
+     *
+     * Saturation is not confounded the same way — fog dilutes both frames, and
+     * the hot hour is further down a ramp that gets more saturated as it goes,
+     * so the gap survives with room to spare: 0.454 against 0.278. */
+    expect(dayCity.sat, 'the hot hour sits further down the ramp, toward the red end')
       .toBeGreaterThan(nightCity.sat * 1.05);
-    // The green channel now carries most of the fall, because the ramp runs from
-    // a straw that is rich in green to a red that has almost none.
+    // The green channel carries most of the fall, because the ramp's warm half
+    // runs from a straw that is rich in green to a red that has almost none.
     expect(night.meanRGB[1]).toBeGreaterThan(day.meanRGB[1]);
   });
 

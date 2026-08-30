@@ -14,6 +14,15 @@
  * application, and none of them should have to click past ninety seconds of
  * cinema first — nor should a screenshot comparison be at the mercy of which
  * frame of a cross-fade it happened to catch. The film has its own spec.
+ *
+ * `?photoreal=0` keeps the context layer shut. The layer opens itself when a
+ * key is available, and a root tileset request — the billable unit — is spent
+ * once per page session, so with a real key in .env this suite quietly started
+ * a tile session per test and exhausted a day's project quota in one run. Every
+ * spec that is not about the photoreal layer should be asking for the massing
+ * model anyway; the flag is also deliberately the one that does NOT touch the
+ * remembered preference, so it cannot leave a developer's browser switched off.
+ * A spec that wants the layer stubs a key and opens the page itself.
  */
 
 export async function openApp(page, { hour, layer } = {}) {
@@ -25,7 +34,7 @@ export async function openApp(page, { hour, layer } = {}) {
   });
   page.on('requestfailed', (r) => failedRequests.push(`${r.url()} ${r.failure()?.errorText}`));
 
-  await page.goto('/?intro=0', { waitUntil: 'domcontentloaded' });
+  await page.goto('/?intro=0&photoreal=0', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => !document.getElementById('boot'), null, { timeout: 150_000 });
   await page.waitForFunction(() => !!window.HC?.scene, null, { timeout: 30_000 });
   // One extra frame so the first recolour has certainly landed.
@@ -107,9 +116,18 @@ export async function cameraSettled(page) {
   await settle(page);
 }
 
-/** Wait for two animation frames — enough for a recolour to be uploaded. */
+/** Wait for two animation frames — enough for a recolour to be uploaded — and
+ *  then for any dissolve between two clock states to finish.
+ *
+ *  The scene no longer cuts between hours: an hour or a date picked through the
+ *  interface hands the mesh both painted states and slides a uniform between
+ *  them over about half a second (see `fadeable` in scene.js). Two frames is
+ *  still the right wait for the repaint itself, but a screenshot taken inside
+ *  that half second catches an arbitrary blend of two hours, which is a race
+ *  every visual comparison in this suite would lose intermittently. */
 export async function settle(page) {
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await page.waitForFunction(() => !window.HC?.scene?.fading, null, { timeout: 15_000 });
 }
 
 /** Statistics over the facade mesh's vertex colours, as the GPU would see them. */

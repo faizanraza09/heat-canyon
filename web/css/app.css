@@ -203,11 +203,18 @@ a:hover { color: var(--t1); }
    which end is which is legible at 44 px without a label. */
 #nav-compass .nn { fill: var(--accent); }
 #nav-compass .ss { fill: var(--t7); }
-#nav-rose { transform-origin: 22px 22px; }
+/* No transform-origin here, and it is worth saying why not.
+   The rose is turned by its `transform` presentation attribute, in the
+   `rotate(angle cx cy)` form — which carries its own centre of rotation. A CSS
+   transform-origin does not replace that centre, it composes with it: the
+   browser wraps the whole attribute list in translate(origin) … translate(-origin),
+   so `transform-origin: 22px 22px` on `rotate(-90 22 22)` rotates about (44,44).
+   The rose then orbited the widget instead of spinning in it, and by 180° it
+   had left the button entirely — a compass that was blank at most bearings and
+   correct only at north. Set the centre in one place; the attribute is that place. */
 #nav-compass .nlab {
-  position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
-  font-family: var(--mono); font-size: 8px; letter-spacing: .1em; color: var(--t7);
-  background: var(--panel-raised); padding: 0 3px; border-radius: 2px;
+  font-family: var(--mono); font-size: 7px; letter-spacing: .06em;
+  fill: var(--t4); text-anchor: middle;
 }
 
 .navzoom {
@@ -224,6 +231,63 @@ a:hover { color: var(--t1); }
 .navzoom button:hover { color: var(--t0); background: var(--panel-tint); }
 .navzoom button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 .navzoom button + button { border-top: 1px solid var(--line); }
+
+/* Turning around the building.
+   A four-way pad rather than a ring: the two things being asked for are
+   different questions — "which wall" and "from how high" — and a pad says
+   which is which without a legend. It sits under the zoom pair because it is
+   the same kind of control, a nudge of the camera you can hold down. */
+.navorbit {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 3px;
+  background: var(--panel-raised); border: 1px solid var(--line-ctl);
+  border-radius: var(--r);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.navorbit .orow { display: flex; gap: 6px; }
+.navorbit .ot {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  width: 20px; height: 18px; text-align: center;
+  font-size: 8px; color: var(--t5); line-height: 18px; border-radius: 3px;
+}
+.navorbit .ot:hover { color: var(--t0); background: var(--panel-tint); }
+.navorbit .ot:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+#nav-spin {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--panel-raised); border: 1px solid var(--line-ctl);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  display: grid; place-items: center;
+}
+#nav-spin svg { width: 22px; height: 22px; display: block; overflow: visible; }
+#nav-spin:hover { border-color: var(--line-hi); }
+#nav-spin:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+#nav-spin .orbit-path { fill: none; stroke: var(--t5); stroke-width: 1.2; }
+#nav-spin .orbit-core { fill: var(--t6); }
+#nav-spin .orbit-head { fill: var(--t4); }
+#nav-spin:hover .orbit-path { stroke: var(--t3); }
+#nav-spin:hover .orbit-head { fill: var(--t0); }
+/* Pressed, the eye is the accent and it actually goes round — the button shows
+   the state it is in rather than only naming it. */
+#nav-spin[aria-pressed="true"] { border-color: var(--accent); }
+#nav-spin[aria-pressed="true"] .orbit-head { fill: var(--accent); }
+#nav-spin[aria-pressed="true"] .orbit-path { stroke: var(--accent); }
+#nav-spin[aria-pressed="true"] .orbit-path {
+  /* The path marches rather than a marker travelling it. Dash offset is one of
+     the few things that can be animated on an arbitrary curve without asking
+     the browser for motion along a path, and at this size a moving dash reads
+     as circulation just as clearly as a dot would. */
+  stroke-dasharray: 3 5;
+  animation: orbit-march 1.4s linear infinite;
+}
+@keyframes orbit-march {
+  from { stroke-dashoffset: 0 }
+  to   { stroke-dashoffset: -8 }
+}
+@media (prefers-reduced-motion: reduce) {
+  #nav-spin[aria-pressed="true"] .orbit-path { animation: none; }
+}
 
 /* The street has no bearing to reset and no distance to step, so the cluster
    goes away rather than sitting there inert. */
@@ -436,7 +500,27 @@ a:hover { color: var(--t1); }
 
 .lblock { padding: 4px 22px 20px; }
 .mdesc { margin: 0 0 20px; font-size: 12.5px; line-height: 1.7; color: var(--t4); text-wrap: pretty; }
-.ramp { height: 8px; border-radius: 1px; }
+.ramp { height: 8px; border-radius: 1px; position: relative; }
+
+/* Where the data on screen actually falls on the scale.
+ *
+ * The temperature scale is fixed at -20 to 60 degC and does not move between
+ * hours, days or months, which is what makes a colour mean something. The cost
+ * is that the figures under the ramp stop being news: they read the same in
+ * January as in July, where the old moving scale at least told you what the
+ * period contained. This bracket hands that back without giving up the fixed
+ * scale — the numbers stay put and the marker slides, so a January city reads
+ * as a narrow slice at the blue end of a ramp whose red end is visibly unused.
+ *
+ * An outline rather than a fill: it sits on top of the ramp and must not become
+ * one more colour on it. The dark ring underneath is what keeps the outline
+ * legible over the pale middle of the ramp as well as over the two dark ends. */
+.ramp i {
+  position: absolute; top: -3px; bottom: -3px;
+  border: 1px solid var(--t0); border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(10, 9, 8, .55);
+  pointer-events: none;
+}
 .ticks {
   display: flex; justify-content: space-between; margin-top: 7px;
   font-family: var(--mono); font-size: 10px; letter-spacing: .06em; color: var(--t7);

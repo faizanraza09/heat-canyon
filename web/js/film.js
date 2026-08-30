@@ -72,24 +72,40 @@ const ATMO = 1.09;
  * is painted with one temperature ramp and the facades with another, the cut is
  * a cut in the colour language as well as in the camera, and the viewer has to
  * learn the legend twice. The stops here are uneven, exactly as they are in
- * colors.js — 0.22, 0.45, 0.68, 0.86 — because a resampled approximation of them
- * drifts, and drift is what makes two implementations of one ramp disagree in
- * the frame where they overlap.
+ * colors.js — 0.16, 0.32, 0.44, 0.52, 0.62, 0.74, 0.86 — because a resampled
+ * approximation of them drifts, and drift is what makes two implementations of
+ * one ramp disagree in the frame where they overlap.
+ *
+ * That is not a hypothetical. This function was left behind when the ramp was
+ * first turned round and spent a release running the old inferno order — a
+ * near-black indigo globe warming to pale cream, cross-fading into a city whose
+ * ramp ran the other way. Both implementations were internally consistent and
+ * the handover was still backwards. Anything that changes CANYON has to change
+ * this in the same commit.
+ *
+ * A cold planet is now blue rather than near-black, which is the direction the
+ * whole opening wanted anyway: the film starts on a blue marble and heats it.
  */
 const RAMP_GLSL = `
 vec3 heatRamp(float t) {
   t = clamp(t, 0.0, 1.0);
-  vec3 c0 = vec3(0.071, 0.063, 0.118);
-  vec3 c1 = vec3(0.243, 0.102, 0.251);
-  vec3 c2 = vec3(0.533, 0.180, 0.235);
-  vec3 c3 = vec3(0.780, 0.376, 0.165);
-  vec3 c4 = vec3(0.910, 0.651, 0.306);
-  vec3 c5 = vec3(0.969, 0.906, 0.745);
-  if (t < 0.22) return mix(c0, c1, t / 0.22);
-  if (t < 0.45) return mix(c1, c2, (t - 0.22) / 0.23);
-  if (t < 0.68) return mix(c2, c3, (t - 0.45) / 0.23);
-  if (t < 0.86) return mix(c3, c4, (t - 0.68) / 0.18);
-  return mix(c4, c5, (t - 0.86) / 0.14);
+  vec3 c0 = vec3(0.173, 0.322, 0.569);
+  vec3 c1 = vec3(0.267, 0.486, 0.698);
+  vec3 c2 = vec3(0.494, 0.667, 0.788);
+  vec3 c3 = vec3(0.729, 0.804, 0.839);
+  vec3 c4 = vec3(0.910, 0.878, 0.769);
+  vec3 c5 = vec3(0.976, 0.804, 0.486);
+  vec3 c6 = vec3(0.961, 0.620, 0.298);
+  vec3 c7 = vec3(0.898, 0.392, 0.204);
+  vec3 c8 = vec3(0.639, 0.102, 0.133);
+  if (t < 0.16) return mix(c0, c1, t / 0.16);
+  if (t < 0.32) return mix(c1, c2, (t - 0.16) / 0.16);
+  if (t < 0.44) return mix(c2, c3, (t - 0.32) / 0.12);
+  if (t < 0.52) return mix(c3, c4, (t - 0.44) / 0.08);
+  if (t < 0.62) return mix(c4, c5, (t - 0.52) / 0.10);
+  if (t < 0.74) return mix(c5, c6, (t - 0.62) / 0.12);
+  if (t < 0.86) return mix(c6, c7, (t - 0.74) / 0.12);
+  return mix(c7, c8, (t - 0.86) / 0.14);
 }`;
 
 /** Cheap value noise, for the cloud shell. Good enough at this distance and it
@@ -265,14 +281,23 @@ const FEATHER_OUT = 0.98;
  * catches the swap; longer and the double exposure is legible as one. */
 const HANDOVER_S = 2.0;
 
-/** Master level for the score. Loud enough to be part of the film rather than a
- *  rumour of one, and still well under the narration it sits beneath. */
-const SCORE_LEVEL = 0.55;
+/* Master level for the score.
+ *
+ * 0.55 was the thirty-second cut's level, and that film had no voice in it: the
+ * score was the only sound and its whole job was to stop a silent globe feeling
+ * like a broken video. Under three minutes of narration the same level is
+ * something else to listen to. A bed under a voice-over is not music played
+ * quietly, it is a different thing that happens to be made of the same parts —
+ * see `_startScore` for what actually changed, which is mostly not the level.
+ */
+const SCORE_LEVEL = 0.17;
 
-/** How far the score drops under a spoken line. Not silence: the drone is what
- *  holds the shots together, and a bed that vanishes whenever anyone talks makes
- *  every caption sound like a different film. */
-const DUCK = 0.42;
+/** How far the score drops under a spoken line. Not silence: the bed is what
+ *  holds the shots together, and one that vanishes whenever anyone talks makes
+ *  every caption sound like a different film. Shallower than it was, because the
+ *  spectral notch below is now doing most of the work of getting out of the
+ *  voice's way and the level no longer has to do it alone. */
+const DUCK = 0.55;
 
 /** How warm the planet is behind the title card, before the film starts. */
 const IDLE_HEAT = 0.45;
@@ -382,6 +407,7 @@ export class Film {
     this.canvas = $('film-gl');
     this.sound = localStorage.getItem('hc.film.sound') !== 'off';
     this.beatIndex = -1;
+    this._cueN = 0;
     this.t = 0;
     this.running = false;
     this.paused = false;
@@ -1217,45 +1243,105 @@ export class Film {
     this.limiter = limiter;
     this.narrator?.attach(ac, limiter);
 
+    /* A SPECTRAL HOLE WHERE THE VOICE GOES.
+     *
+     * This is the part that was missing, and it is why the old bed had to be
+     * either loud and in the way or quiet and pointless. Ducking by level moves
+     * the whole bed up and down; a voice-over does not need the bed quieter, it
+     * needs it OUT OF THE BAND THE VOICE OCCUPIES. Speech intelligibility lives
+     * in the first two formants, roughly 500 Hz to 3 kHz, and everything the old
+     * score did was aimed straight at it: five sawtooths whose harmonics run all
+     * the way up through it, and a noise bed band-passed at 780 Hz, which is
+     * almost exactly where a male voice puts its first formant.
+     *
+     * So the whole bed goes through a broad scoop centred at 1.6 kHz. The bed
+     * keeps its weight underneath and its air on top, the voice sits in the gap,
+     * and neither has to get out of the other's way by going quiet. It is what
+     * a dialogue mix does, and it is four lines.
+     */
+    const scoop = ac.createBiquadFilter();
+    scoop.type = 'peaking';
+    scoop.frequency.value = 1600;
+    scoop.Q.value = 0.7;
+    scoop.gain.value = -9;
+
+    /* Two poles, not one, and 150 Hz rather than 520.
+     *
+     * A single lowpass at 520 with Q 0.8 rolls off at 12 dB an octave, so a
+     * sawtooth at 55 Hz still had audible harmonics at 2 kHz. Cascading two
+     * gives 24 dB an octave and the drone becomes weight rather than tone. The
+     * old comment argued for opening the filter because laptop speakers cannot
+     * reproduce anything below 130 Hz — true, and the answer to it is the air
+     * bed below, which now lives up where small speakers are actually good,
+     * rather than dragging the drone up into the voice to be heard.
+     */
     const filt = ac.createBiquadFilter();
-    // 520 Hz, not 300. Almost all of this drone's energy sits below 130 Hz,
-    // which a laptop speaker cannot reproduce at all — the first version was
-    // mixed for headphones and simply inaudible on anything else. Opening the
-    // filter and adding a partial up at 220 puts real content in the band small
-    // speakers actually pass.
-    filt.type = 'lowpass'; filt.frequency.value = 520; filt.Q.value = 0.8;
-    filt.connect(master);
+    filt.type = 'lowpass'; filt.frequency.value = 150; filt.Q.value = 0.5;
+    const filt2 = ac.createBiquadFilter();
+    filt2.type = 'lowpass'; filt2.frequency.value = 150; filt2.Q.value = 0.7;
+    filt.connect(filt2); filt2.connect(scoop);
 
-    // A minor-ish stack, detuned in pairs so it beats slowly instead of sitting
-    // still. Anything more consonant starts to sound like a product video.
-    [[55, 'sawtooth', 0.20], [82.4, 'sawtooth', 0.12],
-     [110, 'triangle', 0.09], [130.8, 'triangle', 0.06],
-     [220, 'triangle', 0.045]].forEach(([f, type, g], i) => {
-      const o = ac.createOscillator();
-      o.type = type;
-      o.frequency.value = f * (i % 2 ? 1.003 : 0.997);
-      const gain = ac.createGain(); gain.gain.value = g;
-      o.connect(gain); gain.connect(filt); o.start();
-      this.nodes.push(o);
-    });
+    /* AN OPEN FIFTH, NOT A CHORD, and this is the other half of why the old bed
+     * read as cheap.
+     *
+     * It was A1, E2, A2, C3, A3 — an A minor triad, held for three minutes. A
+     * sustained minor chord is not atmosphere, it is music, and music under
+     * narration is either the thing you are listening to or the thing you are
+     * ignoring. There is no third here at all: root, fifth, octave. That is
+     * tonally ambiguous, which is what lets it sit under speech for three
+     * minutes without ever resolving to anything or asking to be followed.
+     *
+     * Sine and triangle rather than sawtooth, because the point is the
+     * fundamental. The pairs are still detuned a few cents so the bed beats
+     * slowly against itself instead of sitting perfectly still.
+     */
+    [[55, 'sine', 0.34], [82.5, 'sine', 0.16], [110, 'triangle', 0.10]]
+      .forEach(([f, type, g], i) => {
+        const o = ac.createOscillator();
+        o.type = type;
+        o.frequency.value = f * (i % 2 ? 1.004 : 0.996);
+        const gain = ac.createGain(); gain.gain.value = g;
+        o.connect(gain); gain.connect(filt); o.start();
+        this.nodes.push(o);
+      });
 
+    /* Breath, on the level rather than on a filter cutoff.
+     *
+     * The old movement was an LFO sweeping the lowpass 260 Hz either side of
+     * its centre every twenty-three seconds. Moving a cutoff moves the HARMONIC
+     * CONTENT, and the ear tracks timbre changes — it is the same reflex that
+     * makes a passing siren impossible to ignore — so the one thing the bed did
+     * was the one thing guaranteed to pull attention off the sentence. Swelling
+     * the level instead is movement you feel and do not follow.
+     */
+    const swell = ac.createGain();
+    swell.gain.value = 1;
+    scoop.connect(swell);
+    swell.connect(master);
     const lfo = ac.createOscillator();
-    lfo.frequency.value = 0.043;
-    const lfoGain = ac.createGain(); lfoGain.gain.value = 260;
-    lfo.connect(lfoGain); lfoGain.connect(filt.frequency); lfo.start();
+    lfo.frequency.value = 0.021;                 // one breath every 48 seconds
+    const lfoGain = ac.createGain(); lfoGain.gain.value = 0.16;
+    lfo.connect(lfoGain); lfoGain.connect(swell.gain); lfo.start();
     this.nodes.push(lfo);
 
-    // Air: white noise through a band-pass that opens during the descent.
+    /* Air, moved up out of the voice.
+     *
+     * Band-passed at 780 Hz this was a hiss sitting exactly on the first
+     * formant. High-passed at 5 kHz it is the sound of a large room, which is
+     * what "air" is supposed to mean — it reads as space and scale, it is where
+     * a laptop speaker is at its best, and it cannot mask a consonant because
+     * there are no consonants up there.
+     */
     const len = ac.sampleRate * 4;
     const buf = ac.createBuffer(1, len, ac.sampleRate);
     const ch = buf.getChannelData(0);
     for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * 0.5;
     const noise = ac.createBufferSource();
     noise.buffer = buf; noise.loop = true;
-    const bp = ac.createBiquadFilter();
-    bp.type = 'bandpass'; bp.frequency.value = 780; bp.Q.value = 0.6;
+    const hp = ac.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 5000; hp.Q.value = 0.5;
     this.airGain = ac.createGain(); this.airGain.gain.value = 0;
-    noise.connect(bp); bp.connect(this.airGain); this.airGain.connect(master);
+    noise.connect(hp); hp.connect(this.airGain); this.airGain.connect(master);
     noise.start(); this.nodes.push(noise);
 
     const sub = ac.createOscillator();
@@ -1317,6 +1403,14 @@ export class Film {
     }, fade * 1000 + 200);
   }
 
+  /* One flag for two things, and they had to come apart.
+   *
+   * `sound` gated the score AND the narration, so the only control the frame
+   * offered for "turn that noise off" also turned off the voice explaining what
+   * you were looking at. With the score at zero the button now means what its
+   * label says — the narration — and the score follows it only in the sense
+   * that zero times anything is still zero.
+   */
   setSound(on) {
     this.sound = on;
     localStorage.setItem('hc.film.sound', on ? 'on' : 'off');
@@ -1403,6 +1497,9 @@ export class Film {
   _prepare(data) {
     if (this._prepared) return;
     this._prepared = true;
+    // A getter, not the object: `_prepare` is idempotent and the title card runs
+    // it for the runtime label before `actx` exists, so a snapshot taken here is
+    // null every time. The beats that need it read it when they are read.
     this.story = buildStory(data, {
       years: this.assets.temp.years,
       anomaly: this.assets.temp.anomaly,
@@ -1410,7 +1507,7 @@ export class Film {
       warmest10_since: this.assets.temp.warmest10_since,
       baseline: this.assets.temp.baseline,
       cities: this.assets.cities,
-    });
+    }, () => this.actx?.ui || null);
     this.voice = this._pickVoice();
     this._prepareBeats();
     this.chapters = this._groupChapters();
@@ -1629,6 +1726,7 @@ export class Film {
     this.paused = false;
     this.t = 0;
     this.beatIndex = -1;
+    this._cueN = 0;
     this.t0 = this.last = performance.now();
     this._loop();
 
@@ -1700,6 +1798,10 @@ export class Film {
 
     this.beatIndex = i;
     const b = beats[i];
+    // A new beat starts with none of its cues fired. `_fireCues`, on the very
+    // next line of the frame, then catches up to wherever in the beat we are —
+    // which is what makes a seek land with the right prefix of them run.
+    this._cueN = 0;
 
     // A beat may carry no line. The last chapter is the dive, and the dive is
     // silent by design — everything the film has to say has been said by the
@@ -1835,6 +1937,61 @@ export class Film {
     }
   }
 
+  /* Cues: a timeline INSIDE a beat.
+   *
+   * `act` fires once, at the top of a beat, and for most of the film that is
+   * exactly right — one sentence, one held frame, one thing changed. It is
+   * wrong wherever a single sentence NAMES SEVERAL THINGS IN ORDER. "Twelve
+   * layers: surface temperature, sun and shade, hours above thirty-five, the
+   * longest unbroken run" is four claims in one line, and an `act` can only
+   * show one of them; the other three are read out over a picture of the first,
+   * which is the film telling you about a control instead of showing it to you.
+   *
+   * So a beat may carry `cues`, each an `at` in beat-fractions and a function.
+   * They fire in order as the beat's own progress passes them, which means they
+   * stay tied to the sentence however long the sentence turns out to be: a
+   * recorded line that runs a second long stretches its beat, and every cue in
+   * it stretches with it. That is the same guarantee the storyboard already
+   * makes for the camera, applied inside a beat rather than between two.
+   *
+   * Seeking is the reason the counter is an index rather than a set of flags.
+   * `_advance` zeroes it on every beat entry, including the synthetic one a
+   * seek produces, so the first frame after a seek fires exactly the prefix of
+   * cues that point in the beat has already passed — no more, and never in a
+   * different order.
+   */
+  _fireCues(b, u) {
+    const cues = b.cues;
+    if (!cues || !cues.length || !this.actx) return;
+    while (this._cueN < cues.length && u >= cues[this._cueN].at) {
+      const c = cues[this._cueN++];
+      /* A cue may move the highlight as well as the panel, and on any beat
+       * that scrolls it has to.
+       *
+       * `spot` was a per-BEAT property, fixed for the whole sentence, while the
+       * things it points at are inside documents the same beat is scrolling.
+       * The floor-schedule beat lit the section heading and then scrolled past
+       * it, so `boxOf` clipped the box to the top edge of the scroller and drew
+       * a two-pixel sliver of highlight along the top of the frame with the
+       * chart the line was describing sitting unlit underneath. The portfolio
+       * and the analyst had the shape of the same fault from the other side:
+       * one beat lit the whole window and the two beats that walked down it lit
+       * nothing, so the highlight agreed with the narration for a third of the
+       * time it was on screen.
+       *
+       * A cue that names a `spot` therefore repoints it. `null` is meaningful
+       * and distinct from absent — it clears the highlight — so the test is on
+       * the property existing rather than on its truthiness.
+       */
+      if ('spot' in c) { this._spot = c.spot; this._placeSpot(); }
+      // Guarded exactly as `act` is, and for the same reason: one dead cue is a
+      // beat that shows less than it says, which is survivable. An unguarded
+      // throw here is inside the frame loop, so it is the whole film.
+      try { c.do?.(this.actx); }
+      catch (e) { console.warn(`film: cue ${this._cueN - 1} of beat ${b.chapter} failed:`, e); }
+    }
+  }
+
   /** Put the highlight over whatever the current beat named, or take it away.
    *
    *  Called every frame from the loop rather than once per beat: nearly
@@ -1878,6 +2035,7 @@ export class Film {
     const beats = this.story.beats;
     const b = beats[Math.min(this.beatIndex, beats.length - 1)] || beats[0];
     const u = clamp01((this.t - b.t0) / b.dur);
+    this._fireCues(b, u);
     const e = (EASES[b.ease] || smooth)(u);
     // Altitude gets its own curve, and by default that curve is a straight
     // line. Every other channel wants to ease in and out of its beat; altitude
@@ -2313,12 +2471,23 @@ export class Film {
       const upto = this.story.beats.findIndex((x) => this.t < x.t0 + x.dur);
       const last = upto < 0 ? this.story.beats.length - 1 : upto;
       for (let k = 0; k <= last; k++) {
-        const act = this.story.beats[k].act;
-        if (!act) continue;
-        try { act(this.actx); }
+        const beat = this.story.beats[k];
+        try { beat.act?.(this.actx); }
         catch (e) { console.warn(`film: replaying beat ${k} failed:`, e); }
+        // The cues of every beat we have passed THROUGH, but none of the beat we
+        // have landed IN: `_advance` zeroes the cue counter on the way in and
+        // `_fireCues` runs the prefix this point in the beat has earned, on the
+        // next frame. Replaying the landing beat's cues here as well would run
+        // its whole timeline — the layer it ends on rather than the one it is
+        // partway through — and then run the prefix again on top of it.
+        if (k === last) break;
+        for (const c of beat.cues || []) {
+          try { c.do(this.actx); }
+          catch (e) { console.warn(`film: replaying cue of beat ${k} failed:`, e); }
+        }
       }
     }
+    this._cueN = 0;
     this.narrator?.cancel();
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     if (this.paused) this._setPaused(false);

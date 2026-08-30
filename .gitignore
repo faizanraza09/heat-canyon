@@ -256,6 +256,15 @@ data/env_params/*
 web/data/*.bin
 web/data/**/*.bin
 
+# The per-building floor schedules, one file per BIN, about 100 MB across four
+# thousand buildings. Same bargain as the solved fields above: they are
+# deterministic given the dataset, the pipeline writes them in a quarter of an
+# hour, and `deploy_static.py` and `deploy_hf.py` both rsync `web/` off the disk
+# of a machine that has run it — so shipping them has never depended on their
+# being in the repository. `floors.json` itself stays committed: it is the
+# bundled ranked 150 and it is four megabytes.
+web/data/floors/
+
 # web/data/vo/ is NOT ignored, and that is the point. Those are the opening
 # film's narration — one MP3 per line, read by ElevenLabs, about three and a half
 # megabytes. Committing them is the same bargain as the FortyGuard responses

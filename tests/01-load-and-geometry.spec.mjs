@@ -175,9 +175,22 @@ test('every facade quad is finite and non-degenerate', async ({ page }) => {
 test('facade colours are varied rather than saturated flat', async ({ page }) => {
   await openApp(page, { layer: 'Facade temperature' });
   const c = await facadeColorStats(page);
-  // A flat or clipped field is the failure this guards against: the first build
-  // mapped the whole afternoon into the top of the ramp and read as one colour.
-  expect(c.distinct).toBeGreaterThan(150);
+  /* A flat or clipped field is the failure this guards against: the first build
+   * mapped the whole afternoon into the top of the ramp and read as one colour.
+   *
+   * The floor came down from 150 to 90 when the temperature scale was fixed at
+   * −20 to 60 °C, and the drop is the fixed scale rather than a regression. The
+   * scale used to be the loaded period's own 0.2–99.8 percentiles, 27 to 56 °C
+   * on the heat-wave day, so the afternoon was stretched across the whole ramp
+   * by construction. It now occupies the third of the ramp it actually spans —
+   * 34.3 to 60 °C at 15:00 — and measures 124 distinct quantised colours where
+   * it used to measure over 150.
+   *
+   * 90 is the floor because it is still miles from the failure: the sun layer,
+   * which really is two colours, measures 20 on this metric. The same test at
+   * 03:00 would legitimately measure 57, because at three in the morning the
+   * whole city is inside 2.1 K and there is nothing else for it to be. */
+  expect(c.distinct).toBeGreaterThan(90);
   expect(c.max - c.min).toBeGreaterThan(0.25);
   expect(c.mean).toBeGreaterThan(0.05);
   expect(c.mean).toBeLessThan(0.97);

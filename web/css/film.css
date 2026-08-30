@@ -30,6 +30,12 @@
  * pointer events back.
  */
 
+/* 300 is above the three full-screen documents at 200 — the brief, the
+   programme and the analyst — and it only means that because the overlay is a
+   child of the BODY. `#app` is `position: fixed` and therefore a stacking
+   context of its own, so while the film lived inside it this number was
+   compared only with the panels, and the two documents that append themselves
+   to the body painted over the entire film. See the note in index.html. */
 #film {
   position: fixed; inset: 0; z-index: 300;
   color: var(--t1);
@@ -391,10 +397,17 @@ body.film-running #time { transform: translateY(16px); }
   right: auto; text-align: center;
 }
 
-/* The brief and the analyst are full-screen documents, and while one is up the
-   middle column is not empty any more. The caption drops to the foot of the
-   screen, clear of both, and keeps its scrim. */
+/* The brief, the analyst and the programme are full-screen documents, and while
+   one is up the middle column is not empty any more. The caption drops to the
+   foot of the screen, clear of all three, and keeps its scrim.
+
+   The portfolio was missing from this list for as long as it existed, which is
+   why chapter four's last three lines — the budget, the person-hours, the range
+   on every cost — were set at the top of the frame directly behind the
+   programme's own masthead. Three captions is not a corner case; it is the
+   whole of the chapter's closing argument. */
 body:has(#brief:not([hidden])) #film.overcity #film-caption,
+body:has(#pf:not([hidden])) #film.overcity #film-caption,
 body:has(#analyst:not([hidden])) #film.overcity #film-caption {
   /* Below the document, above the transport bar, which is 72px tall and owns
      the foot of the screen. At 26px the line was printed straight through the
@@ -402,9 +415,17 @@ body:has(#analyst:not([hidden])) #film.overcity #film-caption {
   top: auto; bottom: 88px; left: 8%; right: 8%;
   font-size: clamp(20px, 1.5vw, 26px);
 }
+/* `!important`, for the same reason the closing rules above carry it: the
+   chapter mark re-enters on a CSS ANIMATION (`hcCap`, restarted from film.js),
+   and an animation's own `opacity: 1` outranks any ordinary declaration in the
+   cascade however specific it is. Without the flag this rule was simply losing
+   — the mark sat across the brief's masthead for the whole of chapter three,
+   which is exactly what it says here it must not do. */
 body:has(#brief:not([hidden])) #film.overcity #film-chaptercard,
+body:has(#pf:not([hidden])) #film.overcity #film-chaptercard,
 body:has(#analyst:not([hidden])) #film.overcity #film-chaptercard {
-  opacity: 0;
+  opacity: 0 !important;
+  transition: opacity .35s ease !important;
 }
 
 /* ------------------------------------------------------- the walkthrough's

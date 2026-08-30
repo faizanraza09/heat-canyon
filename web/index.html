@@ -37,7 +37,7 @@
        panel, and a screen reader needs to be told this is an application
        surface rather than an unlabelled image. -->
   <canvas id="gl" tabindex="0" role="application"
-          aria-label="Three-dimensional model of Midtown Manhattan. Drag to move the camera, scroll to zoom, N faces north."></canvas>
+          aria-label="Three-dimensional model of Midtown Manhattan. Drag to move the camera, right-drag or shift-drag to turn and tilt around the selected building, scroll to zoom, N faces north."></canvas>
 
   <!-- Over the model, under the interface. See the note in app.css. -->
   <div id="vignette"></div>
@@ -53,17 +53,57 @@
             aria-label="Camera bearing. Click to face north.">
       <svg viewBox="0 0 44 44" aria-hidden="true">
         <circle class="ring" cx="22" cy="22" r="17" />
+        <!-- The N belongs on the card, not on the bezel. It used to be an HTML
+             span pinned to the top of the button, which is only true at one
+             bearing: with the rose turning underneath it, the label said north
+             was up while the needle said it was somewhere else, and the two
+             disagreed at every bearing but zero. Inside the rose it turns with
+             the needle and is right at all of them. A rotated N is legible, and
+             at due south — the one bearing where an upside-down letter would be
+             a problem — N happens to be its own half-turn. -->
         <g id="nav-rose">
-          <path class="nn" d="M22 6 L27 22 L22 18 L17 22 Z" />
-          <path class="ss" d="M22 38 L17 22 L22 26 L27 22 Z" />
+          <text class="nlab" x="22" y="10.5">N</text>
+          <path class="nn" d="M22 13 L26 22 L22 19.7 L18 22 Z" />
+          <path class="ss" d="M22 31 L18 22 L22 24.3 L26 22 Z" />
         </g>
       </svg>
-      <span id="nav-north" class="nlab">N</span>
     </button>
     <div class="navzoom">
       <button id="nav-in" title="Zoom in" aria-label="Zoom in">+</button>
       <button id="nav-out" title="Zoom out" aria-label="Zoom out">−</button>
     </div>
+
+    <!-- Turning, as furniture. Right-drag has always turned the view, but a
+         gesture with nothing on screen to name it is a gesture most people
+         never find — and on this model turning is not a nicety: a building's
+         four walls are four different temperatures, and three of them are
+         behind the one you are looking at. The pad turns around the selected
+         building, and the button underneath walks all the way round it. -->
+    <div class="navorbit" role="group" aria-label="Turn the view around the building">
+      <button id="nav-tilt-up" class="ot" title="Look down from higher (W)"
+              aria-label="Tilt the view up and over">▲</button>
+      <div class="orow">
+        <button id="nav-turn-l" class="ot" title="Turn left (Q)"
+                aria-label="Turn the view left around the building">◀</button>
+        <button id="nav-turn-r" class="ot" title="Turn right (E)"
+                aria-label="Turn the view right around the building">▶</button>
+      </div>
+      <button id="nav-tilt-down" class="ot" title="Drop toward street level (S)"
+              aria-label="Tilt the view down toward the facade">▼</button>
+    </div>
+    <button id="nav-spin" title="Walk the camera right round the building (O)"
+            aria-label="Orbit the building automatically" aria-pressed="false">
+      <!-- Order is depth: the ring is drawn first so the tower covers its far
+           half, which leaves the near half crossing in front and the whole
+           glyph reading as a path around a building rather than as a ring
+           beside one. The arrowhead is on the near side, where the travel is
+           toward the viewer, and says which way round it goes. -->
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <ellipse class="orbit-path" cx="12" cy="12.4" rx="9.6" ry="4.3" />
+        <rect class="orbit-core" x="9.6" y="4.4" width="4.8" height="10.4" rx=".8" />
+        <path class="orbit-head" d="M21.6 16.9 L19.5 12.6 L23.7 12.6 Z" />
+      </svg>
+    </button>
   </div>
 
   <div id="credits" hidden>
@@ -92,10 +132,10 @@
         <div class="ptop">
           <div class="pname">URBAN CANYON</div>
           <div class="picons">
-            <button id="tour-replay" class="icon" title="Walk through the controls again" hidden>
+            <button id="tour-replay" class="icon" title="Show me the controls again" hidden>
               <span class="g">?</span>
             </button>
-            <button id="film-replay" class="icon" title="Watch the film again" hidden>
+            <button id="film-replay" class="icon" title="Watch the walkthrough again" hidden>
               <svg width="8" height="9" viewBox="0 0 8 9" aria-hidden="true"><path d="M0.5 0.5 L7 4.5 L0.5 8.5 Z" fill="currentColor"></path></svg>
             </button>
             <button id="fold-left" class="icon fold" title="Hide panel  [" aria-label="Hide this panel">
@@ -133,8 +173,9 @@
 
           <div class="lblock">
             <p class="mdesc" id="legend-cap"></p>
-            <div class="ramp" id="legend-ramp"></div>
+            <div class="ramp" id="legend-ramp"><i id="legend-span" hidden></i></div>
             <div class="ticks" id="legend-ticks"></div>
+            <p class="note" id="legend-here" hidden></p>
             <p class="note" id="legend-note" hidden></p>
           </div>
 
@@ -180,7 +221,7 @@
                    the frame has a figure and a ground at any altitude. -->
               <label>
                 <span class="lrow"><span>HEAT SHOWS ABOVE</span><output id="pr-data-out"></output></span>
-                <input id="pr-data" type="range" min="0" max="100" value="55" />
+                <input id="pr-data" type="range" min="0" max="100" value="0" />
               </label>
               <label>
                 <span class="lrow"><span>FIELD ON STREETS</span><output id="pr-wash-out"></output></span>
@@ -189,6 +230,14 @@
               <label class="prcheck">
                 <input id="pr-solids" type="checkbox" />
                 Also draw our own blocks, for comparing alignment
+              </label>
+              <!-- A cap on how far the photographic world reaches, not a
+                   detail setting. Everything past it is never requested, so the
+                   download and parse queues spend themselves on the study area
+                   instead of on New Jersey. The top stop lifts it entirely. -->
+              <label>
+                <span class="lrow"><span>CONTEXT REACH</span><output id="pr-radius-out"></output></span>
+                <input id="pr-radius" type="range" min="1.5" max="12.5" step="0.5" value="4" />
               </label>
               <label class="prcheck">
                 <input id="pr-cpu" type="checkbox" />
@@ -319,88 +368,99 @@
     <button id="unfold-bottom" class="rehandle bottom" title="Show the timeline  \"></button>
   </div>
 
-  <!-- OPENING FILM ----------------------------------------------------------
-       Driven by js/film.js. It lives in the markup rather than being injected
-       so the first paint is the title card itself, not a blank canvas waiting
-       for a module graph to resolve. Everything here is removed from the DOM
-       once the film ends.                                                    -->
-  <div id="film" hidden>
-    <canvas id="film-gl"></canvas>
-    <!-- The walkthrough's highlight. Same geometry and same dim as the tour's
-         (js/spot.js), because it is doing the same job: from chapter three the
-         captions name a panel every few seconds, and "the floor schedule" is
-         only a phrase until the floor schedule is the lit thing on screen. It
-         sits under the HUD so captions and the transport bar stay bright. -->
-    <div id="film-spot" hidden></div>
-    <div id="film-vignette"></div>
-    <div id="film-grain"></div>
-    <div id="film-flash"></div>
+  <div id="hover"></div>
+</div>
 
-    <div id="film-title">
-      <p class="kicker">FORTYGUARD&nbsp;&nbsp;·&nbsp;&nbsp;URBAN CANYON</p>
-      <h1>The Urban Canyon</h1>
-      <div class="rule"></div>
-      <!-- The tagline is deliberately static and carries no figures from the
-           model. It is a claim about what the instrument is for, which is true
-           before a single byte has loaded, so the card never changes what it
-           says about itself halfway through the load. -->
-      <p class="strap" id="film-title-strap">
-        Heat maps stop at the ground. This one climbs. Every wall in Midtown,
-        every hour of the year, and what it costs to cool the ones that need it.
-      </p>
-      <div class="cta">
-        <button id="film-begin" disabled>Watch the film</button>
-        <button id="film-straight" class="ghost">Go straight to the atlas</button>
-      </div>
-      <div class="boot">
-        <div class="bar"><i id="film-prog"></i></div>
-        <div class="brow"><span id="film-load">LOADING MODEL</span><span id="film-count"></span></div>
-      </div>
+<!-- OPENING FILM ----------------------------------------------------------
+     Driven by js/film.js. It lives in the markup rather than being injected
+     so the first paint is the title card itself, not a blank canvas waiting
+     for a module graph to resolve. Everything here is removed from the DOM
+     once the film ends.
+
+     A SIBLING OF #app, NOT A CHILD OF IT, and that is load-bearing rather
+     than tidy. `#app` is `position: fixed`, which makes it a stacking
+     context, so a z-index inside it — including this overlay's 300 — is only
+     ever compared with its siblings inside `#app`. The building brief and the
+     portfolio are appended to the body when they first open, so as a child of
+     `#app` the whole film painted UNDERNEATH both of them: from chapter three
+     on, every caption spoken over the brief or the programme was behind a
+     62%-black scrim with a blur on it, which is to say invisible. The film has
+     to sit at the top of the document because two thirds of it plays over
+     documents that already do.                                             -->
+<div id="film" hidden>
+  <canvas id="film-gl"></canvas>
+  <!-- The walkthrough's highlight. Same geometry and same dim as the tour's
+       (js/spot.js), because it is doing the same job: from chapter three the
+       captions name a panel every few seconds, and "the floor schedule" is
+       only a phrase until the floor schedule is the lit thing on screen. It
+       sits under the HUD so captions and the transport bar stay bright. -->
+  <div id="film-spot" hidden></div>
+  <div id="film-vignette"></div>
+  <div id="film-grain"></div>
+  <div id="film-flash"></div>
+
+  <div id="film-title">
+    <p class="kicker">FORTYGUARD&nbsp;&nbsp;·&nbsp;&nbsp;URBAN CANYON</p>
+    <h1>The Urban Canyon</h1>
+    <div class="rule"></div>
+    <!-- The tagline is deliberately static and carries no figures from the
+         model. It is a claim about what the instrument is for, which is true
+         before a single byte has loaded, so the card never changes what it
+         says about itself halfway through the load. -->
+    <p class="strap" id="film-title-strap">
+      Heat maps stop at the ground. This one climbs. Every wall in Midtown,
+      every hour of the year, and what it costs to cool the ones that need it.
+    </p>
+    <div class="cta">
+      <button id="film-begin" disabled>Watch the walkthrough</button>
+      <button id="film-straight" class="ghost">Go straight to the map</button>
     </div>
-
-    <div id="film-hud" hidden>
-      <div id="film-chaptercard">
-        <span id="film-chapno"></span>
-        <span class="ct"><b id="film-chapter"></b><i class="crule"></i></span>
-      </div>
-
-      <div id="film-readout">
-        <div id="film-readout-label"></div>
-        <div id="film-readout-value"></div>
-        <canvas id="film-spark" width="680" height="124" hidden></canvas>
-      </div>
-
-      <div id="film-marker"><i></i><b id="film-marker-name"></b><span id="film-marker-coords"></span></div>
-
-      <p id="film-caption"></p>
-
-      <!-- Credited on screen while it is on screen. The descent is flown over
-           real satellite imagery from about nine hundred kilometres down to
-           three, and whose imagery it is belongs in the frame, not in a file. -->
-      <p id="film-credit">IMAGERY&nbsp;&nbsp;·&nbsp;&nbsp;USGS NAIP&nbsp;&nbsp;·&nbsp;&nbsp;ESRI, MAXAR, EARTHSTAR GEOGRAPHICS</p>
-
-      <div id="film-bar">
-        <button id="film-prev" title="Previous chapter">
-          <svg width="11" height="10" viewBox="0 0 11 10" aria-hidden="true"><path d="M10 0 L2.6 5 L10 10 Z" fill="currentColor"></path><rect x="0" y="0" width="1.6" height="10" fill="currentColor"></rect></svg>
-        </button>
-        <button id="film-play" class="round" title="Pause">
-          <svg width="9" height="11" viewBox="0 0 9 11" aria-hidden="true"><rect x="0" y="0" width="3" height="11" fill="currentColor"></rect><rect x="6" y="0" width="3" height="11" fill="currentColor"></rect></svg>
-        </button>
-        <button id="film-next" title="Next chapter">
-          <svg width="11" height="10" viewBox="0 0 11 10" aria-hidden="true"><path d="M1 0 L8.4 5 L1 10 Z" fill="currentColor"></path><rect x="9.4" y="0" width="1.6" height="10" fill="currentColor"></rect></svg>
-        </button>
-
-        <div id="film-segs"></div>
-
-        <div id="film-time">0:00 / 0:00</div>
-
-        <button id="film-sound" class="txt" aria-pressed="true">SOUND ON</button>
-        <button id="film-skip" class="txt">SKIP TO ATLAS</button>
-      </div>
+    <div class="boot">
+      <div class="bar"><i id="film-prog"></i></div>
+      <div class="brow"><span id="film-load">LOADING MODEL</span><span id="film-count"></span></div>
     </div>
   </div>
 
-  <div id="hover"></div>
+  <div id="film-hud" hidden>
+    <div id="film-chaptercard">
+      <span id="film-chapno"></span>
+      <span class="ct"><b id="film-chapter"></b><i class="crule"></i></span>
+    </div>
+
+    <div id="film-readout">
+      <div id="film-readout-label"></div>
+      <div id="film-readout-value"></div>
+      <canvas id="film-spark" width="680" height="124" hidden></canvas>
+    </div>
+
+    <div id="film-marker"><i></i><b id="film-marker-name"></b><span id="film-marker-coords"></span></div>
+
+    <p id="film-caption"></p>
+
+    <!-- Credited on screen while it is on screen. The descent is flown over
+         real satellite imagery from about nine hundred kilometres down to
+         three, and whose imagery it is belongs in the frame, not in a file. -->
+    <p id="film-credit">IMAGERY&nbsp;&nbsp;·&nbsp;&nbsp;USGS NAIP&nbsp;&nbsp;·&nbsp;&nbsp;ESRI, MAXAR, EARTHSTAR GEOGRAPHICS</p>
+
+    <div id="film-bar">
+      <button id="film-prev" title="Previous chapter">
+        <svg width="11" height="10" viewBox="0 0 11 10" aria-hidden="true"><path d="M10 0 L2.6 5 L10 10 Z" fill="currentColor"></path><rect x="0" y="0" width="1.6" height="10" fill="currentColor"></rect></svg>
+      </button>
+      <button id="film-play" class="round" title="Pause">
+        <svg width="9" height="11" viewBox="0 0 9 11" aria-hidden="true"><rect x="0" y="0" width="3" height="11" fill="currentColor"></rect><rect x="6" y="0" width="3" height="11" fill="currentColor"></rect></svg>
+      </button>
+      <button id="film-next" title="Next chapter">
+        <svg width="11" height="10" viewBox="0 0 11 10" aria-hidden="true"><path d="M1 0 L8.4 5 L1 10 Z" fill="currentColor"></path><rect x="9.4" y="0" width="1.6" height="10" fill="currentColor"></rect></svg>
+      </button>
+
+      <div id="film-segs"></div>
+
+      <div id="film-time">0:00 / 0:00</div>
+
+      <button id="film-sound" class="txt" aria-pressed="true">SOUND ON</button>
+      <button id="film-skip" class="txt">SKIP TO MAP</button>
+    </div>
+  </div>
 </div>
 
 <script type="module" src="./js/main.js"></script>
