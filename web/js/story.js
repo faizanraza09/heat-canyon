@@ -605,7 +605,7 @@ export function buildStory(data, globe) {
      * are all seen working rather than described.
      */
     {
-      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 4.0,
+      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 5.0,
       text: 'Every wall in Midtown has an answer like that.',
       act: ({ ui, scene }) => {
         ui.closeBrief();
@@ -664,12 +664,12 @@ export function buildStory(data, globe) {
       act: ({ ui }) => { ui.openPortfolio(); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.6,
+      chapter: 'IV', phase: 'city', seconds: 6.7,
       get text() { return (() => {
         const a = data.decision?.portfolio?.allocation;
         return a
-          ? `${Math.round(a.person_hours_avoided).toLocaleString('en-US')} hours of `
-            + 'exposure nobody has to sit through.'
+          ? `That buys back ${Math.round(a.person_hours_avoided).toLocaleString('en-US')} `
+            + 'hours of exposure nobody has to sit through.'
           : 'Hours of exposure nobody has to sit through.';
       })(); },
       get say() {
@@ -680,7 +680,8 @@ export function buildStory(data, globe) {
         // hundred and fifty thousand" in the film's mouth for a week after the
         // portfolio was re-solved down to a hundred and thirty-seven.
         const k = Math.round(a.person_hours_avoided / 1000);
-        return `${Words(k)} thousand hours of exposure nobody has to sit through.`;
+        return `That buys back ${words(k)} thousand hours of exposure `
+          + 'nobody has to sit through.';
       },
       act: ({ ui }) => { ui.scrollSurface('pf-body', '.pfsvg'); },
     },
@@ -715,7 +716,7 @@ export function buildStory(data, globe) {
      * this wall hotter.
      */
     {
-      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 2.9,
+      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 4.6,
       text: 'And you can ask it questions.',
       act: ({ ui }) => { ui.replayAnalyst(ANALYST_RUN, ANALYST_QUESTION); },
     },

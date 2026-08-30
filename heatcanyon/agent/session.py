@@ -155,11 +155,22 @@ def read_frames(run_id: str) -> list[dict]:
 
 
 def session_cost_so_far() -> float:
+    """What this process has spent, summed over the run directory.
+
+    Runs flagged ``exhibit`` are skipped, and that flag exists for exactly one
+    run: the transcript chapter five of the film replays, which is committed
+    because a run directory is not reproducible. It cost $1.89 when it was
+    recorded and it costs nothing to serve, but the sum here gates admission —
+    so without the flag every deployment boots having already spent that money,
+    for ever, against a budget it never used. A checked-in exhibit is not spend.
+    """
     total = 0.0
     for d in runs_dir().glob("*/status.json"):
         try:
-            total += float(json.loads(d.read_text(encoding="utf-8")).get("cost_usd")
-                           or 0.0)
+            rec = json.loads(d.read_text(encoding="utf-8"))
+            if rec.get("exhibit"):
+                continue
+            total += float(rec.get("cost_usd") or 0.0)
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             continue
     for rec in _RUNNING.values():

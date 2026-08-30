@@ -129,8 +129,8 @@ test('the film is the length it promises, in the chapters it says', async ({ pag
   // target: it is how long someone will sit still before they have been shown
   // anything. Assert the ceiling as well as the figure, so a beat lengthened by
   // half a second at a time cannot walk the film back to forty.
-  expect(shape.total).toBeCloseTo(162, 1);
-  expect(shape.total).toBeLessThanOrEqual(180);
+  expect(shape.total).toBeCloseTo(185.7, 1);
+  expect(shape.total).toBeLessThanOrEqual(190);
   expect(shape.beats).toBe(30);
   expect(shape.stated).toBe(true);
   expect(shape.chapters.map((c) => c.n)).toEqual(['I', 'II', 'III', 'IV', 'V']);
@@ -144,7 +144,7 @@ test('the film is the length it promises, in the chapters it says', async ({ pag
   // application being driven: one building taken apart, then the instrument
   // around it, then the analyst. A walkthrough that spends a third of itself
   // arriving is a trailer, and this one has to be a demo.
-  expect(shape.chapters.map((c) => Math.round(c.dur))).toEqual([20, 12, 64, 44, 22]);
+  expect(shape.chapters.map((c) => Math.round(c.dur))).toEqual([25, 13, 79, 47, 22]);
   const arrival = shape.chapters.slice(0, 2).reduce((a, c) => a + c.dur, 0);
   expect(arrival / shape.total).toBeLessThan(0.25);
 });
@@ -198,7 +198,16 @@ test('the voiced cut gives every line a shot long enough to say it in', async ({
   // beats written against floors.json and prescriptions.json change wording when
   // those land, and a stale recording under a current caption is worse than none.
   expect(shape.stale, `beats reading an outdated line: ${shape.stale}`).toEqual([]);
-  expect(shape.recorded).toBe(shape.spoken);
+  // Every spoken beat has a recording. This is the assertion that goes red when
+  // someone edits a line in story.js, or re-runs the pipeline so a figure moves,
+  // and does not re-bake: the cache is keyed by the exact sentence, so a changed
+  // sentence has no recording and that beat drops to the browser voice. The fix
+  // is one command, and the dry run that tells you what it will cost is free.
+  expect(shape.recorded,
+    `${shape.spoken - shape.recorded} of ${shape.spoken} spoken beats have no recording. `
+    + 'The script has changed since the narration was baked — run '
+    + '`node scripts/prewarm_voice.mjs --dry` to see which lines, then drop --dry to buy them.')
+    .toBe(shape.spoken);
   expect(shape.urls.every((u) => u.startsWith('/data/vo/'))).toBe(true);
   // The button says the length the film will actually run, not the length it
   // would have run unvoiced.

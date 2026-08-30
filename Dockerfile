@@ -1,31 +1,30 @@
 # The Urban Canyon, containerised.
 #
-# Two runtimes in one image, and the second one is the reason this is a
-# Dockerfile rather than a buildpack. The application is Python — FastAPI over a
-# precomputed model, re-solving the energy balance when someone tests an
-# intervention. The analyst is Claude Code as a library, and `claude-agent-sdk`
-# does not talk to an API: it SPAWNS THE `claude` CLI as a subprocess
-# (see claude_agent_sdk/_internal/transport/subprocess_cli.py). So the image
-# needs Node and the CLI on PATH next to the Python, or /api/agent/* reports
-# itself unavailable and the console silently falls back to the single-shot
-# analyst.
+# The application is Python — FastAPI over a precomputed model, re-solving the
+# energy balance when someone tests an intervention. The analyst is Claude Code
+# as a library, and `claude-agent-sdk` does not talk to an API: it SPAWNS THE
+# `claude` CLI as a subprocess.
+#
+# That used to mean Node and a global npm install in this image. It does not any
+# more, and the reason is worth writing down because it is invisible from the
+# requirements file: the SDK ships PLATFORM-SPECIFIC wheels
+# (…-py3-none-manylinux_2_17_x86_64.whl, 215 MB unpacked) carrying a standalone
+# `claude` binary at claude_agent_sdk/_bundled/claude, and `_find_cli()` in
+# _internal/transport/subprocess_cli.py resolves that bundle BEFORE it consults
+# PATH. So `pip install claude-agent-sdk` is the whole install, and adding Node
+# beside it would only have shadowed a binary that was already there.
 #
 # Nothing here builds the model. `python -m heatcanyon.cli build` needs the raw
 # LiDAR and the NYC footprints — 200 MB of sources that are not in the repo and
 # not in this image. The solved fields under web/data/ are built on a
-# workstation and shipped as artifacts; see scripts/deploy_hf.sh.
+# workstation and shipped as artifacts; see scripts/deploy_hf.py.
 
 FROM python:3.12-slim
 
-# Node for the `claude` CLI; git because the agent's shell is a real shell and a
-# repo it cannot interrogate is a worse analyst; curl for the healthcheck.
+# git because the agent's shell is a real shell and a tree it cannot interrogate
+# makes a worse analyst; curl for the healthcheck. That is the whole list.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates gnupg git \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code \
-    && npm cache clean --force \
-    && apt-get purge -y gnupg && apt-get autoremove -y \
+        curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # Hugging Face Spaces runs containers as uid 1000 and gives that user nothing
