@@ -1,4 +1,4 @@
-"""The in-process MCP server: HeatCanyon's own capabilities, callable by the agent.
+"""The in-process MCP server: the Urban Canyon's own capabilities, callable by the agent.
 
 Built-in tools already give the agent files, a shell and the web. Everything here
 is the part that makes it a HEAT analyst rather than a general one: the solved

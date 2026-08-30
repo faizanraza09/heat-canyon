@@ -1,6 +1,6 @@
 # The year
 
-*How HeatCanyon went from one afternoon to 8,760 hours, what each temporal tier
+*How the Urban Canyon went from one afternoon to 8,760 hours, what each temporal tier
 does and does not claim, and the four places the year could quietly be wrong.*
 
 ---

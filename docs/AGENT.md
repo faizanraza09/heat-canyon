@@ -1,6 +1,6 @@
 # The analyst
 
-*How HeatCanyon's AI went from a tool-use loop to an agent that does work, what
+*How the Urban Canyon's AI went from a tool-use loop to an agent that does work, what
 it can reach, and the five things that stop it being a chatbot with a database.*
 
 ---

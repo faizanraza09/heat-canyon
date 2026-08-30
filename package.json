@@ -1,26 +1,33 @@
 {
-  "name": "temperature-api-quickstart",
+  "name": "urban-canyon",
   "version": "1.0.0",
-  "description": "A Python + Jupyter sandbox for the [FortyGuard tOS Enterprise API](https://api.fortyguard.com). Drop in your API key and run a notebook — you'll get a heatmap, a heat-intelligence PDF, or an environmental-parameter time series in minutes.",
-  "main": "index.js",
+  "description": "The Urban Canyon — a 3D street-canyon heat exposure engine for Midtown Manhattan across a whole year, built on the FortyGuard Temperature API and free public data, with an analyst that re-solves the physics to answer questions.",
+  "private": true,
   "directories": {
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FortyGuard-Tech/temperature-api-quickstart.git"
+    "url": "git+https://github.com/faizanraza09/heat-canyon.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "urban-heat",
+    "heat-exposure",
+    "street-canyon",
+    "fortyguard",
+    "three.js",
+    "manhattan"
+  ],
+  "author": "Faizan Raza",
+  "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/FortyGuard-Tech/temperature-api-quickstart/issues"
+    "url": "https://github.com/faizanraza09/heat-canyon/issues"
   },
-  "homepage": "https://github.com/FortyGuard-Tech/temperature-api-quickstart#readme",
+  "homepage": "https://github.com/faizanraza09/heat-canyon#readme",
   "devDependencies": {
     "@playwright/test": "^1.62.1"
   }

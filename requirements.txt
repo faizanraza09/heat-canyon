@@ -1,21 +1,18 @@
 requests>=2.31.0
 python-dotenv>=1.0.0
-jupyterlab>=4.0.0
-ipywidgets>=8.1.0
-pandas>=2.1.0
+# The analyst's `chart` tool renders a matplotlib figure into the transcript.
 matplotlib>=3.8.0
-folium>=0.15.0
+# scripts/fetch_approach.py and scripts/make_globe_assets.py bake the film's
+# satellite pyramid; pillow does the mosaicking, scipy the diffusion that closes
+# NAIP's voids over open water.
 pillow>=10.0.0
-# scripts/fetch_approach.py, for the diffusion that closes NAIP's voids.
 scipy>=1.11.0
 shapely>=2.0.0
 # Surface model from the 2017 airborne LiDAR (heatcanyon/lidar.py).
 pyproj>=3.6.0
 laspy[lazrs]>=2.5.0
-reportlab>=4.0.0
 
 # --- the web app and the analyst -------------------------------------------
-# `heatcanyon serve` needs these; the notebooks do not.
 fastapi>=0.110.0
 uvicorn>=0.27.0
 # The analyst is Claude Code as a library: heatcanyon/agent/ builds a

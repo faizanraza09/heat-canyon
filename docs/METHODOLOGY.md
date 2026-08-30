@@ -1,4 +1,4 @@
-# HeatCanyon — methodology
+# The Urban Canyon — methodology
 
 What this model does, what it is honest about, and where it stops.
 

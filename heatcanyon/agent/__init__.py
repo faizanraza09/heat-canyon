@@ -1,4 +1,4 @@
-"""The HeatCanyon analyst — Claude Code as a library, over the computed model.
+"""The Urban Canyon analyst — Claude Code as a library, over the computed model.
 
 WHAT CHANGED, AND WHY IT IS NOT COSMETIC
 

@@ -52,7 +52,7 @@ except Exception:  # noqa: BLE001
 
 WEB = Path("web")
 
-app = FastAPI(title="HeatCanyon", version="2.0.0")
+app = FastAPI(title="The Urban Canyon", version="2.0.0")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
@@ -592,7 +592,7 @@ def main(port: int | None = None) -> None:
     port = int(port or os.getenv("PORT", "8000"))
     host = os.getenv("HEATCANYON_HOST", "127.0.0.1")
     shown = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
-    print(f"HeatCanyon -> http://{shown}:{port}")
+    print(f"The Urban Canyon -> http://{shown}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

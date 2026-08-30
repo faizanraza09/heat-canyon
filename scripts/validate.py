@@ -1257,7 +1257,7 @@ def v_constants_are_sourced() -> None:
 
 def main() -> int:
     print("=" * 74)
-    print("HeatCanyon validation")
+    print("Urban Canyon validation")
     print("=" * 74)
     print()
 

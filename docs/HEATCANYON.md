@@ -1,4 +1,4 @@
-# HeatCanyon
+# The Urban Canyon
 
 **A 3D street-canyon heat exposure engine for Midtown Manhattan across a whole
 year, built on the FortyGuard Temperature API and free public data, with an

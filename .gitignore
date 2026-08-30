@@ -247,7 +247,7 @@ data/street_view/*
 data/env_params/*
 !data/env_params/env_params_parcel_*.json
 
-# HeatCanyon build artifacts
+# Urban Canyon build artifacts
 .venv/
 # The solved fields. `web/data/*.bin` alone was not enough once the year arrived:
 # a gitignore pattern containing a slash is anchored, so it matched the top-level
@@ -277,7 +277,7 @@ web/data/floors/
 # of — which is what makes a directory of hashes something a person can audit and
 # prune. See docs/HEATCANYON.md, "The voice".
 
-# HeatCanyon caches ARE shipped, deliberately: the FortyGuard responses cost
+# Urban Canyon caches ARE shipped, deliberately: the FortyGuard responses cost
 # credits and the NYC Open Data pulls take minutes, so committing them makes the
 # whole pipeline reproducible offline at zero cost and zero API calls.
 !data/manhattan/

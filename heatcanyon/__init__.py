@@ -1,4 +1,4 @@
-"""HeatCanyon — 3D street-canyon heat exposure engine for Manhattan.
+"""The Urban Canyon — 3D street-canyon heat exposure engine for Manhattan.
 
 Layers, bottom to top:
 

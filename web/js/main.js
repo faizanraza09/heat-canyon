@@ -187,7 +187,7 @@ async function start() {
     pickIndex: !!scene._pick,
   };
   if (Object.values(build).some((v) => !v)) {
-    console.warn('HeatCanyon: the 3D scene is older than the interface around '
+    console.warn('Urban Canyon: the 3D scene is older than the interface around '
       + 'it — a cached scene.js. Reload with the cache cleared.', build);
   }
 
@@ -232,7 +232,7 @@ async function start() {
   };
 
   bootDone();
-  console.log('HeatCanyon ready', {
+  console.log('Urban Canyon ready', {
     build,
     buildings: data.buildings.n,
     panels: data.facades.n,
