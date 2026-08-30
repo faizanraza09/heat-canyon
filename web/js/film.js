@@ -1612,25 +1612,31 @@ export class Film {
    * consequence, that a line running past its shot gets cut, on the grounds
    * that a clipped tail beats narrating the wrong frame.
    *
-   * With a real read that trade stops being reasonable. Measured against the
-   * ElevenLabs recordings, twenty-two of the twenty-seven spoken beats ran over,
-   * several of them by more than double: the second line is fourteen seconds of
-   * audio in a five-and-a-half-second beat, so two thirds of the sentence that
-   * opens the film would never be heard. Thirty percent of a documentary's
-   * sentences ending mid-word is not a film with a small timing fault, it is a
-   * broken one.
+   * With a real read that trade stops being reasonable. When the recordings were
+   * first measured against the storyboard most of the spoken beats ran over,
+   * several by more than double — a line of fourteen seconds of audio in a
+   * five-and-a-half-second beat loses two thirds of its sentence. A third of a
+   * documentary's sentences ending mid-word is not a small timing fault, it is a
+   * broken film.
    *
    * So the recording sets a floor on the beat, and only a floor: a beat already
    * long enough is left exactly as story.js wrote it, and a beat with no
-   * recording — the three silent ones of the descent, or any line the cache does
-   * not have — keeps its stated length too. The film is therefore the design's
-   * shape, stretched only where a sentence needs the room.
+   * recording — the silent ones, or any line the cache does not have — keeps its
+   * stated length too. The film is therefore the design's shape, stretched only
+   * where a sentence needs the room.
    *
-   * What this costs is that a voiced film is longer than an unvoiced one: about
-   * three minutes fifty against two minutes forty-two. The title card is
-   * re-printed from the new total rather than left holding the old one, and
-   * since the audio is cached and committed, the figure it prints is still the
-   * same on every machine that has the cache.
+   * AS OF NOW THIS METHOD IS A NO-OP, and that is the point. story.js states
+   * durations that already include the read (see the note at the top of that
+   * file), so nothing is short, nothing stretches, and the title card prints the
+   * same 2:56 before the narration index arrives as after. It used to print 2:48
+   * and then correct itself — the sort of small lie that makes a viewer stop
+   * believing the rest of the numbers on screen.
+   *
+   * The method stays because the guarantee has to survive an edit. Change a line
+   * or re-bake the voice and the stated lengths are stale by exactly the amount
+   * the new recording differs; this catches that, and the film is right even
+   * though the button briefly was not. `onRuntime` re-prints the total for that
+   * case, and it fires only when something actually moved.
    *
    * Only ever before the film starts. Moving the beats under a running clock
    * would jump the camera and the captions apart.

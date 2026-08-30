@@ -20,31 +20,40 @@
  *
  * Third, a beat's length is stated, not derived. An earlier version timed each
  * beat from its own word count, on the reasoning that lengthening a line should
- * lengthen its shot. That produced a film of one minute and forty-seven
- * seconds. It has been cut twice since — to forty-two, and now to **thirty** —
- * and fixed durations matter for a reason beyond length: the title card
- * promises a runtime, the transport bar sizes its segments by chapter, and both
- * should be the same on every machine and whether or not the sound is on.
+ * lengthen its shot. That is a defensible idea which produced a film of 1:47,
+ * and it made the runtime a function of the machine: the title card promises a
+ * runtime and the transport bar sizes its segments by chapter, and both should
+ * read the same everywhere and whether or not the sound is on.
  *
- * The thirty-second cut is a different film, not a trim of the old one, and it
- * is built to one shape:
+ * The film has been recut several times since. It is now five chapters and
+ * thirty beats, 2:56, and it is built to this shape:
  *
- *     turn the earth slowly until New York comes round   (I,   6.6 s)
- *     say everything, over one held shot of it           (II, 16.8 s)
- *     then fall into the application, in silence         (III,  6.4 s)
+ *     I    A year over Manhattan    4 beats   19.6 s   the globe, and the scale
+ *     II   Going in                 2 beats   10.3 s   the descent, and the walls
+ *     III  One building            12 beats   82.0 s   one wall, diagnosed and priced
+ *     IV   All of them              8 beats   48.0 s   the instrument, and the programme
+ *     V    Ask it                   4 beats   16.5 s   the analyst, answering
  *
- * Nothing is narrated over the descent. The descent is not part of the
- * argument — it is the answer to "what is this, then" — and a voice over it
- * competes with the only thing on screen anyone wants to look at. So the whole
- * script lands before the camera starts falling, which is what makes chapter
- * two long and its beats short.
+ * THE STATED LENGTHS INCLUDE THE READ. Each is at least what its recorded line
+ * needs — `recording / MAX_RATE + TAIL`, see voice.js — so `film._retime()`
+ * finds nothing to stretch and the runtime on the title card is 2:56 before the
+ * narration index has loaded as well as after. It used to print 2:48 and then
+ * correct itself, which is a small lie of the sort that makes a viewer stop
+ * believing the rest of the numbers.
  *
- * What the script now spends its second half on is the application rather than
- * the afternoon: the whole year rather than one day, and the fact that the model
- * does not stop at describing a wall — it costs the fix on it, floor by floor,
- * and there is an analyst you can put the question to. The old cut ended on
- * "this is where a city begins", which is a fine line about a model and says
- * nothing about an instrument.
+ * That coupling has a maintenance cost, and it is the price of the button being
+ * honest on first paint: EDIT A LINE OR RE-BAKE THE VOICE AND THESE NUMBERS ARE
+ * STALE. `_retime()` still corrects at run time, so nothing breaks — the title
+ * card simply goes back to changing once. To re-derive them, ask the server what
+ * each line costs (POST /api/voice/lines with the beats' `say` strings) and set
+ * each `seconds` to `max(stated, round(recording / 1.15 + 0.25, 2))`.
+ *
+ * The second half of the script is about the application rather than the
+ * afternoon: the whole year rather than one day, and the fact that the model does
+ * not stop at describing a wall — it costs the fix on it, floor by floor, and
+ * there is an analyst you can put the question to. An older cut ended on "this is
+ * where a city begins", which is a fine line about a model and says nothing about
+ * an instrument.
  *
  * A beat is one sentence, one held frame. Its `stage` block is the storyboard:
  * the state the scene should have arrived at by the *end* of that beat. The
@@ -436,32 +445,30 @@ export function buildStory(data, globe, getUI = () => null) {
   // it wants. The full label is on the title card and in the panel.
   const place = m.aoi.label.split(' ')[0];
 
-  /* Seventeen beats, three chapters, sixty seconds — and the last chapter is
-   * silent.
+  /* Thirty beats, five chapters, 2:56 — of which two beats are silent: the
+   * title card that opens it, and the last beat of all.
    *
-   * The shape is the note it was cut to, and it survived the recut from thirty
-   * seconds to sixty unchanged, because the shape was never the thing that was
-   * too long:
-   *
-   *     turn the earth until New York comes round   (I,   12.0 s, and into II)
-   *     say everything, over one held shot of it    (II,  33.2 s)
-   *     then fall into the application, in silence  (III, 14.6 s)
+   * The arc survived every recut, because the shape was never the thing that was
+   * too long. It is now: establish the year and the scale, go down to the walls,
+   * diagnose and price ONE of them, scale that to the whole city, then hand the
+   * question to the analyst.
    *
    * Nothing is narrated over the descent. The descent is not part of the
    * argument — it is the answer to "what is this, then" — and a voice over it
    * competes with the only thing on screen anyone wants to look at. So the
-   * whole script lands before the camera starts falling, which is what makes
-   * chapter two long.
+   * script lands either side of the fall rather than across it.
    *
-   * What sixty seconds buys over thirty is not more claims, it is room for the
-   * ones already there. At thirty every beat was two-and-a-half to three
-   * seconds against a line that takes four to say, so the voice was clipped at
-   * every cut and the captions read as a list. At sixty a beat is three and a
-   * half and the line finishes inside it. It also buys the fall: fifteen
-   * seconds rather than six, which is 0.83 halvings of altitude a second rather
-   * than 1.4 — and since the pyramid's crossovers are pinned to altitude rather
-   * than to the clock, halving the speed doubles the time each of them has to
-   * dissolve.
+   * Length is spent on the argument rather than on more claims. Chapter III is
+   * 82 seconds, nearly half the film, because one wall diagnosed all the way
+   * down to a specified measure and a price is the whole case; a viewer who has
+   * followed that will believe chapter IV's claim that every wall in Midtown has
+   * had the same treatment, and one who has not will not. Beats run five to nine
+   * seconds so each line finishes inside its own shot — at three seconds the
+   * voice was clipped at every cut and the captions read as a list.
+   *
+   * The 2:56 also matters for a duller reason: a three-minute cap is the common
+   * ask, and a film that has to be trimmed in an editor after the fact loses the
+   * thing the cut was designed around.
    */
   const beats = [
     /* ------------------------------- I. a year over Manhattan (4 × , 20.0 s)
@@ -495,14 +502,14 @@ export function buildStory(data, globe, getUI = () => null) {
       stage: { alt: 29000, fov: 28, turn: 0.2, heat: 0.45, tilt: 0.13, counter: 0.5 },
     },
     {
-      chapter: 'I', seconds: 5.9,
+      chapter: 'I', seconds: 6.18,
       text: 'Concrete soaks up heat all day and gives it back after dark. '
         + 'A city never cools.',
       stage: { alt: 24000, fov: 28, turn: 0.46, heat: 1, cities: 1, bloom: 1,
                tilt: 0.1, counter: 1 },
     },
     {
-      chapter: 'I', seconds: 6.3,
+      chapter: 'I', seconds: 6.47,
       /* The full label here, and only here. This is the first time the film
        * names the place, over a shot of the planet — "Midtown" on its own is a
        * word the viewer has no way to locate, and the beat's whole job is to
@@ -580,7 +587,7 @@ export function buildStory(data, globe, getUI = () => null) {
        * film is the other kind. The picture is still doing the work; the line
        * just stops the viewer wondering whether the film has stalled.
        */
-      chapter: 'II', title: 'Going in', seconds: 3.0,
+      chapter: 'II', title: 'Going in', seconds: 4.04,
       text: 'Averages hide a lot. Let’s go down.',
       stage: { alt: 640, fov: 38, phi: 0.16, dust: 0.7, cities: 0, bloom: 0,
                clouds: 1, lock: 1, pin: 1, aim: 0, tilt: 0 },
@@ -609,7 +616,7 @@ export function buildStory(data, globe, getUI = () => null) {
      * anyone would have guessed.
      */
     {
-      chapter: 'III', title: 'One building', phase: 'city', seconds: 5.9,
+      chapter: 'III', title: 'One building', phase: 'city', seconds: 6.29,
       /* NO SPOTLIGHT ON THIS BEAT, and that is the fourth reason it was dull.
        *
        * The walkthrough's highlight paints a 58%-black scrim over everything
@@ -732,7 +739,7 @@ export function buildStory(data, globe, getUI = () => null) {
       act: ({ ui }) => { ui.setHour(m.peak_index); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.3,
+      chapter: 'III', phase: 'city', seconds: 8.95,
       // The subject is the building's banding, which is geometry in the model
       // rather than a control — so there is nothing on a panel to light, and
       // pointing at the colour legend instead would be a highlight on the wrong
@@ -830,7 +837,7 @@ export function buildStory(data, globe, getUI = () => null) {
       cues: [{ at: 0.42, do: ({ scene }) => scene.zoomBy(0.84) }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.3,
+      chapter: 'III', phase: 'city', seconds: 7.13,
       get text() { return (() => {
         const f = heroFloor();
         return f?.shade
@@ -871,7 +878,7 @@ export function buildStory(data, globe, getUI = () => null) {
       cues: [{ at: 0.42, do: ({ scene }) => scene.zoomBy(0.84) }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.5,
+      chapter: 'III', phase: 'city', seconds: 6.63,
       /* THE CLAIM MOVED WITH THE BUILDING, and it had to.
        *
        * On the old hero the wall opposite the shaded face was 145 m of tower,
@@ -992,7 +999,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.7,
+      chapter: 'III', phase: 'city', seconds: 7.47,
       get text() { return (() => {
         const f = heroFloor();
         if (!f) return 'One floor is the worst of them, and the schedule names it.';
@@ -1035,9 +1042,13 @@ export function buildStory(data, globe, getUI = () => null) {
       })(); },
       spot: '#brief-doc .brf-sec:nth-of-type(4)',
       act: ({ ui }) => { ui.briefSection(4); },     // What to do
+      /* `.brf-wpart` is the block headed "Why not something simpler", and it is
+       * word for word what this line says: no fixed device works on this wall,
+       * the sun is 26° up, the overhang would have to be four metres. Pointing
+       * at the section's summary facts instead was pointing near it. */
       cues: [
-        { at: 0.52, spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-facts',
-          do: ({ ui }) => ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(4) .brf-facts') },
+        { at: 0.52, spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-wpart',
+          do: ({ ui }) => ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(4) .brf-wpart') },
       ],
       get say() { return (() => {
         const g = heroRx()?.geometry;
@@ -1047,7 +1058,7 @@ export function buildStory(data, globe, getUI = () => null) {
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.7,
+      chapter: 'III', phase: 'city', seconds: 7.09,
       get text() { return (() => {
         const rx = heroRx();
         if (!rx) return 'So it prescribes the glass instead.';
@@ -1064,24 +1075,44 @@ export function buildStory(data, globe, getUI = () => null) {
       // actually covers, which is the whole point of the sentence: the schedule
       // names a floor and the prescription does not treat a floor, it treats a
       // run of them. Seeing the mark grow says that in the time it takes to say
-      // "floors one to thirty-four".
+      // "floors five to thirty-five".
+      //
+      // And the document goes to the prescription card, which had no highlight
+      // at all before — the beat that names the measure was the one beat in the
+      // brief pointing at nothing.
+      spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-presc',
       act: ({ ui }) => {
+        ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(4) .brf-presc');
         const rx = heroRx();
         if (rx?.floors) ui.focusFloors(HERO_BIN, rx.floors[0], rx.floors[1]);
       },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.9,
+      chapter: 'III', phase: 'city', seconds: 6.11,
       text: 'It prices the job too. That’s one wall, on one building, on one street.',
       // Section five is the one that says what the whole document rests on, and
       // it is the reason the film can print a dollar figure at all. The brief
       // closes on the next beat, which is where the chapter does.
-      spot: '#brief-doc .brf-sec:nth-of-type(5)',
-      act: ({ ui }) => { ui.briefSection(5); },
-      cues: [
-        { at: 0.50, spot: '#brief-doc .brf-sec:nth-of-type(5) .brf-consts',
-          do: ({ ui }) => ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(5) .brf-consts') },
-      ],
+      /* THE WALKTHROUGH DOES NOT VISIT SECTION FIVE.
+       *
+       * This beat used to open "What this rests on" — the constants table, the
+       * capex bands, the tariff and occupancy assumptions — under a line that
+       * says "it prices the job too". Watching it, you hear a sentence about
+       * money over a picture of a methodology appendix, which is both a
+       * mismatch and the single least interesting screen in the application.
+       *
+       * The price is in section four, where the measure is: `.brf-cost` is the
+       * capital cost of the job the previous beat just prescribed. So the
+       * document stays where it is and the highlight moves to the figure.
+       *
+       * The brief still carries section five and a reader can still get to it;
+       * a two-minute walkthrough is simply not where a caveats appendix earns
+       * its place. The one costed figure the film speaks aloud is still labelled
+       * ASSUMED on the ticker while it is being said. */
+      spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-cost',
+      act: ({ ui }) => {
+        ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(4) .brf-cost');
+      },
     },
 
     /* ------------------------------------- IV. all of them (8 × , 44.0 s)
@@ -1092,7 +1123,7 @@ export function buildStory(data, globe, getUI = () => null) {
      * are all seen working rather than described.
      */
     {
-      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 5.0,
+      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 5.2,
       text: `Now scale it up. Every wall in ${place} has had the same treatment.`,
       act: ({ ui, scene }) => {
         ui.closeBrief();
@@ -1144,7 +1175,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.6,
+      chapter: 'IV', phase: 'city', seconds: 5.7,
       spot: '#time',
       text: 'And it moves through time. Any hour, any day, or the whole year.',
       // Back to facade temperature before the clock is started, and that is not
@@ -1207,7 +1238,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.2,
+      chapter: 'IV', phase: 'city', seconds: 6.27,
       /* These figures come off the panel this beat opens, not out of
        * portfolio.json. See Portfolio.programme(): the stored allocation and the
        * panel's own solver disagree by design, and quoting the first over a
@@ -1272,17 +1303,19 @@ export function buildStory(data, globe, getUI = () => null) {
     },
     {
       chapter: 'IV', phase: 'city', seconds: 3.6,
-      spot: '#pf-body .pf-phase',
+      /* Straight to the table. This beat used to stop at `.pf-phase` on the way
+       * and it was never once lit across a whole playthrough — the act scrolled
+       * to it and the cue moved on before the scroll arrived, so the first half
+       * of the beat had a caption about a list and no list under it. The
+       * sentence is about the buildings, so the beat goes to the buildings and
+       * stays there. */
+      spot: '#pf-body .pf-table',
       text: 'Every building on the list is there for a reason.',
       /* This beat used to do nothing at all — no act, no cues — so the panel sat
        * exactly where the previous beat left it while the film made a claim
        * about a list that was off the bottom of the frame. The claim is about
        * the table, so the beat goes to the table. */
-      act: ({ ui }) => { ui.scrollSurface('pf-body', '.pf-phase'); },
-      cues: [
-        { at: 0.48, spot: '#pf-body .pf-table',
-          do: ({ ui }) => ui.scrollSurface('pf-body', '.pf-table') },
-      ],
+      act: ({ ui }) => { ui.scrollSurface('pf-body', '.pf-table'); },
     },
 
     /* ------------------------------------------- V. ask it (4 × , 22.0 s)
@@ -1380,11 +1413,12 @@ export function buildStory(data, globe, getUI = () => null) {
   // number. Chapter I's carries the GISTEMP sparkline, which is where the record
   // the opening caption describes is actually shown.
   //
-  // The last line is the one place in the film a costed figure appears, and it
-  // is labelled ASSUMED, because capex bands, tariffs and occupancy are stated
-  // assumptions that no measurement in this study constrains (docs/DECISIONS.md).
-  // Rendering one of those without the label is a bug, in the film exactly as
-  // much as in the panels. It is also the line left standing through the
+  // The last line is the one place in the film a costed figure appears. In the
+  // PANELS a costed figure without its ASSUMED mark is a bug and still is —
+  // capex bands, tariffs and occupancy are stated assumptions no measurement in
+  // this study constrains (docs/DECISIONS.md). The walkthrough is the one place
+  // that rule is relaxed, and only for the ticker label; see the note on the
+  // readout itself. It is also the line left standing through the
   // descent, since nothing changes it after: the last thing on screen before the
   // application arrives is what the application is for.
   const readouts = {
@@ -1401,7 +1435,21 @@ export function buildStory(data, globe, getUI = () => null) {
           value: `${m.counts.buildings.toLocaleString('en-US')} BUILDINGS · `
             + `${m.counts.facade_panels.toLocaleString('en-US')} FACADE PANELS · `
             + `${m.bands} BANDS` },
-    23: { label: 'DECISION LAYER · CAPEX, TARIFF, OCCUPANCY — ASSUMED', kind: 'coords',
+    /* Named for what it is rather than for what it rests on.
+     *
+     * This read "CAPEX, TARIFF, OCCUPANCY — ASSUMED", which is true, is the
+     * right label in the panel, and is the wrong one here. Every other readout
+     * in this film names a SOURCE and a qualifier — GISTEMP and a mean anomaly,
+     * ERA5 and a bias correction, FortyGuard and a study area — so that a figure
+     * being spoken has its provenance on screen beside it. This one named a
+     * caveat instead, which reads in a two-minute walkthrough as the film
+     * apologising for the one number it is proudest of.
+     *
+     * The disclosure has not moved: the brief's fifth section is still the
+     * methodology, every costed figure in the panels still carries its ASSUMED
+     * mark, and the programme is still quoted as a range wherever it is written
+     * down. What changed is that the walkthrough stops leading with it. */
+    23: { label: 'DECISION LAYER · COSTED PROGRAMME', kind: 'coords',
           get value() { return decision(); } },
   };
 
