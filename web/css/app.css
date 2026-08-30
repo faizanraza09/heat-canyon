@@ -142,7 +142,32 @@ a:hover { color: var(--t1); }
    crosshair, which promises a targeting gesture it does not have; dragging is
    a grab down there exactly as it is in the fly-over, and what you can click
    on is said by the ring on the pavement rather than by the pointer. */
-#gl  { position: absolute; inset: 0; display: block; cursor: grab; }
+/* `width`/`height` are not redundant beside `inset: 0`, and leaving them out
+   broke the application on every HiDPI screen.
+
+   A canvas is a REPLACED element, and an absolutely positioned replaced element
+   with `width: auto` resolves to its INTRINSIC width — its `width` attribute —
+   after which `left: 0; right: 0` is over-constrained and `right` is simply
+   dropped. The attribute is set by `renderer.setSize(w, h, false)`, and the
+   `false` is deliberate: it means three.js sizes the drawing buffer and leaves
+   the CSS box to the stylesheet. So the box was the buffer: `w * dpr` CSS
+   pixels wide.
+
+   At dpr 1 that is the viewport and nothing looks wrong, which is why this
+   survived. At dpr 2 — a retina laptop, or Windows at 150% — the canvas laid
+   out at 2880x1620 CSS px inside a 1440x810 window, so the window showed the
+   TOP-LEFT QUARTER of the frame and the city sat off the bottom-right corner.
+   Picking went with it: `_initPicking` maps the pointer through
+   `getBoundingClientRect()`, so the centre of the window resolved to NDC
+   (-0.5, +0.55) and a click on a building either selected the wrong one or,
+   usually, nothing. Plugging an external monitor in fixed it, because that
+   monitor was dpr 1 — which is what made it read as a display problem rather
+   than a layout one.
+
+   100% of the containing block is the fix rather than `setSize(w, h)` with the
+   style flag on, because it is also correct on the first frame, before any
+   resize has run. */
+#gl  { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
 #gl.is-panning { cursor: grabbing; }
 /* On the street, over a patch of road you could actually walk to. The ring on
    the pavement says the same thing in the scene; the pointer says it before
