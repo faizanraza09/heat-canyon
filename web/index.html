@@ -169,6 +169,36 @@
                 requests.</p>
             </div>
             <div id="pr-look" hidden>
+              <!-- How the data shows, which decides what every control below it
+                   means. Tint paints the field onto Google's mesh everywhere,
+                   which is right at street level and turns the city to mud from
+                   the air. Lens and Section stop overlaying: inside the region
+                   Google's buildings step aside and ours stand in their place,
+                   on the same photographed street. -->
+              <label>
+                <span class="lrow"><span>HOW THE DATA SHOWS</span></span>
+                <div class="prseg" id="pr-cut-mode">
+                  <button type="button" data-cut="0" aria-pressed="true">Tint</button>
+                  <button type="button" data-cut="1" aria-pressed="false">Lens</button>
+                  <button type="button" data-cut="2" aria-pressed="false">Section</button>
+                </div>
+              </label>
+              <label id="pr-cut-radius-row" hidden>
+                <span class="lrow"><span>LENS RADIUS</span><output id="pr-cut-radius-out"></output></span>
+                <input id="pr-cut-radius" type="range" min="60" max="900" step="10" value="260" />
+              </label>
+              <label class="prcheck" id="pr-cut-follow-row" hidden>
+                <input id="pr-cut-follow" type="checkbox" checked />
+                The lens follows the pointer
+              </label>
+              <label id="pr-cut-bearing-row" hidden>
+                <span class="lrow"><span>SECTION ALONG</span><output id="pr-cut-bearing-out"></output></span>
+                <input id="pr-cut-bearing" type="range" min="0" max="179" step="1" value="25" />
+              </label>
+              <label id="pr-cut-offset-row" hidden>
+                <span class="lrow"><span>SECTION ACROSS</span><output id="pr-cut-offset-out"></output></span>
+                <input id="pr-cut-offset" type="range" min="-1200" max="1200" step="10" value="0" />
+              </label>
               <label>
                 <span class="lrow"><span>PHOTO COLOUR</span><output id="pr-desat-out"></output></span>
                 <input id="pr-desat" type="range" min="0" max="100" value="35" />

@@ -37,6 +37,7 @@
  * hundredths of a second ramp rather than a `pause()`.
  */
 
+import { api } from './api.js';
 /** How much a line may be hurried to fit its shot. Beyond about fifteen percent
  *  the read stops sounding unhurried, which is the whole reason for using this
  *  voice; a line that needs more than that is a line to shorten in story.js. */
@@ -86,12 +87,12 @@ export class Narrator {
   async prepare(lines) {
     const gen = ++this._gen;
     try {
-      const s = await fetch('/api/voice').then((r) => (r.ok ? r.json() : null));
+      const s = await fetch(api('/api/voice')).then((r) => (r.ok ? r.json() : null));
       if (gen !== this._gen) return this.enabled;
       this.status = s;
       if (!s || !s.enabled) return false;
 
-      const res = await fetch('/api/voice/lines', {
+      const res = await fetch(api('/api/voice/lines'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lines }),

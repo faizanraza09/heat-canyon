@@ -29,6 +29,7 @@
  * renders both ends.
  */
 
+import { api } from './api.js';
 /* An en dash between the ends of a range, and a non-breaking space before the
    unit. Both matter more than they look: a hyphen reads as a minus sign in a
    column of temperature deltas, and a range that wraps between its value and
@@ -200,7 +201,7 @@ export function makeContext(host) {
 
 async function post(path, body, signal) {
   const t0 = performance.now();
-  const r = await fetch(path, {
+  const r = await fetch(api(path), {
     method: 'POST', signal,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body || {}),
@@ -211,7 +212,7 @@ async function post(path, body, signal) {
 async function get(path, query, signal) {
   const t0 = performance.now();
   const q = query ? `?${new URLSearchParams(query)}` : '';
-  return unwrap(await fetch(path + q, { signal }), path, t0);
+  return unwrap(await fetch(api(path) + q, { signal }), path, t0);
 }
 
 async function unwrap(r, path, t0) {

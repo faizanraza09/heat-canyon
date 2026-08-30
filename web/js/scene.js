@@ -25,6 +25,7 @@ import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { RAMPS, norm, SHADE_RGB, SUNLIT_RGB } from './colors.js';
 import { Photoreal, findApiKey } from './photoreal.js';
+import { Cut, CUT_GLSL, CUT_LENS } from './cut.js';
 
 /** Contrast curve, indexed 0-255. A smoothstep-weighted lift: dark values fall
  *  away faster, bright values are left nearly alone, nothing clips. Built once
@@ -117,6 +118,16 @@ export class Scene {
      * the tileset's terrain at the height most of Midtown actually sits at, and
      * makes the residual error symmetric instead of one-sided. */
     this.datumM = Scene._medianBase(data);
+
+    /* The cut, and the materials it drives on our side of the boundary.
+     *
+     * Created before any geometry, because _buildFacades and _buildRoofs patch
+     * their materials with it as they build them and a material patched against
+     * a cut that does not exist yet would never receive one. The photoreal
+     * layer gets the same object by reference in _ensurePhotoreal. */
+    this._cutMats = [];
+    this.cut = new Cut(() => this._pushCut());
+    this.cut.setBearing(Scene._dominantBearing(data));
 
     this._initRenderer();
     this._initScene();
@@ -1062,6 +1073,7 @@ export class Scene {
     this.facadeMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide,
     }));
+    this._patchCutMaterial(this.facadeMesh.material);
     this.scene.add(this.facadeMesh);
     this.facadeColors = geo.getAttribute('color');
     this.nQuad = nQuad;
@@ -1128,6 +1140,7 @@ export class Scene {
     this.roofMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide,
     }));
+    this._patchCutMaterial(this.roofMesh.material);
     this.scene.add(this.roofMesh);
     this.roofColors = geo.getAttribute('color');
     this.roofPosFlat = new Float32Array(pos);
@@ -1502,6 +1515,148 @@ export class Scene {
     return v[v.length >> 1];
   }
 
+  /* ------------------------------------------------------------------- cut
+
+     Two representations, one world, and a boundary between them instead of a
+     blend. The rationale is in cut.js; what lives here is the state, the shader
+     patch for our own side of it, and the pointer tracking that makes the lens
+     feel like a light rather than a setting.                                 */
+
+  /** The dominant street bearing in the study area, degrees clockwise of north.
+   *
+   * The section plane runs *along* a street rather than across one, so it needs
+   * to know which way Midtown's grid is turned. A median over the canyon table
+   * is the wrong statistic here: the grid has two families ninety degrees
+   * apart, and the median of the two is a diagonal that lies along neither. So
+   * fold the bearings onto a half circle, where an avenue and the street it
+   * crosses stay distinct, and take the modal ten-degree bin.
+   */
+  static _dominantBearing(data) {
+    const bins = new Array(18).fill(0);
+    for (const c of (data.canyons || [])) {
+      const b = ((c.bearing % 180) + 180) % 180;
+      bins[Math.min(17, Math.floor(b / 10))]++;
+    }
+    let best = 0;
+    for (let i = 1; i < bins.length; i++) if (bins[i] > bins[best]) best = i;
+    return best * 10 + 5;
+  }
+
+  /** Give one of our own materials the cut, so it draws only inside the region.
+   *
+   * The mirror image of the patch in Photoreal._patchMaterials: there the test
+   * removes Google's buildings *inside* the region, here it removes ours
+   * *outside* it. Neither side needs a second render pass, a stencil or a
+   * render target — the boundary is a signed distance both shaders can evaluate
+   * from a world position they already have.
+   *
+   * The discard goes at `clipping_planes_fragment`, which is the first thing in
+   * the fragment main, so a rejected fragment costs a texture fetch and nothing
+   * else. The rim goes at `dithering_fragment`, which three places after
+   * `colorspace_fragment` — hence the display-space rim colour (see cut.js).
+   *
+   * A three.js clipping plane would do the section case natively and does not
+   * generalise: `Plane` is a half space, and the lens is a cylinder. One
+   * mechanism that covers both is worth more than a built-in that covers half.
+   */
+  _patchCutMaterial(mat) {
+    const u = this.cut.uniforms();
+    mat.userData.cutUniforms = u;
+    this._cutMats.push(mat);
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, u);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>',
+          '#include <common>\nvarying vec3 vWorldCut;')
+        .replace('#include <worldpos_vertex>',
+          `#include <worldpos_vertex>
+           vWorldCut = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>',
+          `#include <common>
+           varying vec3 vWorldCut;
+           ${CUT_GLSL}`)
+        .replace('#include <clipping_planes_fragment>',
+          `#include <clipping_planes_fragment>
+           float cutSd = cutSigned( vWorldCut );
+           if ( uCutMode != 0 && cutSd < 0.0 ) discard;`)
+        .replace('#include <dithering_fragment>',
+          `#include <dithering_fragment>
+           // Half the strength the tiles use. Our side of the boundary is
+           // already the bright one, and a rim as strong there would read as a
+           // band of data rather than as an edge.
+           if ( uCutMode != 0 ) {
+             gl_FragColor.rgb = mix( gl_FragColor.rgb, uCutRim,
+               ( 1.0 - smoothstep( 0.0, uCutFeather, abs( cutSd ) ) ) * 0.5 );
+           }`);
+    };
+    mat.needsUpdate = true;
+  }
+
+  /** Push the cut into every material on both sides of it. */
+  _pushCut() {
+    for (const mat of this._cutMats) this.cut.writeTo(mat.userData.cutUniforms);
+    if (this.photoreal) this.photoreal.setCut(this.cut);
+  }
+
+  /** Move or reshape the cut. Every field of the patch is optional.
+   *
+   * Public because the cut is meant to be driven by more than a slider: the
+   * tour and the film can sweep the section as a shot, and the analyst can put
+   * the lens on the building it is talking about. That is the difference
+   * between an instrument and a toy — a divider you can only drag by hand is a
+   * widget, one the narration moves is a camera move.
+   */
+  setCut(patch) {
+    const was = this.cut.active;
+    this.cut.set(patch);
+    if (this.cut.active !== was) this._applySolids();
+  }
+
+  /** Where the pointer meets the ground, in world coordinates, or null.
+   *
+   * Against the ground rather than against the buildings, and deliberately:
+   * a lens centred on whatever surface the ray happens to strike first would
+   * jump several hundred metres every time the pointer crossed a tower's
+   * silhouette. Anchoring it to the ground means the pool of light slides
+   * smoothly across the city the way a real one would, at the cost of landing
+   * slightly beyond a building you point at from a low angle.
+   *
+   * Solved twice: once against the flat datum to find out where on the map the
+   * ray lands, then again against the terrain height there. One correction is
+   * enough — Midtown spans 26 m of relief under a camera that is normally
+   * hundreds of metres above it.
+   */
+  _pointerGround() {
+    if (this.pointer.x < -1 || this.pointer.x > 1) return null;
+    if (!this._cutPlane) {
+      this._cutPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      this._cutHit = new THREE.Vector3();
+    }
+    const plane = this._cutPlane, hit = this._cutHit;
+    this.ray.setFromCamera(this.pointer, this.camera);
+    plane.constant = 0;
+    if (!this.ray.ray.intersectPlane(plane, hit)) return null;
+    plane.constant = -this._elevOffsetAt(hit.x, -hit.z);
+    return this.ray.ray.intersectPlane(plane, hit) ? hit : null;
+  }
+
+  /** Walk the lens to the pointer. Called once a frame while it is following.
+   *
+   * Gated on half a metre of movement rather than run unconditionally, because
+   * a push writes six uniforms into every streamed tile material in the scene
+   * and there can be several hundred of those. Half a metre is well under a
+   * pixel of lens movement at any altitude the layer is usable at.
+   */
+  _trackLens() {
+    if (!this.cut.active || this.cut.mode !== CUT_LENS || !this.cut.follow) return;
+    const g = this._pointerGround();
+    if (!g) return;
+    const c = this.cut.center;
+    if (Math.hypot(g.x - c.x, g.z - c.z) < 0.5) return;
+    this.setCut({ center: { x: g.x, y: 0, z: g.z } });
+  }
+
   /* -------------------------------------------------------- photoreal layer */
 
   /** Build the layer lazily. No TilesRenderer is constructed and no root tile
@@ -1520,6 +1675,7 @@ export class Scene {
       datumM: this.datumM,
       fieldTex: this.groundTex,
       forceCpu: this.forceCpuPhotoreal,
+      cut: this.cut,
       // The ground texture spans the AOI exactly, centred on the origin, and is
       // drawn north-up — the same rectangle _buildGround gives its plane.
       fieldRect: { x0: -w / 2, y0: -h / 2, w, h },
@@ -1578,6 +1734,11 @@ export class Scene {
       this.photoreal.disable();
     }
     this.photorealOn = want;
+    /* The cut only means anything against a photograph. With the layer off the
+     * prisms are the entire scene, so a live cut would carve the city away and
+     * leave the clear colour behind. The chosen mode is kept either way, so
+     * switching the layer back on restores the cut that was there. */
+    this.cut.set({ enabled: want && !this.showSolids });
 
     this._useElevation(want);
     if (this.ground) this.ground.visible = !want;
@@ -1611,7 +1772,11 @@ export class Scene {
    * unchanged; only the surface carrying it is. `showSolids` exists because
    * comparing the two is the fastest way to check registration by eye. */
   _applySolids() {
-    const hide = this.photorealOn && !this.showSolids;
+    /* A cut is the third reason our geometry may be on top of a photograph, and
+     * unlike the other two it is the point rather than a diagnostic: inside the
+     * region the tiles have stepped aside, so if the prisms were also hidden
+     * the lens would be an empty hole in the city. */
+    const hide = this.photorealOn && !this.showSolids && !this.cut.active;
     if (this.facadeMesh) this.facadeMesh.visible = !hide;
     if (this.roofMesh) this.roofMesh.visible = !hide;
   }
@@ -1629,6 +1794,12 @@ export class Scene {
 
   setShowSolids(on) {
     this.showSolids = !!on;
+    /* The alignment check wants both representations drawn everywhere, on top
+     * of each other, so their disagreement can be read directly. That is the
+     * exact condition a cut exists to prevent, so the cut is suspended while it
+     * runs rather than left to clip half the comparison away. The chosen mode
+     * survives, and comes back when the check is switched off. */
+    this.cut.set({ enabled: this.photorealOn && !this.showSolids });
     this._applySolids();
   }
 
@@ -2496,6 +2667,11 @@ export class Scene {
       this._clampOrbitView();
       this._orbitFog();
     }
+    // After the controls have moved the camera and before the tileset selects
+    // against it: the lens is solved from the pointer through *this* frame's
+    // view, and solving it against the previous one leaves it visibly lagging
+    // the cursor during a drag.
+    this._trackLens();
     if (this.photorealOn && this.photoreal) this.photoreal.update();
     // The sky rides with the eye. A fixed 9 km sphere works from inside the
     // study area and nowhere else — the opening descent starts sixty kilometres

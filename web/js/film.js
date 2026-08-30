@@ -1740,23 +1740,31 @@ export class Film {
 
     this._speak(b, i);
 
-    /* And the beat acts on the application.
+    /* The city phase is entered before the beat acts, and the order is load-
+     * bearing.
      *
-     * From chapter three on, the film is not a picture of the tool, it is the
-     * tool: the globe canvas is gone, the panels are up, and each beat calls
-     * `act` to move the real camera, select the real building, switch the real
-     * layer, open the real brief. Everything on screen from here is the working
-     * application being driven, which is the only way a walkthrough can claim
-     * to show what a thing does rather than a drawing of it.
+     * `_enterCity` is what hands scene.js its camera back: it fires `onLanded`,
+     * which ends the descent and flies from wherever the film left the camera
+     * to the application's opening view. That flight takes three and a half
+     * seconds. The first city beat is also the one that selects a building and
+     * frames it — so with the act running first, the framing happened and the
+     * flight then overwrote it every frame and finished a mile up. Chapter
+     * three played out over the overview instead of over the building it spends
+     * a minute describing, and every probe that paused the film immediately
+     * after seeking reported the camera in the right place, because the flight
+     * had not had a frame to run in yet.
      *
-     * Guarded, because a beat that throws must not take the film down with it.
-     * A walkthrough with one dead step is worth far more than a black screen,
-     * and the caption for that step is already on screen saying what should be
-     * happening — which is also how you find out which one broke.
+     * Landing first and acting second means the act aborts that flight (see
+     * scene.focus) and owns the camera from there.
      */
-    if (b.act && this.actx) {
-      try { b.act(this.actx); }
-      catch (e) { console.warn(`film: beat ${i} (${b.chapter}) could not act:`, e); }
+    if (b.phase === 'city' && !this._cityPhase) {
+      this._enterCity();
+      // The panels come up here rather than under the closing line. They used
+      // to arrive last because the film was a film and the application was what
+      // came after it; now two thirds of the film is the application, so it has
+      // to be on screen for the beats that talk about it.
+      this._revealed = true;
+      this.hooks.onReveal?.();
     }
 
     if (b.phase === 'handoff' && !this._handedOver) {
@@ -1775,14 +1783,23 @@ export class Film {
         this.subGain.gain.linearRampToValueAtTime(0.04, t + b.dur + 3.0);
       }
     }
-    if (b.phase === 'city' && !this._cityPhase) {
-      this._enterCity();
-      // The panels come up here rather than under the closing line. They used
-      // to arrive last because the film was a film and the application was what
-      // came after it; now two thirds of the film is the application, so it has
-      // to be on screen for the beats that talk about it.
-      this._revealed = true;
-      this.hooks.onReveal?.();
+    /* And the beat acts on the application.
+     *
+     * From chapter three on, the film is not a picture of the tool, it is the
+     * tool: the globe canvas is gone, the panels are up, and each beat calls
+     * `act` to move the real camera, select the real building, switch the real
+     * layer, open the real brief. Everything on screen from here is the working
+     * application being driven, which is the only way a walkthrough can claim
+     * to show what a thing does rather than a drawing of it.
+     *
+     * Guarded, because a beat that throws must not take the film down with it.
+     * A walkthrough with one dead step is worth far more than a black screen,
+     * and the caption for that step is already on screen saying what should be
+     * happening — which is also how you find out which one broke.
+     */
+    if (b.act && this.actx) {
+      try { b.act(this.actx); }
+      catch (e) { console.warn(`film: beat ${i} (${b.chapter}) could not act:`, e); }
     }
     // The film's own chrome steps aside on the closing beat. The interface is
     // already up by then — it came in with the city phase — so this is only

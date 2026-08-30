@@ -33,6 +33,7 @@
  * answered rather than pretending the capability is there.
  */
 
+import { api } from './api.js';
 /* What each call is called on the record.
  *
  * The transcript is the evidence for an answer, so it stays: a figure you cannot
@@ -288,7 +289,7 @@ export class AgentConsole {
 
   async _loadEnvelope() {
     try {
-      const r = await fetch('/api/agent/envelope');
+      const r = await fetch(api('/api/agent/envelope'));
       this.envelope = await r.json();
     } catch (e) {
       this.envelope = { available: false, unavailable_because: 'Server not reachable.' };
@@ -300,7 +301,7 @@ export class AgentConsole {
       // answers questions, and saying which one answered is more useful than
       // hiding the feature.
       try {
-        const h = await (await fetch('/api/health')).json();
+        const h = await (await fetch(api('/api/health'))).json();
         this.mode = h.legacy_ai_available ? 'single-shot' : 'none';
       } catch { this.mode = 'none'; }
       // Enough for the person in front of it to know what they have lost, and a
@@ -396,7 +397,7 @@ export class AgentConsole {
     this.stop.hidden = false;
     const status = this._status('Reading the question');
     try {
-      const r = await fetch('/api/agent/ask', {
+      const r = await fetch(api('/api/agent/ask'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, resume: this.sessionId }),
       });
@@ -451,7 +452,7 @@ export class AgentConsole {
     // the server replays from the run's JSONL on reconnect, so a dropped
     // connection costs nothing. The one thing it cannot do is stop by itself, so
     // the terminal frame closes it explicitly.
-    const es = new EventSource(`/api/agent/runs/${runId}/events`);
+    const es = new EventSource(api(`/api/agent/runs/${runId}/events`));
     this.stream = es;
     let sawText = false;
     let live = false;
@@ -540,7 +541,7 @@ export class AgentConsole {
     this.send.disabled = true;
     const status = this._status('thinking…');
     try {
-      const r = await fetch('/api/ask', {
+      const r = await fetch(api('/api/ask'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question }),
       });
@@ -565,7 +566,7 @@ export class AgentConsole {
   async interrupt() {
     if (!this.runId) return;
     try {
-      await fetch(`/api/agent/runs/${this.runId}/interrupt`, { method: 'POST' });
+      await fetch(api(`/api/agent/runs/${this.runId}/interrupt`), { method: 'POST' });
     } catch { /* the stream will report the state */ }
   }
 

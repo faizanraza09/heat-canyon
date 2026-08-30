@@ -499,8 +499,13 @@ export function buildStory(data, globe) {
       },
       // Light it, so "the tower opposite" is a thing on screen rather than a
       // direction. Both are marked: the wall being talked about and the wall
-      // doing it.
-      act: ({ ui }) => { ui.highlight([HERO_BIN, NEIGHBOUR_BIN]); },
+      // doing it — and the camera pulls back, because at the framing the
+      // previous beats want the tower being blamed is off the edge of the
+      // picture, which makes the line a caption about something invisible.
+      act: ({ ui, scene }) => {
+        ui.highlight([HERO_BIN, NEIGHBOUR_BIN]);
+        scene.zoomBy(1.55);
+      },
     },
     {
       chapter: 'III', phase: 'city', seconds: 6.3,
@@ -633,7 +638,11 @@ export function buildStory(data, globe) {
         ? `Run the year and the ranking moves. ${Words(overlap)} of the heat wave’s `
           + 'worst fifty are still worst.'
         : 'Run the year and the ranking moves.',
-      act: ({ ui }) => { ui.stop?.(); ui.setLayer('annual_priority'); },
+      // Stop the clock AND put it back where it was. `play` leaves the hour
+      // wherever it happened to reach, which on the last pass was three in the
+      // morning — so the ranking, the what-if, the portfolio and the analyst all
+      // played out over a night hour, on a film about afternoon heat.
+      act: ({ ui }) => { ui.stop?.(); ui.setHour(lateSun); ui.setLayer('annual_priority'); },
     },
     {
       chapter: 'IV', phase: 'city', seconds: 6.3,

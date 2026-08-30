@@ -1,0 +1,43 @@
+# What `gcloud run deploy --source .` uploads as the build context.
+#
+# THIS FILE IS LOAD-BEARING, AND ITS ABSENCE IS A SILENT FAILURE. With no
+# .gcloudignore, gcloud synthesises the ignore list from .gitignore — and
+# .gitignore deliberately excludes web/data/*.bin, because the solved fields are
+# 189 MB of build output that has no business in a git repository. The container
+# reads those files at startup and cannot rebuild them. So the default behaviour
+# uploads an application with its model removed, the image builds cleanly, and
+# the server answers 503 on every request that needs data.
+#
+# The rule to remember: .gitignore answers "what is not source?" and this file
+# answers "what does the server not need?" Those are different questions, and
+# web/data is the case where they give opposite answers.
+
+.git/
+.gitignore
+
+# The pipeline's raw inputs — LiDAR tiles, NYC footprints, cached FortyGuard
+# responses and the credit ledger. Only `cli build` reads them, and that never
+# runs in the image.
+data/
+
+.env
+node_modules/
+
+tests/
+test-results/
+playwright-report/
+notebooks/
+*.ipynb
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Agent run transcripts are per-machine scratch, except the one the film replays.
+.agent/runs/*
+!.agent/runs/r17880442193644fa/
+
+Design Overhaul Request.zip
+*:Zone.Identifier
+.deploy/

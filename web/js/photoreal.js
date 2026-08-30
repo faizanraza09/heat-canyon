@@ -40,6 +40,7 @@
  *   physics comes from public LiDAR (see heatcanyon/lidar.py).
  */
 
+import { api } from './api.js';
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import {
@@ -50,6 +51,7 @@ import { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
 import {
   GLTFExtensionsPlugin, TileCompressionPlugin, TilesFadePlugin, ReorientationPlugin,
 } from '3d-tiles-renderer/three/plugins';
+import { CUT_GLSL } from './cut.js';
 
 const DEG = Math.PI / 180;
 
@@ -247,7 +249,7 @@ export async function resolveApiKey() {
   const local = findApiKey();
   if (local) return local;
   try {
-    const r = await fetch('./api/config', { cache: 'no-store' });
+    const r = await fetch(api('./api/config'), { cache: 'no-store' });
     if (!r.ok) return '';
     const j = await r.json();
     return (j && j.gmaps_key) || '';
@@ -790,6 +792,12 @@ export class Photoreal {
         uLutSize: { value: new THREE.Vector2(this.lutW, this.lutH) },
         uNBands: { value: this.nBands },
         uGroundY: { value: this.groundY },
+        // Whether the massing rasters exist at all. The cut's column test reads
+        // them directly rather than through uDataWash, which the viewer can
+        // slide to zero — and a cut that stopped cutting when you turned the
+        // tint down would be a baffling thing to debug.
+        uHasGrid: { value: this.grid ? 1 : 0 },
+        ...(this.o.cut ? this.o.cut.uniforms() : {}),
       };
       mat.userData.uniforms = uniforms;
       this._mats.add(mat);
@@ -820,10 +828,51 @@ export class Photoreal {
              uniform sampler2D uLut;
              uniform vec2 uLutSize;
              uniform float uNBands;
-             uniform float uGroundY;`)
+             uniform float uGroundY;
+             uniform float uHasGrid;
+             ${CUT_GLSL}`)
           .replace('#include <dithering_fragment>',
             `#include <dithering_fragment>
              {
+               /* ---- the cut: inside it, this building is not ours to draw
+                *
+                * See cut.js for why the two representations are separated
+                * rather than blended. The test is a *column* test — is there a
+                * modelled building in this vertical column, and is this
+                * fragment above its pavement — and it deliberately does not use
+                * the derivative normal the tint below relies on. That normal is
+                * noise at coarse LOD, which costs the tint some speckle and
+                * would cost a discard a ragged silhouette.
+                *
+                * Terrain, roadway, vehicles and street trees are never cut:
+                * they are the one ground both representations stand on, and
+                * swapping them too would put a step at every boundary, because
+                * our own ground plane is flat at the datum while this layer
+                * stands on real terrain across a 26 m range.
+                *
+                * First thing in the block, so a fragment about to be thrown
+                * away does not pay for the field lookup below. */
+               float cutSd = cutSigned( vWorldPR );
+               if ( uCutMode != 0 && cutSd > 0.0 && uHasGrid > 0.5 ) {
+                 vec2 cCell = floor( vec2(
+                   ( vWorldPR.x - uGridRect.x ) / uGridRect.z,
+                   ( ( -vWorldPR.z ) - uGridRect.y ) / uGridRect.z ) );
+                 if ( all( greaterThanEqual( cCell, vec2( 0.0 ) ) ) &&
+                      all( lessThan( cCell, uGridSize ) ) ) {
+                   vec4 cg = texture2D( uGrid, ( cCell + 0.5 ) / uGridSize );
+                   float cb = cg.r * 255.0 + cg.g * 255.0 * 256.0;
+                   if ( cb < 65535.0 ) {
+                     // Params .r is the building's ground elevation relative to
+                     // the scene datum. A 1.5 m sill above it clears the kerb,
+                     // the parked cars and the podium grille without ever
+                     // clipping a wall we mean to replace.
+                     vec4 cp = texture2D( uParams,
+                       vec2( 0.5, ( cb + 0.5 ) / uLutSize.y ) );
+                     if ( vWorldPR.y > cp.r + 1.5 ) discard;
+                   }
+                 }
+               }
+
                vec3 c = gl_FragColor.rgb;
                float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
 
@@ -984,6 +1033,19 @@ export class Photoreal {
                  }
                }
 
+               /* ---- the boundary, named rather than left to be inferred
+                *
+                * Drawn on every surviving surface within a feather of the
+                * boundary, terrain included, so the lens reads as a pool of
+                * light on the street and the section as a line ruled down an
+                * avenue. Without it the eye has to work out for itself where
+                * one representation stopped and the other began, and at a
+                * distance where both are dim that reading is not available. */
+               if ( uCutMode != 0 ) {
+                 c = mix( c, uCutRim,
+                          ( 1.0 - smoothstep( 0.0, uCutFeather, abs( cutSd ) ) ) * 0.7 );
+               }
+
                gl_FragColor.rgb = c;
              }`);
       };
@@ -1042,6 +1104,21 @@ export class Photoreal {
       if (desaturate !== undefined) u.uDesat.value = desaturate;
       if (fieldWash !== undefined) u.uWash.value = fieldWash;
       if (dataWash !== undefined) u.uDataWash.value = dataWash;
+    }
+  }
+
+  /** Push the cut's state into every material this layer has patched.
+   *
+   * Same iteration as setLook and for the same reason: tiles stream in and out
+   * constantly, and a material can be alive in the LRU cache while detached
+   * from the group, so the live set is the authority and the scene graph is
+   * not. Materials patched *after* this call pick the state up from
+   * `cut.uniforms()` at patch time, which is why that path exists.
+   */
+  setCut(cut) {
+    for (const mat of this._mats) {
+      const u = mat.userData.uniforms;
+      if (u) cut.writeTo(u);
     }
   }
 
