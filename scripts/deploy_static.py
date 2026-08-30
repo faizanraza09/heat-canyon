@@ -103,14 +103,30 @@ def gh_pages(branch: str) -> str:
     return f"https://{user}.github.io/{repo}/"
 
 
+def _wrangler(*args: str):
+    """Run wrangler, streaming its output rather than capturing it.
+
+    Captured-and-truncated output is how the first Cloudflare attempt reported
+    "run `npx wrangler login` first" when the real error was that the Pages
+    project did not exist yet — the banner filled the tail and the message fell
+    off the top. A deploy tool that guesses at its own failures is worse than
+    one that prints them.
+    """
+    return subprocess.run(["npx", "--yes", "wrangler@latest", *args], text=True)
+
+
 def cloudflare(project: str) -> str:
-    r = subprocess.run(["npx", "--yes", "wrangler@latest", "pages", "deploy",
-                        str(BUNDLE), "--project-name", project,
-                        "--commit-dirty=true"],
-                       text=True, capture_output=True)
-    print(r.stdout[-2500:] or r.stderr[-2500:])
+    # `pages deploy` will not create the project, and its error for a missing one
+    # suggests logging in again, which sends you looking in the wrong place.
+    # Creating first is idempotent enough: an existing project makes this fail
+    # harmlessly and the deploy below is what matters.
+    _wrangler("pages", "project", "create", project, "--production-branch", "main")
+
+    r = _wrangler("pages", "deploy", str(BUNDLE), "--project-name", project,
+                  "--branch", "main", "--commit-dirty=true")
     if r.returncode != 0:
-        sys.exit("wrangler failed — run `npx wrangler login` first")
+        sys.exit(f"wrangler exited {r.returncode} — see its output above. If it "
+                 f"reports an auth problem, run `npx wrangler login`.")
     return f"https://{project}.pages.dev/"
 
 

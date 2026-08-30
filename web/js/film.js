@@ -1086,6 +1086,9 @@ export class Film {
   placeMarker(lon, lat) {
     const p = lonLatToVec3(lon, lat, R * 1.002);
     this.markerLocal = lonLatToVec3(lon, lat, R * 1.01);
+    // Kept for `_placeLabel`: the one point both the rings and the label's dot
+    // are placed from.
+    this.markerAnchor = p.clone();
     this.markerGroup.position.copy(p);
     // The group's local +Y should point away from the centre; rings are drawn in
     // its XY plane, so they also need laying flat against the surface.
@@ -2125,14 +2128,24 @@ export class Film {
   _placeLabel(pin) {
     const el = $('film-marker');
     if (!this._nycLocal || pin < 0.02) { el.style.opacity = '0'; return; }
-    const world = this._nycLocal.clone().applyMatrix4(this.earthGroup.matrixWorld);
+    // Projected from the point the rings are actually drawn around — a shade
+    // above the surface — rather than from the surface point itself. Two
+    // marks claiming one coordinate have to be given the same coordinate, or
+    // the fifteen kilometres between R and R * 1.002 turn into a visible gap
+    // between the label's dot and the mark it labels once the camera is low.
+    const world = (this.markerAnchor || this._nycLocal)
+      .clone().applyMatrix4(this.earthGroup.matrixWorld);
     const toCam = this.camera.position.clone().sub(world).normalize();
     const normal = world.clone().normalize();
     const facing = toCam.dot(normal);
     const p = world.clone().project(this.camera);
     const x = (p.x * 0.5 + 0.5) * window.innerWidth;
     const y = (-p.y * 0.5 + 0.5) * window.innerHeight;
-    el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    // The second translate lifts the row by half its own height, so the origin
+    // the dot is centred on (see `#film-marker i`) lands on the projection
+    // instead of the row's top-left corner.
+    el.style.transform =
+      `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(0, -50%)`;
     el.style.opacity = String(pin * clamp01((facing - 0.05) * 4));
   }
 

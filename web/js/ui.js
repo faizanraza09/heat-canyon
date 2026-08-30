@@ -25,7 +25,6 @@
 
 import { RAMPS, css, gradient, norm, SUN_CSS } from './colors.js';
 import { findApiKey, resolveApiKey, storeApiKey } from './photoreal.js';
-import { CUT_OFF, CUT_LENS, CUT_SECTION } from './cut.js';
 import { YearStrip } from './year.js';
 import { AgentConsole } from './agent.js';
 import { makeContext } from './ctx.js';
@@ -924,108 +923,18 @@ export class UI {
     };
     slider('pr-desat', 'pr-desat-out', (v) => `${Math.round(100 - v)}%`,
       (v) => this.scene.photoreal?.setLook({ desaturate: v / 100 }));
-    slider('pr-data', 'pr-data-out', (v) => `${Math.round(v)}%`,
-      (v) => this.scene.photoreal?.setLook({ dataWash: v / 100 }));
+    // Read out as a position on the ramp rather than as a percentage of a
+    // wash, because that is what it now is: everything above this point on the
+    // legend glows, everything below it stays photograph.
+    slider('pr-data', 'pr-data-out', (v) => `${Math.round(v)}% OF RANGE`,
+      (v) => this.scene.photoreal?.setLook({ threshold: v / 100 }));
     slider('pr-wash', 'pr-wash-out', (v) => `${Math.round(v)}%`,
       (v) => this.scene.photoreal?.setLook({ fieldWash: v / 100 }));
     $('pr-solids').onchange = (e) => this.scene.setShowSolids(e.target.checked);
     slider('pr-nudge', 'pr-nudge-out', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} m`,
       (v) => this.scene.photoreal?.setNudge(v));
 
-    this._cut(slider);
-
     if (findApiKey()) say('Key found in this browser.');
-  }
-
-  /* How the data shows: painted onto the photograph, or carried by our own
-   * geometry inside a region cut out of it.
-   *
-   * The mode sits above the look sliders because it decides what they mean, and
-   * choosing a cut drives the tint to zero on purpose. The whole argument for a
-   * cut is that the two representations should stop competing for the same
-   * pixel: the photograph is left to do the one thing it is good at, which is
-   * recognition, and the measurement is carried by geometry built to carry it —
-   * including coloured roofs, which the tint cannot paint at all and which are
-   * most of what an aerial view can actually see. The previous tint is
-   * remembered and restored on the way back, so this is a default rather than a
-   * decision taken away.
-   *
-   * `slider` is passed in rather than rebuilt because the controls here have to
-   * be the same control as the ones above them, down to the read-out.
-   */
-  _cut(slider) {
-    const seg = $('pr-cut-mode');
-    if (!seg) return;
-    const rowsFor = {
-      [CUT_LENS]: ['pr-cut-radius-row', 'pr-cut-follow-row'],
-      [CUT_SECTION]: ['pr-cut-bearing-row', 'pr-cut-offset-row'],
-    };
-    const dataSlider = $('pr-data');
-    let mode = CUT_OFF;
-    let tintBeforeCut = null;
-
-    /* The section plane's normal is perpendicular to the street it runs along,
-     * so the offset slides it sideways across the grid — from one avenue to the
-     * next — rather than up and down the one it is on. */
-    const centre = () => {
-      const a = (parseFloat($('pr-cut-bearing').value) * Math.PI) / 180;
-      const d = parseFloat($('pr-cut-offset').value);
-      return { x: Math.cos(a) * d, y: 0, z: Math.sin(a) * d };
-    };
-
-    const apply = () => {
-      for (const [m, ids] of Object.entries(rowsFor)) {
-        for (const id of ids) { const el = $(id); if (el) el.hidden = mode !== Number(m); }
-      }
-      for (const b of seg.querySelectorAll('button')) {
-        b.setAttribute('aria-pressed', String(Number(b.dataset.cut) === mode));
-      }
-      const patch = {
-        mode,
-        radius: parseFloat($('pr-cut-radius').value),
-        follow: $('pr-cut-follow').checked,
-      };
-      // Only in section mode, or the lens would be dragged back to the plane's
-      // offset every time any control in the panel moved.
-      if (mode === CUT_SECTION) {
-        patch.bearing = parseFloat($('pr-cut-bearing').value);
-        patch.center = centre();
-      }
-      this.scene.setCut(patch);
-    };
-
-    const setMode = (m) => {
-      if (m === mode) return;
-      if (mode === CUT_OFF && m !== CUT_OFF) {
-        tintBeforeCut = dataSlider.value;
-        dataSlider.value = '0';
-        dataSlider.dispatchEvent(new Event('input'));
-      } else if (m === CUT_OFF && tintBeforeCut !== null) {
-        dataSlider.value = tintBeforeCut;
-        dataSlider.dispatchEvent(new Event('input'));
-      }
-      mode = m;
-      apply();
-    };
-
-    seg.onclick = (e) => {
-      const b = e.target.closest('button[data-cut]');
-      if (b) setMode(Number(b.dataset.cut));
-    };
-
-    // Open the section on the grid the city is actually built on rather than on
-    // a round number, so the first thing the slider does is move it off an
-    // avenue instead of onto one.
-    const bearing = this.scene.cut?.bearing;
-    if (Number.isFinite(bearing)) {
-      $('pr-cut-bearing').value = String(Math.round(((bearing % 180) + 180) % 180));
-    }
-
-    slider('pr-cut-radius', 'pr-cut-radius-out', (v) => `${Math.round(v)} m`, apply);
-    slider('pr-cut-bearing', 'pr-cut-bearing-out', (v) => `${Math.round(v)}°`, apply);
-    slider('pr-cut-offset', 'pr-cut-offset-out',
-      (v) => `${v > 0 ? '+' : ''}${Math.round(v)} m`, apply);
-    $('pr-cut-follow').onchange = apply;
   }
 
   /* ------------------------------------------------------------ what if

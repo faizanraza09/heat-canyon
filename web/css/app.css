@@ -813,22 +813,6 @@ ul.why li:before {
 }
 #pr-look label.prcheck input { accent-color: var(--accent); width: auto; flex: none; height: auto; }
 
-/* The three ways of showing the data, as one segmented control. Built from the
-   same border, radius and pressed treatment as #pr-toggle so the panel reads as
-   one family of controls rather than as a settings form. */
-.prseg { display: flex; gap: 6px; }
-.prseg button {
-  all: unset; box-sizing: border-box; cursor: pointer; flex: 1; text-align: center;
-  padding: 8px 0; border: 1px solid var(--line-ctl); border-radius: var(--r);
-  font-family: var(--sans); font-size: 12.5px; line-height: normal; color: var(--t4);
-  letter-spacing: normal; text-transform: none;
-  transition: all 240ms var(--ease);
-}
-.prseg button:hover { color: var(--t1); border-color: rgba(237, 231, 220, .3); }
-.prseg button[aria-pressed="true"] {
-  background: rgba(237, 231, 220, .1); border-color: var(--line-hi); color: var(--t0);
-}
-
 /* ------------------------------------------------------------- what-if sliders */
 
 .slider { margin-bottom: 26px; }

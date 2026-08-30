@@ -40,7 +40,6 @@
  *   physics comes from public LiDAR (see heatcanyon/lidar.py).
  */
 
-import { api } from './api.js';
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import {
@@ -51,7 +50,7 @@ import { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
 import {
   GLTFExtensionsPlugin, TileCompressionPlugin, TilesFadePlugin, ReorientationPlugin,
 } from '3d-tiles-renderer/three/plugins';
-import { CUT_GLSL } from './cut.js';
+import { api } from './api.js';
 
 const DEG = Math.PI / 180;
 
@@ -304,6 +303,10 @@ export class Photoreal {
      * street field wash falls off with height above the *road*, and once the
      * layer is on there is real terrain between the two. */
     this.groundY = 0;
+    /* Metres of eye above the local ground. The encoding is chosen from this:
+     * see the ladder in _patchMaterials. Held here so a material patched
+     * mid-flight opens at the right regime rather than at street level. */
+    this.eyeHeight = 0;
     this._et = RAMP.ceiling;
     this._rampAt = 0;
     this._creditsAt = 0;
@@ -320,9 +323,21 @@ export class Photoreal {
      *
      * Multiplying the heat colour over the retained luminance instead keeps the
      * building legible as a building and the field legible as a field. */
-    this.desaturate = 0.35;
+    this.desaturate = 0.30;
     this.fieldWash = 0.40;
-    this.dataWash = 0.55;
+    /* Where on the normalised domain the glow starts.
+     *
+     * This replaces a "how much heat colour to paint" strength, and the
+     * replacement is the whole point rather than a rename. A strength spreads
+     * the same wash over every surface the model covers, which from the air is
+     * every surface in frame — and colour that is everywhere is the paper, not
+     * the mark. A threshold spends the colour budget on the top of the domain
+     * and leaves the rest as photograph, so the frame has a figure and a ground
+     * at every altitude without anyone having to tune it per view.
+     *
+     * It is the same idea as a thermal fusion mode on a real camera: greyscale
+     * visible everywhere, colour only where the sensor says hot. */
+    this.threshold = 0.55;
     this._credits = [];
     this._mats = new Set();
 
@@ -344,6 +359,21 @@ export class Photoreal {
     this.lut = null;
     this.lutSum = null;
     this.lutCount = null;
+    /* Mean normalised value per LUT cell, 0..1 on the same domain the panel was
+     * drawn against. The colour alone cannot answer "how hot is this" — the
+     * ramp is monotonic in lightness, so luminance nearly recovers it, but
+     * "nearly" is not a basis for a threshold that decides whether a surface is
+     * painted at all. Carried explicitly and packed into the LUT's alpha. */
+    this.lutT = null;
+    /* One aggregate per building: the peak value anywhere on its facades, and
+     * the ramp colour at that value. This is what the far regime paints on
+     * roofs, and it is written by the scene rather than derived in GLSL for the
+     * reason _recolour gives about the facade LUT — a second implementation of
+     * the ramp would drift from the first, and nobody would notice until a
+     * screenshot looked wrong. */
+    this.agg = null;
+    this.aggBuf = null;
+    this.aggPeak = null;
 
     /* The plugin orients the tileset with X facing *west* and Z facing north.
      * This scene's frame is (east, up, -north). A half turn about Y takes one
@@ -462,10 +492,29 @@ export class Photoreal {
     const w = N_BUCKETS * nBands;
     this.lutSum = new Float32Array(w * nB * 3);
     this.lutCount = new Uint16Array(w * nB);
+    this.lutT = new Float32Array(w * nB);
     const buf = new Uint8Array(w * nB * 4);
     const tex = new THREE.DataTexture(buf, w, nB, THREE.RGBAFormat,
                                       THREE.UnsignedByteType);
-    tex.colorSpace = THREE.SRGBColorSpace;
+    /* Sampled raw, not linearised — and this flag was the single largest reason
+     * the layer read as mud.
+     *
+     * An RGBA byte texture marked SRGBColorSpace is uploaded as SRGB8_ALPHA8,
+     * which makes the *hardware* decode it to linear light on every fetch. The
+     * shader patch injects at `dithering_fragment`, and three runs that after
+     * `colorspace_fragment` — so gl_FragColor is already display-encoded by the
+     * time these colours arrive. Linear numbers were being composited straight
+     * into a display buffer, which draws the whole ramp far darker than the
+     * legend beside it: a mid-ramp orange around rgb(182,118,50) landed near
+     * rgb(119,46,8). Every diagnosis of "the heat colour is a muddy brown"
+     * started here, before any question of how it was blended.
+     *
+     * NoColorSpace hands back the bytes the scene wrote, in the space it wrote
+     * them in. It is also what the rest of this scene already does — see the
+     * approach basemap in scene.js, which says the same thing for the same
+     * reason: every shader here authors in display space and writes straight
+     * out, so nothing should be linearised on the way in. */
+    tex.colorSpace = THREE.NoColorSpace;
     tex.minFilter = THREE.NearestFilter;
     tex.magFilter = THREE.NearestFilter;
     tex.generateMipmaps = false;
@@ -476,11 +525,42 @@ export class Photoreal {
     return tex;
   }
 
+  /** One row per building: the ramp colour at that building's peak facade value.
+   *
+   * A byte texture rather than float because it is a colour, and deliberately
+   * *not* flagged sRGB: the scene hands over display-space bytes straight off
+   * the same ramp the geometry uses, and they must arrive in the shader in that
+   * space. Alpha is the peak value itself, offset by one so that zero
+   * can keep its meaning of "this building carries no data at all" — a building
+   * whose peak is genuinely 0.0 and one the model never solved are different
+   * claims, and painting them the same colour would invent data.
+   */
+  _buildAgg() {
+    const nB = this.o.data.buildings.attrs.length;
+    this.aggBuf = new Uint8Array(nB * 4);
+    this.aggPeak = new Float32Array(nB);
+    const tex = new THREE.DataTexture(this.aggBuf, 1, nB, THREE.RGBAFormat,
+                                      THREE.UnsignedByteType);
+    // Raw, for the reason spelled out in _buildLut: these are display-space
+    // bytes going into a display-space buffer, and an sRGB flag here would have
+    // the hardware silently darken every roof in the far view.
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
   /** Zero the accumulators. Called by the scene before it recolours. */
   beginLut() {
     if (!this.lut) return false;
     this.lutSum.fill(0);
     this.lutCount.fill(0);
+    this.lutT.fill(0);
+    // -1 rather than 0: a building with no panels must stay distinguishable
+    // from one whose panels are all at the bottom of the domain.
+    this.aggPeak.fill(-1);
     return true;
   }
 
@@ -488,7 +568,7 @@ export class Photoreal {
   commitLut() {
     if (!this.lut) return;
     const out = this.lut.image.data;
-    const sum = this.lutSum, cnt = this.lutCount;
+    const sum = this.lutSum, cnt = this.lutCount, tt = this.lutT;
     for (let i = 0, n = cnt.length; i < n; i++) {
       const c = cnt[i];
       const o = i * 4, s = i * 3;
@@ -496,9 +576,21 @@ export class Photoreal {
       out[o] = Math.min(255, (sum[s] / c) * 255) | 0;
       out[o + 1] = Math.min(255, (sum[s + 1] / c) * 255) | 0;
       out[o + 2] = Math.min(255, (sum[s + 2] / c) * 255) | 0;
-      out[o + 3] = 255;
+      /* Alpha carries the mean normalised value, not a coverage flag.
+       *
+       * Zero stays reserved for "no panel ever contributed here", which is the
+       * test the shader uses to avoid inventing a wall orientation a building
+       * does not have. Everything else is 1 + 254t, so the threshold has a real
+       * quantity to compare against instead of guessing at one from the
+       * colour's luminance. */
+      out[o + 3] = 1 + Math.min(254, Math.max(0, (tt[i] / c) * 254)) | 0;
     }
     this.lut.needsUpdate = true;
+  }
+
+  /** Upload the per-building aggregates the scene has just filled in. */
+  commitAgg() {
+    if (this.agg) this.agg.needsUpdate = true;
   }
 
   /* ------------------------------------------------------------------ setup */
@@ -755,6 +847,7 @@ export class Photoreal {
       this.grid = this._buildGrid();
       this.params = this._buildParams();
       this.lut = this._buildLut();
+      this.agg = this._buildAgg();
       this.o.onLutReady?.();
     }
     const g = data.meta.massing_grid;
@@ -777,7 +870,10 @@ export class Photoreal {
       const uniforms = {
         uDesat: { value: this.desaturate },
         uWash: { value: fieldTex ? this.fieldWash : 0 },
-        uDataWash: { value: this.grid ? this.dataWash : 0 },
+        uThreshold: { value: this.threshold },
+        uHasGrid: { value: this.grid ? 1 : 0 },
+        uEyeHeight: { value: this.eyeHeight },
+        uAgg: { value: this.agg },
         uField: { value: fieldTex || null },
         uFieldRect: {
           value: new THREE.Vector4(
@@ -792,12 +888,6 @@ export class Photoreal {
         uLutSize: { value: new THREE.Vector2(this.lutW, this.lutH) },
         uNBands: { value: this.nBands },
         uGroundY: { value: this.groundY },
-        // Whether the massing rasters exist at all. The cut's column test reads
-        // them directly rather than through uDataWash, which the viewer can
-        // slide to zero — and a cut that stopped cutting when you turned the
-        // tint down would be a baffling thing to debug.
-        uHasGrid: { value: this.grid ? 1 : 0 },
-        ...(this.o.cut ? this.o.cut.uniforms() : {}),
       };
       mat.userData.uniforms = uniforms;
       this._mats.add(mat);
@@ -818,7 +908,9 @@ export class Photoreal {
              varying vec3 vWorldPR;
              uniform float uDesat;
              uniform float uWash;
-             uniform float uDataWash;
+             uniform float uThreshold;
+             uniform float uHasGrid;
+             uniform float uEyeHeight;
              uniform sampler2D uField;
              uniform vec4 uFieldRect;
              uniform sampler2D uGrid;
@@ -826,53 +918,29 @@ export class Photoreal {
              uniform vec2 uGridSize;
              uniform sampler2D uParams;
              uniform sampler2D uLut;
+             uniform sampler2D uAgg;
              uniform vec2 uLutSize;
              uniform float uNBands;
              uniform float uGroundY;
-             uniform float uHasGrid;
-             ${CUT_GLSL}`)
-          /* ---- the cut: inside it, this building is not ours to draw
-           *
-           * See cut.js for why the two representations are separated rather
-           * than blended. Placed at `clipping_planes_fragment`, the first thing
-           * in the fragment main, for the same reason the prism side is: a
-           * fragment that is about to be thrown away should not first pay for
-           * the material's whole texture and lighting chain. It also puts the
-           * two halves of the cut in structurally the same place, which is the
-           * only way the claim that they are mirror images stays true.
-           *
-           * The test is a *column* test — is there a modelled building in this
-           * vertical column, and is this fragment above its pavement. It
-           * deliberately does not use the derivative normal the tint relies on:
-           * that normal is noise at coarse LOD, which costs the tint some
-           * speckle and would cost a discard a ragged silhouette.
-           *
-           * Terrain, roadway, vehicles and street trees are never cut. They are
-           * the one ground both representations stand on, and swapping them too
-           * would put a step at every boundary, because our own ground plane is
-           * flat at the datum while this layer stands on real terrain across a
-           * 26 m range. */
-          .replace('#include <clipping_planes_fragment>',
-            `#include <clipping_planes_fragment>
-             float cutSd = cutSigned( vWorldPR );
-             if ( uCutMode != 0 && cutSd > 0.0 && uHasGrid > 0.5 ) {
-               vec2 cCell = floor( vec2(
-                 ( vWorldPR.x - uGridRect.x ) / uGridRect.z,
-                 ( ( -vWorldPR.z ) - uGridRect.y ) / uGridRect.z ) );
-               if ( all( greaterThanEqual( cCell, vec2( 0.0 ) ) ) &&
-                    all( lessThan( cCell, uGridSize ) ) ) {
-                 vec4 cg = texture2D( uGrid, ( cCell + 0.5 ) / uGridSize );
-                 float cb = cg.r * 255.0 + cg.g * 255.0 * 256.0;
-                 if ( cb < 65535.0 ) {
-                   // Params .r is the building's ground elevation relative to
-                   // the scene datum. A 1.5 m sill above it clears the kerb, the
-                   // parked cars and the podium grille without ever clipping a
-                   // wall we mean to replace.
-                   vec4 cp = texture2D( uParams,
-                     vec2( 0.5, ( cb + 0.5 ) / uLutSize.y ) );
-                   if ( vWorldPR.y > cp.r + 1.5 ) discard;
-                 }
-               }
+
+             // Raster cell for a world point. The massing grid is indexed
+             // north-up, so its second axis runs along -z.
+             vec2 prCell( vec3 p ) {
+               return vec2( ( p.x - uGridRect.x ) / uGridRect.z,
+                            ( ( -p.z ) - uGridRect.y ) / uGridRect.z );
+             }
+
+             // Is there a modelled building standing in this raster column?
+             // Read on its own to test a fragment, and differenced across
+             // neighbours to recover which way a wall faces.
+             float prSolid( vec2 cell ) {
+               vec2 f = floor( cell );
+               if ( any( lessThan( f, vec2( 0.0 ) ) ) ||
+                    any( greaterThanEqual( f, uGridSize ) ) ) return 0.0;
+               vec4 g = texture2D( uGrid, ( f + 0.5 ) / uGridSize );
+               float b = g.r * 255.0 + g.g * 255.0 * 256.0;
+               float h = ( g.b * 255.0 + g.a * 255.0 * 256.0 ) * 0.1;
+               return ( b < 65535.0 && h > 2.0 ) ? 1.0 : 0.0;
              }`)
           .replace('#include <dithering_fragment>',
             `#include <dithering_fragment>
@@ -882,130 +950,261 @@ export class Photoreal {
 
                // Geometric normal from world-position derivatives. Google's
                // photoreal tiles are unlit and ship no normal attribute, so
-               // there is nothing to read; the derivative of the interpolated
-               // world position is the only normal available.
+               // the derivative of the interpolated world position is the only
+               // normal available. It is good enough to tell a wall from a
+               // roof, and — see the footprint gradient below — not nearly good
+               // enough to tell north-facing from north-east-facing.
                vec3 dPRx = dFdx( vWorldPR );
                vec3 dPRy = dFdy( vWorldPR );
                vec3 nPR = cross( dPRx, dPRy );
                float nlen = length( nPR );
                nPR = nlen > 1e-9 ? nPR / nlen : vec3( 0.0, 1.0, 0.0 );
                float horiz = abs( nPR.y );
-
-               // ---- look up the modelled facade field for this fragment
-               //
-               // Done before anything is altered, because how much of the
-               // photograph to keep depends on whether this surface is carrying
-               // data at all.
-               //
-               // This is the whole point of the layer. Rather than drawing our
-               // own prisms next to Google's buildings and letting the two
-               // shapes fight, the field is looked up per fragment and applied
-               // to whatever surface is actually there. The colour therefore
-               // lands on real setbacks, real cornices and real towers, and
-               // nothing can interpenetrate because there is only one set of
-               // geometry in the frame.
                float wall = 1.0 - smoothstep( 0.30, 0.62, horiz );
-               vec3 tinted = c;
-               float dataAmt = 0.0;
-               if ( uDataWash > 0.0 && wall > 0.001 ) {
-                 // Two probe depths, shallow first. A shallow probe keeps the
-                 // lookup on the right building where footprints are only metres
-                 // apart; a deeper one rescues the case where Google's wall sits
-                 // well outside ours. Taking the first hit rather than blending
-                 // avoids averaging two different buildings into a colour that
-                 // belongs to neither.
+
+               /* ---- the ladder: which encoding this altitude can actually read
+                *
+                * One encoding cannot serve every camera distance, and pretending
+                * otherwise is what made this layer unreadable from the air. At
+                * two metres a facade fills the frame and a per-band, per-
+                * orientation field is exactly the right resolution. At a
+                * kilometre a whole building is twenty pixels wide, the visible
+                * surface is mostly roof, and a field that resolves eight compass
+                * buckets per building is computing a distinction no pixel can
+                * hold.
+                *
+                * So the far view drops the facade lookup entirely and paints one
+                * flat colour per building on its roof, and the near view keeps
+                * the field. The weights crossfade rather than switch: a hard
+                * change of encoding at a threshold pops, and on a scene that is
+                * also streaming geometry a pop is indistinguishable from a bug.
+                * Overlapping smoothsteps are also why no hysteresis is needed —
+                * there is no discrete decision to oscillate.
+                */
+               /* The edges are set by where Google's mesh stops resolving a
+                * facade, which is a measurable distance rather than a taste.
+                *
+                * The finest level published here is 2.006 m of geometric error.
+                * Against a 3 px screen-space target that is only satisfied
+                * beyond roughly 900 m of slant range, so every surface nearer
+                * than that is already showing the best geometry that exists —
+                * and at 300 m those 2 m project to some ten pixels of visible
+                * melting. Measured live at two altitudes: climbing from 241 m
+                * to 443 m tripled the ground area in frame and drew only 44%
+                * more tiles, which is the renderer refining exactly as far as
+                * the pixel budget asks and no further, and running into the
+                * publisher's floor before it gets there.
+                *
+                * A per-band, per-orientation field painted onto that surface
+                * inherits every bit of the mush, and the viewer cannot tell
+                * whether the blobbiness is the data or the reconstruction. A
+                * flat colour cannot inherit it: there is no detail in it to
+                * lose. So the flat regime opens as soon as facades stop being
+                * trustworthy — around a hundred metres up — rather than at the
+                * altitude where they stop being visible. */
+               float wFar  = smoothstep( 90.0, 300.0, uEyeHeight );
+               float wNear = 1.0 - smoothstep( 25.0, 80.0, uEyeHeight );
+               float wMid  = clamp( 1.0 - wFar - wNear, 0.0, 1.0 );
+
+               // What the measurement contributes, kept apart from the
+               // photograph until the very end so the two can be combined by
+               // something other than a mix().
+               vec3 glow = vec3( 0.0 );
+               float paint = 0.0;
+
+               if ( uHasGrid > 0.5 ) {
+                 vec2 cellF = prCell( vWorldPR );
+
+                 /* Which building is this fragment part of.
+                  *
+                  * Two probe depths, shallow first, stepping back along the
+                  * normal so a wall lands inside its own footprint rather than
+                  * in the street. A shallow probe keeps the lookup on the right
+                  * building where footprints are metres apart; a deeper one
+                  * rescues the case where Google's wall sits well outside ours.
+                  * The step is scaled by the wall mask, so a roof probes down
+                  * at its own position and the same three lines serve both. */
                  float bidx = 65535.0;
-                 float hLocal = 0.0;
                  for ( int probeStep = 0; probeStep < 2; probeStep++ ) {
                    float depth = probeStep == 0 ? 2.5 : 6.0;
-                   vec3 probe = vWorldPR - nPR * depth;
-                   vec2 cell = floor( vec2(
-                     ( probe.x - uGridRect.x ) / uGridRect.z,
-                     ( ( -probe.z ) - uGridRect.y ) / uGridRect.z ) );
+                   vec2 cell = floor( prCell( vWorldPR - nPR * ( depth * wall ) ) );
                    if ( any( lessThan( cell, vec2( 0.0 ) ) ) ||
                         any( greaterThanEqual( cell, uGridSize ) ) ) continue;
                    vec4 gt = texture2D( uGrid, ( cell + 0.5 ) / uGridSize );
                    float b0 = gt.r * 255.0 + gt.g * 255.0 * 256.0;
                    float h0 = ( gt.b * 255.0 + gt.a * 255.0 * 256.0 ) * 0.1;
-                   if ( b0 < 65535.0 && h0 > 2.0 ) { bidx = b0; hLocal = h0; break; }
+                   if ( b0 < 65535.0 && h0 > 2.0 ) { bidx = b0; break; }
                  }
-                 // hLocal is metres of surface above local ground (the raster
-                 // stores decimetres; the 0.1 above converts). A 2 m floor
-                 // clears kerbs, cars and shrubs without excluding any wall.
-                 if ( bidx < 65535.0 && hLocal > 2.0 ) {
+
+                 if ( bidx < 65535.0 ) {
                    vec4 bp = texture2D( uParams,
                      vec2( 0.5, ( bidx + 0.5 ) / uLutSize.y ) );
                    float baseRel = bp.r;
                    float hWall = max( bp.g, 1.0 );
-                   float rel = ( vWorldPR.y - baseRel ) / hWall;
-                   if ( rel > -0.08 && rel < 1.12 ) {
-                     float band = clamp( floor( rel * uNBands ), 0.0, uNBands - 1.0 );
-                     // Azimuth of the outward normal, degrees clockwise from
-                     // north, in the scene frame where -Z is north.
-                     float az = degrees( atan( nPR.x, -nPR.z ) );
-                     az = mod( az + 360.0, 360.0 );
-                     float bucket = floor( mod( az + 22.5, 360.0 ) / 45.0 );
-                     float col = bucket * uNBands + band;
-                     vec4 heat = texture2D( uLut,
-                       vec2( ( col + 0.5 ) / uLutSize.x,
-                             ( bidx + 0.5 ) / uLutSize.y ) );
-                     // Alpha 0 marks a cell no panel ever contributed to —
-                     // a wall orientation this building does not have. Tinting
-                     // it would invent data.
-                     dataAmt = uDataWash * wall * heat.a;
-                     // Restore the surface's own light and shade by modulating
-                     // with its luminance. A straight mix() throws that away and
-                     // the wall goes flat; keeping it means a window reveal, a
-                     // cornice shadow and a sunlit spandrel all still read
-                     // through the tint.
-                     //
-                     // The floor was 0.45 against a gain of 1.6, which put every
-                     // luminance below about 0.06 on the same value — and a
-                     // masonry facade in canyon shade spends most of its area
-                     // down there. So the exact detail a photographic mesh is
-                     // brought in to provide was being flattened out again by
-                     // the tint that sits on top of it. A lower floor and a
-                     // wider gain spend more of the range on the dark end,
-                     // where the structure actually is.
-                     float shade = clamp( l * 1.9 + 0.24, 0.30, 1.45 );
-                     tinted = heat.rgb * shade;
+                   // Height above this building's own pavement. A 2 m sill
+                   // clears kerbs, parked cars and shrubs without excluding any
+                   // wall or roof we mean to paint.
+                   float above = vWorldPR.y - baseRel;
+
+                   /* ---- far: the city as marks rather than surfaces
+                    *
+                    * A roof is the one surface an aerial view resolves cleanly,
+                    * and under the old wall mask it was the one surface that
+                    * carried nothing at all — so most of the frame was untinted
+                    * photograph and the rest was a wash over foreshortened
+                    * flanks. One flat colour per building is the highest
+                    * legibility per pixel any encoding can reach, and it makes
+                    * the frame say "these eleven towers, not those" instead of
+                    * "the city is brownish".
+                    *
+                    * The colour comes from a table the scene fills from the same
+                    * ramp, shading and contrast curve it drew the geometry with.
+                    * Recomputing it here from a value would be a second
+                    * implementation of the ramp, and a second implementation
+                    * drifts. */
+                   if ( wFar > 0.001 && above > 2.0 ) {
+                     vec4 ag = texture2D( uAgg,
+                       vec2( 0.5, ( bidx + 0.5 ) / uLutSize.y ) );
+                     if ( ag.a > 0.0 ) {
+                       /* Every surface of the building, not only its roof.
+                        *
+                        * Roofs alone was the obvious reading of "buildings
+                        * become marks", and it is wrong for the view this
+                        * regime actually serves. The camera here is oblique:
+                        * most of what a building presents is flank, and marking
+                        * only the lid leaves the mark as a small cap floating on
+                        * an untouched tower. A mark is the whole silhouette.
+                        * One colour over roof and walls together also makes the
+                        * building read as a single object, which is the entire
+                        * claim the far regime is making about it.
+                        *
+                        * The threshold applies here exactly as it does to the
+                        * facade field. Without it every building the model
+                        * covers would be coloured, and colour that is
+                        * everywhere is the paper rather than the mark — which is
+                        * the failure this whole ladder exists to undo. */
+                       float tAgg = ( ag.a * 255.0 - 1.0 ) / 254.0;
+                       float overAgg = smoothstep( uThreshold,
+                                                   min( 1.0, uThreshold + 0.20 ),
+                                                   tAgg );
+                       float amt = wFar * overAgg;
+                       glow += ag.rgb * amt;
+                       paint = max( paint, amt );
+                     }
+                   }
+
+                   /* ---- near and mid: the facade field */
+                   float wallAmt = ( wNear + wMid ) * wall;
+                   if ( wallAmt > 0.001 && above > 2.0 ) {
+                     float rel = above / hWall;
+                     if ( rel > -0.08 && rel < 1.12 ) {
+                       float band = clamp( floor( rel * uNBands ), 0.0, uNBands - 1.0 );
+
+                       /* ---- which way this wall faces, from the footprint
+                        *
+                        * Not from nPR. That normal is the derivative of a soft,
+                        * coarse-LOD photogrammetric surface, and the field is
+                        * bucketed into 45 degree sectors — so a normal wobbling
+                        * by twenty degrees flips neighbouring fragments into
+                        * different buckets and a single flat wall comes out as
+                        * salt and pepper. The footprint does not wobble. The
+                        * massing raster's own gradient gives the outward normal
+                        * of the wall standing at this position, sampled three
+                        * cells out to clear the two-cell dilation the raster
+                        * carries, and it is constant across the whole face.
+                        *
+                        * The derivative normal stays as the fallback: deep
+                        * inside a footprint the solidity field is flat and has
+                        * no gradient to read, which is exactly where a wall
+                        * never is. */
+                       vec2 gxz = vec2(
+                         prSolid( cellF + vec2( 3.0, 0.0 ) )
+                           - prSolid( cellF - vec2( 3.0, 0.0 ) ),
+                         prSolid( cellF + vec2( 0.0, 3.0 ) )
+                           - prSolid( cellF - vec2( 0.0, 3.0 ) ) );
+                       vec3 nFace = nPR;
+                       if ( dot( gxz, gxz ) > 0.05 ) {
+                         // Grid y runs north, which is -z, so the outward
+                         // direction is (-dx, +dy) read back into world x,z.
+                         nFace = normalize( vec3( -gxz.x, 0.0, gxz.y ) );
+                       }
+
+                       float az = degrees( atan( nFace.x, -nFace.z ) );
+                       az = mod( az + 360.0, 360.0 );
+                       float bucket = floor( mod( az + 22.5, 360.0 ) / 45.0 );
+                       float col = bucket * uNBands + band;
+                       vec4 heat = texture2D( uLut,
+                         vec2( ( col + 0.5 ) / uLutSize.x,
+                               ( bidx + 0.5 ) / uLutSize.y ) );
+
+                       /* Alpha 0 marks a cell no panel ever contributed to — a
+                        * wall orientation this building does not have. Anything
+                        * else carries the cell's own normalised value, which is
+                        * what the threshold needs: the colour alone cannot say
+                        * how hot a surface is without re-deriving the ramp. */
+                       if ( heat.a > 0.0 ) {
+                         float t = ( heat.a * 255.0 - 1.0 ) / 254.0;
+                         float over = smoothstep( uThreshold,
+                                                  min( 1.0, uThreshold + 0.20 ), t );
+
+                         /* Luminance modulation, wide at street level and
+                          * gentle from the air.
+                          *
+                          * The old shader multiplied the heat colour by the
+                          * photograph's luminance outright, which threw away the
+                          * one property the ramp is built on — it is monotonic
+                          * in lightness, so lightness *is* the measurement.
+                          * Oblique photogrammetry is largely in its own baked
+                          * shadow, so that multiply pinned most of the frame at
+                          * the bottom of its clamp and two facades eight degrees
+                          * apart came out the same brown.
+                          *
+                          * Kept, but as a modulation rather than a gate, and
+                          * only as wide as the view can justify: at street
+                          * level a window reveal and a cornice shadow are the
+                          * reason a photographic mesh is here at all, and from
+                          * a few hundred metres they are below a pixel. */
+                         float depth = mix( 0.15, 0.45,
+                                            wNear / max( wNear + wMid, 1e-4 ) );
+                         float shade = mix( 1.0,
+                                            clamp( l * 2.2 + 0.15, 0.35, 1.5 ),
+                                            depth );
+                         float amt = wallAmt * over;
+                         glow += heat.rgb * ( amt * shade );
+                         paint = max( paint, amt );
+                       }
+                     }
                    }
                  }
                }
 
-               // ---- desaturate, but only where the data is going
-               //
-               // Pulling the whole frame toward grey is what lets an inferno
-               // ramp read against saturated photogrammetry. Applied
-               // indiscriminately it also drains the things that are not
-               // carrying data, and the worst victims are street trees: Google
-               // renders foliage as spiky geometry, and stripped of its green
-               // that geometry stops looking like a tree and starts looking
-               // like broken glass heaped along the kerb. Weighting the
-               // desaturation by how much tint this fragment is about to
-               // receive keeps the trees green, the vehicles coloured, and the
-               // walls neutral enough for the ramp to dominate.
-               float desatW = uDesat * mix( 0.25, 1.0, clamp( dataAmt * 2.0, 0.0, 1.0 ) );
-
-               /* A wall the model has nothing to say about is desaturated as
-                * hard as one it does, rather than as softly as a street tree.
+               /* ---- desaturate the photograph, then screen the measurement on
                 *
-                * The weighting above exists to protect foliage and vehicles,
-                * and it does that by leaving anything untinted at full colour.
-                * That is right for a plane tree and wrong for a tower: a
-                * hundred metres of saturated photographic facade standing among
-                * tinted neighbours reads as the layer having failed on that
-                * building, when what has actually happened is that the model
-                * does not cover it. Midtown has real cases — a footprint whose
-                * height the city records as a fifth of the building's, so the
-                * bands stop a third of the way up and the rest is raw
-                * photograph. Neutral says "outside the study"; saturated says
-                * "broken", and only one of those is true. */
-               float wallNoData = wall * ( 1.0 - clamp( dataAmt * 3.0, 0.0, 1.0 ) );
-               desatW = max( desatW, uDesat * wallNoData );
-
+                * Order matters: desaturating after the glow would drain the
+                * measurement along with the picture.
+                *
+                * The weighting is now almost flat, and the rule it replaces is
+                * worth recording. The old shader desaturated any wall the model
+                * did not cover as hard as one it did, so that neutral would read
+                * as "outside the study" rather than as "broken". That is right
+                * only while neutral is rare. Under a threshold most of the frame
+                * is deliberately left alone, so the same rule turned the whole
+                * city grey and took the photograph's one job — recognition —
+                * away from it. */
+               float desatW = uDesat * mix( 0.35, 1.0, clamp( paint * 1.5, 0.0, 1.0 ) );
                c = mix( c, vec3( l ), desatW );
-               c = mix( c, tinted, dataAmt );
+
+               /* Screen, not mix, and not a plain add.
+                *
+                * Photogrammetry is unlit baked albedo. A mix() replaces the
+                * picture with the measurement and a multiply fights the light
+                * already baked into it; adding sits on top and survives shade,
+                * which is the whole point. Screen is the add that cannot clip:
+                * it behaves like addition in the dark, where nearly all of this
+                * mesh lives, and rolls off at the top instead of burning a
+                * sunlit spandrel to flat white. */
+               glow = clamp( glow, 0.0, 1.0 );
+               c = 1.0 - ( 1.0 - c ) * ( 1.0 - glow );
 
                // ---- the measured field, washed onto roads and plazas
                if ( uWash > 0.0 ) {
@@ -1015,17 +1214,9 @@ export class Photoreal {
                  // clutter that belongs to no building still reads as part of
                  // the street.
                  float up = mix( 0.32, 1.0, smoothstep( 0.55, 0.85, horiz ) );
-                 // Height above the *road*, not above the scene datum.
-                 //
-                 // This read vWorldPR.y directly, which is height above y = 0 —
-                 // and y = 0 is the flat datum, not the ground. The photoreal
-                 // layer is the one place that distinction bites, because it is
-                 // the only place the scene stands on real terrain: Midtown
-                 // spans 0-26 m, so the same roadway that took the full wash
-                 // downtown took almost none of it on the high ground, and the
-                 // measured field simply faded out of the streets as you walked
-                 // north. uGroundY carries the local terrain height so the
-                 // falloff measures what it always meant to.
+                 // Height above the *road*, not above the scene datum: this
+                 // layer is the only place in the scene that stands on real
+                 // terrain, and Midtown spans 26 m of it.
                  float low = 1.0 - smoothstep( 6.0, 22.0, vWorldPR.y - uGroundY );
                  vec2 uv = vec2(
                    ( vWorldPR.x - uFieldRect.x ) / uFieldRect.z,
@@ -1033,21 +1224,8 @@ export class Photoreal {
                  if ( all( greaterThanEqual( uv, vec2( 0.0 ) ) ) &&
                       all( lessThanEqual( uv, vec2( 1.0 ) ) ) ) {
                    vec3 f = texture2D( uField, uv ).rgb;
-                   c = mix( c, f, uWash * up * low * ( 1.0 - dataAmt ) );
+                   c = mix( c, f, uWash * up * low * ( 1.0 - paint ) );
                  }
-               }
-
-               /* ---- the boundary, named rather than left to be inferred
-                *
-                * Drawn on every surviving surface within a feather of the
-                * boundary, terrain included, so the lens reads as a pool of
-                * light on the street and the section as a line ruled down an
-                * avenue. Without it the eye has to work out for itself where
-                * one representation stopped and the other began, and at a
-                * distance where both are dim that reading is not available. */
-               if ( uCutMode != 0 ) {
-                 c = mix( c, uCutRim,
-                          ( 1.0 - smoothstep( 0.0, uCutFeather, abs( cutSd ) ) ) * 0.7 );
                }
 
                gl_FragColor.rgb = c;
@@ -1094,11 +1272,29 @@ export class Photoreal {
     }
   }
 
+  /** Tell the shader how high the eye is, which is what picks the encoding.
+   *
+   * Unlike the ground height this cannot ride the 400 ms bookkeeping tick: the
+   * regime crossfade is a visible property of the frame, and updating it four
+   * hundred milliseconds late makes a zoom look like it is dragging a second
+   * image behind it. Gated on a metre of movement instead, which is far below
+   * the width of either crossfade band and keeps a stationary camera from
+   * rewriting a uniform in several hundred materials sixty times a second.
+   */
+  setEyeHeight(h) {
+    if (!Number.isFinite(h) || Math.abs(h - this.eyeHeight) < 1) return;
+    this.eyeHeight = h;
+    for (const mat of this._mats) {
+      const u = mat.userData.uniforms;
+      if (u && u.uEyeHeight) u.uEyeHeight.value = h;
+    }
+  }
+
   /** Live-adjust the two look controls without rebuilding the tileset. */
-  setLook({ desaturate, fieldWash, dataWash }) {
+  setLook({ desaturate, fieldWash, threshold }) {
     if (desaturate !== undefined) this.desaturate = desaturate;
     if (fieldWash !== undefined) this.fieldWash = fieldWash;
-    if (dataWash !== undefined) this.dataWash = dataWash;
+    if (threshold !== undefined) this.threshold = threshold;
     // Iterate the materials we patched rather than the scene graph: tiles are
     // streamed in and out constantly, and a material can be alive in the LRU
     // cache while detached from the group.
@@ -1107,22 +1303,7 @@ export class Photoreal {
       if (!u) continue;
       if (desaturate !== undefined) u.uDesat.value = desaturate;
       if (fieldWash !== undefined) u.uWash.value = fieldWash;
-      if (dataWash !== undefined) u.uDataWash.value = dataWash;
-    }
-  }
-
-  /** Push the cut's state into every material this layer has patched.
-   *
-   * Same iteration as setLook and for the same reason: tiles stream in and out
-   * constantly, and a material can be alive in the LRU cache while detached
-   * from the group, so the live set is the authority and the scene graph is
-   * not. Materials patched *after* this call pick the state up from
-   * `cut.uniforms()` at patch time, which is why that path exists.
-   */
-  setCut(cut) {
-    for (const mat of this._mats) {
-      const u = mat.userData.uniforms;
-      if (u) cut.writeTo(u);
+      if (threshold !== undefined) u.uThreshold.value = threshold;
     }
   }
 
@@ -1229,6 +1410,7 @@ export class Photoreal {
     // against last frame's viewpoint, which at walking speed means it is always
     // refining where the eye just was.
     this.o.camera.updateMatrixWorld();
+    this.setEyeHeight(this.o.camera.position.y - this.groundY);
     this.tiles.setResolutionFromRenderer(this.o.camera, this.o.renderer);
     this.tiles.update();
 

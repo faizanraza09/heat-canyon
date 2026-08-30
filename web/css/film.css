@@ -187,8 +187,15 @@
   /* Clear of the outermost expanding ring, so the label never sits inside it. */
   padding-left: 62px;
 }
+/* The dot is the label's claim about where the place is, so it has to sit on
+   the same pixel as the globe's own mark and not merely near it. Centring it on
+   the element's origin — rather than hanging it off the origin by its top-left
+   corner — is what makes that true: `_placeLabel` puts the origin on the
+   projected coordinate, and both translates here are what carry the dot's
+   centre, not its corner, onto it. */
 #film-marker i {
-  position: absolute; left: 0; top: 50%; width: 9px; height: 9px; margin-top: -4.5px;
+  position: absolute; left: 0; top: 50%; width: 9px; height: 9px;
+  transform: translate(-50%, -50%);
   border: 1px solid var(--accent); border-radius: 50%;
   box-shadow: 0 0 12px rgba(217, 84, 46, .8);
 }
