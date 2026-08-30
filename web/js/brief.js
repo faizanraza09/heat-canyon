@@ -1298,6 +1298,15 @@ export class Brief {
     if (capex) cash.push(['CAPITAL COST', this._rng(capex[0], capex[1], '$'), 'cost']);
     const en = pair(mo.energy_usd_yr);
     if (en) cash.push(['ENERGY SAVED, PER YEAR', this._rng(en[0], en[1], '$'), 'money']);
+    // The demand charge, which on SC-9 is usually the LARGER half of the saving
+    // and was missing from this grid for a while. Leaving it out did not just
+    // understate the case, it made the card fail to add up: simple payback is
+    // computed on energy + demand + LL97, so a reader dividing the capital cost
+    // by the two lines shown got several times the number printed beside them.
+    // economics.py keeps the two apart precisely so the interface can say which
+    // one is carrying a measure; this is the interface holding up its end.
+    const dm = pair(mo.demand_usd_yr);
+    if (dm) cash.push(['PEAK DEMAND AVOIDED, PER YEAR', this._rng(dm[0], dm[1], '$'), 'money']);
     const ll = pair(mo.ll97_usd_yr);
     if (ll) cash.push(['LL97 PENALTY AVOIDED', this._rng(ll[0], ll[1], '$'), 'money']);
     const co2 = pair(mo.carbon_t_yr);

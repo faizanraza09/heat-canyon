@@ -579,6 +579,10 @@ def _price_all(prescriptions, loads) -> int:
             p.money = EC.price(
                 measure_key=line,
                 area_m2=float(getattr(p, "area_m2", 0.0) or 0.0),
+                # Two of the capex bands are quoted per square metre of glass,
+                # not of wall; price() picks the denominator and says so in
+                # `basis` when this comes back zero.
+                glazed_m2=float(getattr(p, "glazed_m2", 0.0) or 0.0),
                 kwh_saved_yr=_magnitude(kwh),
                 kw_peak_saved=_magnitude(kw),
                 occupancy=loads.occupancy,

@@ -732,6 +732,27 @@ MEASURE_KEYS: tuple[str, ...] = (
 )
 
 
+#: The measures whose capex band is denominated in GLAZED area rather than in
+#: gross facade area, derived from the bands' own ``unit`` strings so the two
+#: can never drift apart.
+#:
+#: This distinction was silently lost for a while and it is worth saying why it
+#: matters. ``prescribe.py`` sizes a facade measure by the treated envelope
+#: area, which is the right denominator for a louvre, a coating or insulation —
+#: those are fitted to the wall. A glazing swap and a film are fitted to the
+#: glass, and the trade pricing behind both bands is quoted per square metre of
+#: glass. Multiplying a per-glass rate by a whole-facade area overstates the
+#: capex by 1/WWR: a third again at the 0.75 window-to-wall ratio of a curtain
+#: wall, and nearly three times over on a punched-window elevation at 0.35. On
+#: 560 3 Avenue it turned a $2.3M-$7.8M job into a $3.1M-$10.4M one and pushed
+#: the simple payback past eight centuries, which is how it surfaced.
+CAPEX_ON_GLAZED_AREA: frozenset[str] = frozenset(
+    key[len("capex_usd_m2_"):]
+    for key, c in CONSTANTS.items()
+    if key.startswith("capex_usd_m2_") and "glazed area" in c.unit
+)
+
+
 #: Public programmes a prescription can cite, by measure. These are citations,
 #: not numbers, and they carry no cost: the point of naming them is that a
 #: measure with a programme behind it has a different lead time and a different
@@ -866,6 +887,7 @@ def price(
     kw_peak_saved: float | tuple[float, float],
     occupancy: str | object,
     gross_floor_m2: float | None = None,
+    glazed_m2: float | None = None,
 ) -> Money:
     """Put a price on one measure on one building.
 
@@ -888,6 +910,14 @@ def price(
     without ``envelope.py`` being present. That is deliberate: the constants
     table is useful on its own and should not be held hostage to the rest of the
     decision layer building.
+
+    ``area_m2`` is the treated envelope area and is the denominator for every
+    band except the two in ``CAPEX_ON_GLAZED_AREA``, which are quoted per square
+    metre of glass and take ``glazed_m2`` instead. Passing ``glazed_m2`` for a
+    measure priced on facade area is harmless — it is ignored. Omitting it for
+    one priced on glass is not harmless, so the fallback to ``area_m2`` says so
+    in ``basis`` rather than quietly overstating the job by 1/WWR; a caller that
+    has the glazed area and does not pass it will see the caveat in the brief.
     """
     if measure_key not in MEASURE_KEYS:
         raise KeyError(
@@ -928,7 +958,19 @@ def price(
     used.append(cap_key)
     cap = float(CONSTANTS[cap_key].pair[0])
 
-    capex = _mul(area, take(f"capex_usd_m2_{measure_key}"))
+    # The denominator the band is actually quoted in. See CAPEX_ON_GLAZED_AREA.
+    capex_area, capex_area_note = area, ""
+    if measure_key in CAPEX_ON_GLAZED_AREA:
+        if glazed_m2 is not None and float(glazed_m2) > 0.0:
+            capex_area = _pair(float(glazed_m2))
+        else:
+            capex_area_note = (
+                "; capex priced on gross facade area because no glazed area was "
+                "supplied, and this band is quoted per square metre of glass, so "
+                "the capital cost is an over-estimate by one over the "
+                "window-to-wall ratio"
+            )
+    capex = _mul(capex_area, take(f"capex_usd_m2_{measure_key}"))
     life = take(f"measure_life_years_{measure_key}")
     rate = take("discount_rate")
 
@@ -954,6 +996,7 @@ def price(
         f"assumed: priced from the economics constants table; "
         f"oldest constant as of {oldest}; "
         f"{len(unverified)} of {len(set(used))} constants used are unverified"
+        f"{capex_area_note}"
     )
 
     return Money(

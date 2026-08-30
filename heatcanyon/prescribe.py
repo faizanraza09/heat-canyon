@@ -303,6 +303,11 @@ class Prescription:
     also_consider: list[str]
     confidence: str                  # "modelled" | "assumed"
     lead_time: str                   # "this season" | "one year" | "capital cycle"
+    #: Glass within ``area_m2``, for the two capex bands in ``economics.py``
+    #: that are quoted per square metre of glass rather than of wall. Defaulted
+    #: rather than required because a roof or a canopy has no glazed area to
+    #: report and neither is priced on one.
+    glazed_m2: float = 0.0
     effect: Effect | None = None
     effect_note: str = ""
     money: "Money | None" = None
@@ -325,6 +330,7 @@ class Prescription:
             "faces": list(self.faces), "floors": list(self.floors),
             "bands": list(self.bands), "device": self.device,
             "geometry": dict(self.geometry), "area_m2": self.area_m2,
+            "glazed_m2": self.glazed_m2,
             "why": self.why, "effect": eff, "effect_note": self.effect_note,
             "winter_cost": self.winter_cost, "programme": list(self.programme),
             "does_not_fix": self.does_not_fix,
@@ -964,6 +970,10 @@ class _Pick:
     area_m2: float
     governing_metric: float      # larger wins the merged geometry
     why: tuple[tuple[str, str], ...]   # the reasoning, in labelled parts
+    #: Glass within ``area_m2``. Zero on the measures that have no facade to
+    #: read it from (roof, canopy) and on the floors where the model reports
+    #: none; ``economics.price`` falls back to ``area_m2`` and says that it did.
+    glazed_m2: float = 0.0
 
     @property
     def why_floor(self) -> str:
@@ -1033,6 +1043,25 @@ def _treated_faces(fl: Any, term: str) -> list[Any]:
 
 def _face_area(faces: Iterable[Any]) -> float:
     return round(sum(_face_attr(f, "area_m2") for f in faces), 1)
+
+
+def _face_glazed(faces: Iterable[Any]) -> float:
+    """The glass in those faces, which is not the same denominator as the wall.
+
+    ``FaceLoad`` carries ``glazed_m2`` beside ``area_m2`` because ``loads.py``
+    needs them apart — the solar term runs on the glass and the conduction term
+    on both. The measure schedule needs them apart for a different reason: two
+    of the capex bands in ``economics.py`` are quoted per square metre of GLASS,
+    and sizing a glazing swap or a film by the whole elevation prices window
+    units for the spandrel as well.
+
+    ``FaceLoad.glazed_m2`` is reported at the assembly's HIGH window-to-wall
+    corner, not its midpoint, which is the conservative end for a capital cost:
+    it buys more glass than the low corner would. Taking the low corner here to
+    narrow the capex band would be reading the assembly's uncertainty as a
+    discount.
+    """
+    return round(sum(_face_attr(f, "glazed_m2") for f in faces), 1)
 
 
 def _peak_hour(fl: Any, faces: Sequence[Any]) -> int:
@@ -1132,6 +1161,7 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                 grp = sorted(by_device[dev], key=lambda f: str(getattr(f, "compass", "")))
                 gnames = tuple(str(getattr(f, "compass", "")) for f in grp)
                 garea = _face_area(grp)
+                gglazed = _face_glazed(grp)
                 geo = dict(geo_by_device[dev])
 
                 key = _measure_for_device(dev)
@@ -1190,7 +1220,7 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
 
                 picks.append(_Pick(
                     key=key, faces=gnames, device=dev, floor=floor, band=band,
-                    geometry=geo, area_m2=garea,
+                    geometry=geo, area_m2=garea, glazed_m2=gglazed,
                     governing_metric=_governing(geo),
                     why=_why(
                         ("Where the heat is", attrib),
@@ -1214,7 +1244,7 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
             picks.append(_Pick(
                 key="blinds_policy", faces=names, device="internal",
                 floor=floor, band=band, geometry={}, area_m2=_face_area(faces),
-                governing_metric=0.0,
+                glazed_m2=_face_glazed(faces), governing_metric=0.0,
                 why=_why(
                     ("Where the heat is", attrib),
                     ("Why now", (
@@ -1567,6 +1597,7 @@ def _merge(picks: Sequence[_Pick]) -> list[dict]:
                 "floors": (lo, hi), "bands": (bands[0], bands[-1]),
                 "geometry": dict(gov.geometry),
                 "area_m2": round(sum(p.area_m2 for p in run), 1),
+                "glazed_m2": round(sum(p.glazed_m2 for p in run), 1),
                 "why": gov.why_floor,
                 "why_parts": [list(x) for x in gov.why],
                 "n_floors": len(run),
@@ -1914,6 +1945,7 @@ def for_building(
             device=g["device"],
             geometry=g["geometry"],
             area_m2=g["area_m2"],
+            glazed_m2=g.get("glazed_m2", 0.0),
             why=g["why"],
             why_parts=[tuple(x) for x in g.get("why_parts", [])],
             winter_cost=fam.winter_cost,
