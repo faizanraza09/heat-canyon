@@ -51,6 +51,7 @@
 
 import * as THREE from 'three';
 import { buildStory } from './story.js';
+import { place as placeSpot } from './spot.js';
 import { Narrator } from './voice.js';
 import { RAMPS, css } from './colors.js';
 
@@ -1681,6 +1682,7 @@ export class Film {
     if (!this.paused) this.t = (now - this.t0) / 1000;
     this._advance();
     this._animate(this.paused ? 0 : dt);
+    this._placeSpot();
     this._paintTransport();
     if (this.renderGlobe !== false) this.renderer.render(this.scene, this.camera);
     this.raf = requestAnimationFrame(this._loop);
@@ -1800,6 +1802,23 @@ export class Film {
      * and the caption for that step is already on screen saying what should be
      * happening — which is also how you find out which one broke.
      */
+    /* And it lights what it is talking about.
+     *
+     * From chapter three the captions name a panel every few seconds — the
+     * floor schedule, the layer list, the ranking, the programme — and a
+     * caption alone cannot point. This is the onboarding tour's device, on the
+     * tour's own geometry (spot.js), because a viewer who has met one has met
+     * the other: the named thing is lit and everything else steps back.
+     *
+     * `spot` is applied before `act` deliberately, so a beat that opens a panel
+     * and lights part of it does not light the old panel for a frame first.
+     * `_followSpot` then keeps it true, because most of what it points at is
+     * arriving: a document scrolling to a section, a console streaming, a panel
+     * still sliding in.
+     */
+    this._spot = b.spot || null;
+    this._placeSpot();
+
     if (b.act && this.actx) {
       try { b.act(this.actx); }
       catch (e) { console.warn(`film: beat ${i} (${b.chapter}) could not act:`, e); }
@@ -1809,9 +1828,28 @@ export class Film {
     // the caption, the chapter mark and the transport bar clearing the frame.
     if (i === beats.length - 1 && !this._closing) {
       this._closing = true;
+      this._spot = null;
+      this._placeSpot();
       this.root.classList.add('closing');
       if (!this._revealed) { this._revealed = true; this.hooks.onReveal?.(); }
     }
+  }
+
+  /** Put the highlight over whatever the current beat named, or take it away.
+   *
+   *  Called every frame from the loop rather than once per beat: nearly
+   *  everything it points at is still moving when the beat starts. Cheap,
+   *  because `place` writes only when the box has actually changed.
+   */
+  _placeSpot() {
+    const el = $('film-spot');
+    if (!el) return;
+    if (!this._spot || !this._cityPhase) { el.hidden = true; return; }
+    const box = placeSpot(el, this._spot);
+    // A target that resolves to nothing on screen hides the highlight, which
+    // takes the dim with it. An undimmed frame with nothing lit reads as "no
+    // particular thing"; a dimmed one with the hole off-screen reads as broken.
+    if (!box) el.hidden = true;
   }
 
   /** The descent is over: give the application its camera back.

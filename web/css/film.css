@@ -406,3 +406,34 @@ body:has(#brief:not([hidden])) #film.overcity #film-chaptercard,
 body:has(#analyst:not([hidden])) #film.overcity #film-chaptercard {
   opacity: 0;
 }
+
+/* ------------------------------------------------------- the walkthrough's
+   highlight
+
+   The same device the onboarding tour uses, for the same reason and with the
+   same geometry (js/spot.js): a 9999px box-shadow paints the dim, so the lit
+   region is a hole rather than a cut-out, and it glides from one panel to the
+   next in a single transition.
+
+   Two differences from the tour. The dim is lighter — the tour is instruction
+   and can afford to bury everything else, the film is a shot and has to stay
+   readable — and there is no card or arrow, because the film already has a
+   caption and a second pointer would be two things saying one thing.        */
+
+#film-spot {
+  position: fixed; pointer-events: none; z-index: 4;
+  border-radius: var(--r2);
+  box-shadow:
+    0 0 0 9999px rgba(10, 9, 8, .58),
+    0 0 0 1px rgba(217, 84, 46, .55),
+    0 0 30px 3px rgba(217, 84, 46, .16);
+  transition:
+    left .5s var(--ease), top .5s var(--ease),
+    width .5s var(--ease), height .5s var(--ease),
+    opacity .35s ease;
+}
+#film-spot[hidden] { display: none; }
+
+/* The caption and the transport bar live above the dim; the ticker does not,
+   because over the city it is already switched off. */
+#film.overcity #film-hud { z-index: 6; }

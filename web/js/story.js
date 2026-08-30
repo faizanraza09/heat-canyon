@@ -412,6 +412,7 @@ export function buildStory(data, globe) {
      */
     {
       chapter: 'III', title: 'One building', phase: 'city', seconds: 5.9,
+      spot: '#selcard',
       text: `Take this one. ${hero.addr}. ${hero.floors} floors, ${hero.year}, `
         + `${hero.units} homes.`,
       say: `Take this one. Seven forty-seven Second Avenue. ${Words(hero.floors)} floors, `
@@ -434,6 +435,13 @@ export function buildStory(data, globe) {
     },
     {
       chapter: 'III', phase: 'city', seconds: 6.3,
+      // No highlight. The subject is the building's banding, which is geometry
+      // in the model rather than a control — and the colour legend, the only
+      // thing on the panel that touches it, sits below the fold of the left
+      // rail at this point, so the clamp hides it and the frame just dims.
+      // The beats either side of this one are about the model too and light
+      // nothing, which is the honest answer: a highlight that points at the
+      // wrong thing is worse than none.
       text: `${Words(m.bands)} height bands, one for every three storeys, `
         + 'and a separate answer on every face.',
     },
@@ -529,6 +537,7 @@ export function buildStory(data, globe) {
     },
     {
       chapter: 'III', phase: 'city', seconds: 7.5,
+      spot: '#brief-doc .brf-sec:nth-of-type(3) .brf-h',
       text: 'Then floor by floor. Surface temperature, what it costs to hold '
         + '24 inside, hours a year it fails.',
       say: 'Then floor by floor. Surface temperature, what it costs to hold '
@@ -621,6 +630,7 @@ export function buildStory(data, globe) {
     },
     {
       chapter: 'IV', phase: 'city', seconds: 5.9,
+      spot: '#layers',
       text: `${Words(LAYERS.length)} layers. Surface temperature, sun and shade, `
         + `hours above ${r0(m.event.threshold_c)}, the longest unbroken run.`,
       say: `${Words(LAYERS.length)} layers. Surface temperature, sun and shade, `
@@ -629,6 +639,7 @@ export function buildStory(data, globe) {
     },
     {
       chapter: 'IV', phase: 'city', seconds: 5.6,
+      spot: '#time',
       text: 'Any hour of any day. Or a month, a season, the whole year.',
       act: ({ ui }) => { ui.setLayer('exceedance'); ui.play?.(); },
     },
@@ -646,6 +657,7 @@ export function buildStory(data, globe) {
     },
     {
       chapter: 'IV', phase: 'city', seconds: 6.3,
+      spot: '#tab-whatif',
       text: 'Change something and it solves again. Cool roofs, trees, a coating. '
         + 'It re-runs the physics.',
       act: ({ ui }) => {
@@ -696,8 +708,8 @@ export function buildStory(data, globe) {
     },
     {
       chapter: 'IV', phase: 'city', seconds: 4.8,
+      spot: '#pf-win',
       text: 'Every cost carries a range, because tariffs and capex are assumptions.',
-      act: ({ ui }) => { ui.closePortfolio(); },
     },
 
     /* ------------------------------------------- V. ask it (4 × , 22.0 s)
@@ -726,8 +738,12 @@ export function buildStory(data, globe) {
      */
     {
       chapter: 'V', title: 'Ask it', phase: 'city', seconds: 4.6,
+      spot: '#analyst-win',
       text: 'And you can ask it questions.',
-      act: ({ ui }) => { ui.replayAnalyst(ANALYST_RUN, ANALYST_QUESTION); },
+      act: ({ ui }) => {
+        ui.closePortfolio();
+        ui.replayAnalyst(ANALYST_RUN, ANALYST_QUESTION);
+      },
     },
     {
       chapter: 'V', phase: 'city', seconds: 6.7,

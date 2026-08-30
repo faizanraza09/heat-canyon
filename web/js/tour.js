@@ -31,6 +31,8 @@
 
 const SEEN_KEY = 'hc.tour.v1';
 
+import { boxOf, targetsOf } from './spot.js';
+
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
   const n = document.createElement(tag);
@@ -186,7 +188,7 @@ const STEPS = [
     // spotlight the right half of one column.
     tab: 'diagnose',
     // No explicit guard needed, and adding one would have been dead code:
-    // `_targets` already rejects a node that is `hidden` or inside something
+    // `targetsOf` already rejects a node that is `hidden` or inside something
     // hidden, and `#tab-diagnose` stays hidden until its module mounts. So on a
     // build without the decision layer this step drops itself, which is exactly
     // the behaviour the missing-target rule was written for.
@@ -443,64 +445,18 @@ export class Tour {
   /** Resolve a step's target to a single element, or null. Steps may name
    *  several (`['#layers', '.lblock']`) and get the union of their boxes. */
   _target(s) {
-    const list = this._targets(s);
+    const list = targetsOf(s.target);
     return list[0] || null;
   }
 
-  _targets(s) {
-    if (!s.target) return [];
-    const one = (t) => {
-      const n = typeof t === 'function' ? t() : document.querySelector(t);
-      if (!n) return null;
-      if (n.hidden || n.closest('[hidden]')) return null;
-      const r = n.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) return null;
-      return n;
-    };
-    return (Array.isArray(s.target) ? s.target : [s.target]).map(one).filter(Boolean);
-  }
-
-  /** Union of a step's target boxes, in viewport coordinates, with padding.
-   *
-   *  Clipped to whatever scrolls around them, so a control near the bottom of
-   *  the left rail's scrolling body gets a highlight that stops at the panel
-   *  edge instead of one that runs off past it. If the clip leaves nothing —
-   *  the target is scrolled clean out of view and the smooth scroll has not
-   *  arrived yet — the unclipped box stands, and the next frame corrects it.
-   */
+  /** The box to light for a step, or null if there is nothing on screen to
+   *  light. Delegated to spot.js so the film's walkthrough highlights the same
+   *  way, with the same clipping and the same refusal to dim the whole screen
+   *  around a hole that is off it. */
   _box(s) {
-    const ns = this._targets(s);
-    if (!ns.length) return null;
-    let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
-    for (const n of ns) {
-      const q = n.getBoundingClientRect();
-      l = Math.min(l, q.left); t = Math.min(t, q.top);
-      r = Math.max(r, q.right); b = Math.max(b, q.bottom);
-    }
-    const c = this._clipRect(ns[0]);
-    if (c) {
-      const cl = Math.max(l, c.left), ct = Math.max(t, c.top);
-      const cr = Math.min(r, c.right), cb = Math.min(b, c.bottom);
-      if (cr - cl > 8 && cb - ct > 8) { l = cl; t = ct; r = cr; b = cb; }
-    }
-    const p = 8;
-    return {
-      left: Math.max(2, l - p), top: Math.max(2, t - p),
-      width: Math.min(window.innerWidth - 4, r - l + p * 2),
-      height: Math.min(window.innerHeight - 4, b - t + p * 2),
-    };
+    return boxOf(s.target);
   }
 
-  /** The visible rect of the nearest ancestor that clips its content. */
-  _clipRect(node) {
-    for (let n = node.parentElement; n && n !== document.body; n = n.parentElement) {
-      const o = getComputedStyle(n);
-      if (/(auto|scroll|hidden)/.test(o.overflowY + o.overflowX)) {
-        return n.getBoundingClientRect();
-      }
-    }
-    return null;
-  }
 
   /* ----------------------------------------------------------------- chrome */
 

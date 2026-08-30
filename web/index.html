@@ -326,6 +326,12 @@
        once the film ends.                                                    -->
   <div id="film" hidden>
     <canvas id="film-gl"></canvas>
+    <!-- The walkthrough's highlight. Same geometry and same dim as the tour's
+         (js/spot.js), because it is doing the same job: from chapter three the
+         captions name a panel every few seconds, and "the floor schedule" is
+         only a phrase until the floor schedule is the lit thing on screen. It
+         sits under the HUD so captions and the transport bar stay bright. -->
+    <div id="film-spot" hidden></div>
     <div id="film-vignette"></div>
     <div id="film-grain"></div>
     <div id="film-flash"></div>
