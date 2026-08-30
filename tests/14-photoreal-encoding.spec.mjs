@@ -209,13 +209,17 @@ test('the aggregate is each building\'s peak, never its mean',
        * cell mixes a hot band with a cooler one, which is most of them. Only
        * the inequality is a contract; the excess is the averaging showing
        * through, and is measured here rather than forbidden. */
+      /* aggPeak holds the raw peak, on the same domain the facade table uses.
+       * aggBuf's alpha holds that peak *after* the across-buildings contrast
+       * stretch, which is a different scale by design — so the two halves of
+       * this contract have to be checked against different things. */
       const lut = pr.lut.image.data;
       const wCells = pr.lutW;
-      const agg = pr.aggBuf;
+      const agg = pr.aggBuf, peak = pr.aggPeak;
       let checked = 0, violations = 0, strictlyAbove = 0;
+      const pairs = [];
       for (let b = 0; b < pr.lutH; b++) {
-        const a = agg[b * 4 + 3];
-        if (a === 0) continue;
+        if (agg[b * 4 + 3] === 0) continue;
         let rowMax = 0;
         for (let x = 0; x < wCells; x++) {
           const al = lut[((b * wCells) + x) * 4 + 3];
@@ -223,13 +227,24 @@ test('the aggregate is each building\'s peak, never its mean',
         }
         if (rowMax === 0) continue;
         checked++;
-        // Both are 1 + 254t on the same domain, so they are directly
-        // comparable. One level of slack for the two roundings.
-        if (a < rowMax - 1) violations++;
-        if (a > rowMax + 1) strictlyAbove++;
+        // Raw peak against the hottest cell mean, both as 1 + 254t.
+        const rawByte = 1 + Math.min(254, Math.round(peak[b] * 254));
+        if (rawByte < rowMax - 1) violations++;
+        if (rawByte > rowMax + 1) strictlyAbove++;
+        pairs.push([peak[b], agg[b * 4 + 3]]);
       }
+
+      // Does the stretch actually spend the ramp, and does it preserve order?
+      pairs.sort((x, y) => x[0] - y[0]);
+      let inversions = 0;
+      for (let i = 1; i < pairs.length; i++) if (pairs[i][1] < pairs[i - 1][1]) inversions++;
+      const alphas = pairs.map((x) => x[1]);
+      const stretchedSpan = Math.max(...alphas) - Math.min(...alphas);
+      const rawSpan = 254 * (pairs[pairs.length - 1][0] - pairs[0][0]);
+
       pr.dispose();
-      return { checked, violations, strictlyAbove };
+      return { checked, violations, strictlyAbove, inversions,
+               stretchedSpan, rawSpan: Math.round(rawSpan) };
     });
 
     expect(out.checked).toBeGreaterThan(500);
@@ -249,4 +264,18 @@ test('the aggregate is each building\'s peak, never its mean',
     // legitimately. A tenth is a floor with real headroom under that.
     expect(out.strictlyAbove, 'peaks sit above cell means, so a max was taken first')
       .toBeGreaterThan(out.checked * 0.1);
+
+    /* And the far regime's scale is the city's own, not the panel domain's.
+     *
+     * This is the assertion that would have caught the flat cream city: on the
+     * peak hour every building's peak sits between 0.77 and 0.92 of the panel
+     * domain, so an unstretched aggregate spends about a seventh of the ramp on
+     * the whole of Midtown and every building comes out the same colour. The
+     * stretch has to widen that materially while leaving the ranking alone. */
+    expect(out.inversions, 'the stretch is monotonic, so it cannot reorder buildings')
+      .toBe(0);
+    expect(out.stretchedSpan, 'the stretched aggregate spends most of the ramp')
+      .toBeGreaterThan(230);
+    expect(out.stretchedSpan, 'and it is a real widening of the raw spread')
+      .toBeGreaterThan(out.rawSpan * 1.5);
   });

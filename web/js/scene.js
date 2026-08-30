@@ -2194,13 +2194,55 @@ export class Scene {
    */
   _commitAggregate(pr, f) {
     const buf = pr.aggBuf, peak = pr.aggPeak;
+
+    /* Stretched across the buildings, not against the panel domain.
+     *
+     * This is the difference between a choropleth that says something and one
+     * that is a single flat colour over the whole city, and it was measured
+     * rather than guessed. On the peak hour of the surface layer, the peak
+     * facade value of 5,294 buildings spans 0.767 to 0.921 on the panel domain,
+     * with the middle half inside 0.855 to 0.883. The panel domain is set by the
+     * range of *panels* — which includes every shaded low band on every north
+     * wall — and the buildings, taken at their peaks, all sit in a narrow strip
+     * near the top of it. Rendering that strip through the full ramp puts every
+     * building in the same pale cream and the far view says nothing at all.
+     *
+     * Switching statistic does not help: the mean over a building's facades
+     * spans 0.061 and the mean of its hottest face spans 0.116, both narrower
+     * than the peak's 0.154. Nothing about the choice of aggregate is the
+     * problem. The scale is.
+     *
+     * So the far regime ranks buildings against each other, on robust
+     * percentiles of the city's own distribution, exactly as the air layer is
+     * already contrast-stretched to its own hour. Two consequences worth being
+     * explicit about: the colour here is a position in the city, not a reading
+     * off the legend beside it, and the threshold slider therefore becomes
+     * "show me the hottest such-and-such per cent", which is the more useful
+     * control at this altitude anyway.
+     */
+    const vals = [];
+    for (let i = 0, n = peak.length; i < n; i++) if (peak[i] >= 0) vals.push(peak[i]);
+    let lo = 0, hi = 1;
+    if (vals.length > 20) {
+      vals.sort((a, b) => a - b);
+      lo = vals[Math.floor(vals.length * 0.02)];
+      hi = vals[Math.floor(vals.length * 0.98)];
+    }
+    // A city where every building agrees is a real possibility — one hour of one
+    // annual layer could be flat — and stretching it would manufacture contrast
+    // out of rounding noise. Fall back to the honest, undiscriminating scale.
+    const span = hi - lo;
+    const stretch = span > 1e-3 ? (t) => Math.min(1, Math.max(0, (t - lo) / span))
+                                : (t) => t;
+
     for (let i = 0, n = peak.length; i < n; i++) {
       const o = i * 4;
       const t = peak[i];
       if (!(t >= 0)) { buf[o + 3] = 0; continue; }
-      const c = f(t);
+      const st = stretch(t);
+      const c = f(st);
       buf[o] = c[0]; buf[o + 1] = c[1]; buf[o + 2] = c[2];
-      buf[o + 3] = 1 + Math.min(254, Math.round(t * 254));
+      buf[o + 3] = 1 + Math.min(254, Math.round(st * 254));
     }
     pr.commitAgg();
   }
