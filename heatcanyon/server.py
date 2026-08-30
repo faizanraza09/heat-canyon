@@ -89,7 +89,20 @@ def dataset():
 
 
 class Question(BaseModel):
-    question: str = Field(min_length=3, max_length=4000)
+    # One character, not three. The floor was three, and the first thing anyone
+    # types into a console with a text box in it is "hi" — two characters, so
+    # the analyst's opening move was a 422 raised by Pydantic before the
+    # endpoint ran, which the console could only render as
+    # "Could not start: [object Object]". A guard whose only observed catch is
+    # the greeting people actually send is not guarding anything.
+    #
+    # What it was standing in for is spend, and spend is bounded where it can
+    # actually be bounded: HEATCANYON_AGENT_BUDGET_USD caps the turn,
+    # TASK_BUDGET_TOKENS gives the model a countdown it can see, and
+    # SESSION_BUDGET_USD caps the process across every visitor. A character
+    # count never bounded any of that — "hello there" was always free to cost
+    # a dollar fifty.
+    question: str = Field(min_length=1, max_length=4000)
     resume: str | None = None
 
 

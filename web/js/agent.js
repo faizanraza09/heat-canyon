@@ -139,6 +139,39 @@ function working(name) {
 /* Calls that are plumbing rather than evidence, and are kept off the record. */
 const UNLOGGED = new Set(['ToolSearch', 'TodoWrite']);
 
+/* What the server actually said, as a sentence.
+ *
+ * FastAPI's `detail` is two different shapes and the console only ever handled
+ * one. An `HTTPException` puts a STRING there — 503 when the agent is switched
+ * off, 402 when the session budget is gone — but a 422 is raised by Pydantic
+ * before the endpoint runs at all, and its `detail` is a LIST OF OBJECTS, one
+ * per field that failed. `new Error(j.detail)` stringified that list, so the
+ * console's single visible failure mode read
+ *
+ *     Could not start: [object Object]
+ *
+ * which names neither the field nor the rule and sends you to the server logs
+ * for a request that never reached the server's code.
+ *
+ * Measured: asking the analyst "hi" is two characters against the
+ * three-character floor on `Question.question`, and that is the whole of what
+ * the console could say about it.
+ */
+function detailOf(j, status) {
+  const d = j?.detail;
+  if (typeof d === 'string' && d) return d;
+  if (Array.isArray(d) && d.length) {
+    // `loc` is ['body', 'question']; the last element is the field, and naming
+    // it is most of the difference between a usable message and a shrug.
+    return d.map((e) => {
+      const field = Array.isArray(e.loc) ? e.loc[e.loc.length - 1] : null;
+      const msg = e.msg || e.type || 'was not acceptable';
+      return field ? `${field}: ${msg}` : msg;
+    }).join('; ');
+  }
+  return `HTTP ${status}`;
+}
+
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
   const n = document.createElement(tag);
@@ -504,8 +537,11 @@ export class AgentConsole {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, resume: this.sessionId }),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+      // A body that is not JSON is a real case here — a proxy timing out in
+      // front of Cloud Run answers in HTML — and letting `json()` throw put the
+      // parser's complaint on screen in place of the status that explains it.
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(detailOf(j, r.status));
       this.runId = j.run_id;
       status.textContent = j.state === 'queued'
         ? `queued behind ${j.ahead_of_you} other question(s)…` : 'working…';
