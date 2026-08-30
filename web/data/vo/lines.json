@@ -623,6 +623,14 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "4e2ca812db2ae5e372fa": {
+  "text": "Give it a budget and it spends it. Fifty-one million dollars, eighty-eight buildings.",
+  "chars": 85,
+  "seconds": 5.642,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "50580230f686a11a300c": {
   "text": "And if the panels don't cover it, you can just ask. This owner wants to insulate his wall.",
   "chars": 90,
@@ -1327,6 +1335,14 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "acb4004a3b4e00a88dc4": {
+  "text": "Change something and it solves again. Cool roofs, trees, a coating.",
+  "chars": 67,
+  "seconds": 4.389,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "adaef01b11f0a3bf5f3e": {
   "text": "The usual heat map stops at one number per block, taken at head height.",
   "chars": 71,
@@ -1916,6 +1932,14 @@
   "chars": 86,
   "seconds": 7.105,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "ffe8928616617c2eccff": {
+  "text": "And what that bought. One point nine million hours of heat nobody sits through.",
+  "chars": 79,
+  "seconds": 5.303,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  }

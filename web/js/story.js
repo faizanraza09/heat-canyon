@@ -1238,9 +1238,16 @@ export function buildStory(data, globe, getUI = () => null) {
        * a dollar amount without saying what the dollars were for.
        *
        * `:has()` picks the grid that contains it: capital cost, energy saved,
-       * penalty avoided, net present value, each with its label. 720 by 91,
-       * which is a region a viewer can land on, and it is what "it prices the
-       * job" actually means — not one number, the costing.
+       * peak demand avoided, penalty avoided, carbon avoided, simple payback,
+       * net present value, each with its label. 720 by 104, which is a region a
+       * viewer can land on, and it is what "it prices the job" actually means —
+       * not one number, the costing.
+       *
+       * Seven tiles and 104 tall since the demand charge was given a tile of
+       * its own; it was 720 by 91 over four when this spot was chosen. The grid
+       * is `auto-fit`, so it reflows rather than overflowing and the spot needs
+       * no adjusting — but the figure above is measured, so it is restated
+       * rather than left describing a grid that no longer exists.
        */
       spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-facts:has(.brf-cost)',
       act: ({ ui }) => {
@@ -1382,7 +1389,13 @@ export function buildStory(data, globe, getUI = () => null) {
        * portfolio.json. See Portfolio.programme(): the stored allocation and the
        * panel's own solver disagree by design, and quoting the first over a
        * picture of the second had the film saying "$2 million, 20 buildings, 33
-       * measures" while the rail beside it read $57M, 91 and 292. */
+       * measures" while the rail beside it read $51M, 88 and 274.
+       *
+       * Those three move whenever a capex band does, because the default budget
+       * is a quarter of the summed midpoint capex. Pricing the glazing retrofit
+       * per square metre of glass rather than of wall took the candidate total
+       * from $228.7M to $202.8M and the budget with it, $57M to $51M — which is
+       * a re-bake, since the voice cache is keyed by the exact sentence. */
       get text() { return (() => {
         const a = programme();
         if (!a) return 'Then it spends a budget, and says where it went.';
@@ -1431,15 +1444,19 @@ export function buildStory(data, globe, getUI = () => null) {
           + `hours of heat nobody sits through.`;
       },
       // To the outcome, not back to the curve. This beat says what the money
-      // buys, and the panel says it too, in a sentence: "At $57M this programme
-      // treats 91 buildings with 292 measures. It avoids 1.88M person-hours of
-      // exposure above 35 °C behind 13,353 homes." Scrolling to the chart left
+      // buys, and the panel says it too, in a sentence of the shape "At $51M
+      // this programme treats 88 buildings with 274 measures. It avoids 1.92M
+      // person-hours of exposure above 35 °C behind the homes it names." Every
+      // figure in that sentence moves whenever a capex band does, so what is
+      // load-bearing here is its shape and its place on the page, not the
+      // numbers — they are quoted to say what is being scrolled to.
+      // Scrolling to the chart left
       // that paragraph clipped off the bottom edge for the whole chapter, so the
       // film asserted a figure the panel was showing just out of frame, and the
       // ranges the next beat is about were never on screen at all.
       /* The ledger, and nothing after it. This moved on to the objectives at
        * 58% through, which left the ledger — the block that actually states
-       * "at $57M this programme treats 91 buildings and avoids 1.88M
+       * "at $51M this programme treats 88 buildings and avoids 1.92M
        * person-hours" — holding for barely half the sentence that quotes it.
        * One target, held for the whole line: measured 60% lit before, 91%
        * after, and the missing tenth is the glide in. */
