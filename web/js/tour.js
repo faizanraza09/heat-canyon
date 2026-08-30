@@ -2,7 +2,7 @@
  *
  * The film explains why the city is hot. It says nothing about the instrument,
  * and someone who has just watched ninety seconds of cinema is looking at three
- * panels, six layers, a day on a scrubber and two camera modes, with no idea
+ * panels, twelve layers, two time scrubbers and two camera modes, with no idea
  * which one to touch first. This walks them through it: one spotlight and one
  * card per control, in the order you would actually use them.
  *
@@ -70,7 +70,7 @@ const STEPS = [
     title: 'The model itself',
     body: `<b>Drag in any direction</b> to slide across the city, <b>scroll</b> to zoom,
       <b>right-drag</b> to tilt and turn. <b>Click any building</b> and its file
-      opens on the right.
+      opens at the top of this panel — the ranking on the right stays put.
       <br /><br />
       Nothing here is decoration: wall colour is modelled surface temperature at
       the hour on the scrubber, and the ground wash is the measured air-temperature
@@ -78,48 +78,60 @@ const STEPS = [
   },
   {
     id: 'layers',
-    target: ['#layers', '#legend'],
+    target: ['#layers', '.lblock'],
     place: 'right',
     tab: 'view',
     enter: (ui) => ui.setLayer('surface'),
     title: 'What is drawn',
-    body: `Six views of the same block. The first two are this hour — how hot each
-      wall is, and which walls the sun is on. The next two are the whole seven-day
-      wave, because duration is what puts people in hospital, not peak.
-      <b>Where to act</b> combines exposure with how badly the occupants can cope.
+    body: `Twelve views of the same block, in two groups. The first six are one
+      moment: how hot each wall is, which walls the sun is on, the seven-day wave,
+      the air, and where to act during that wave.
       <br /><br />
-      The scale below is fixed for the entire day, so playing the day reads as the
-      city changing rather than the legend rescaling underneath it.`,
+      The six below the rule are the <b>whole year</b> — sunlit hours, accumulated
+      dose, the swing between summer and winter, the month each wall peaks in.
+      None of those depends on the clock, so the time controls grey out while one
+      is showing.
+      <br /><br />
+      The colour scale is fixed across the entire year, so scrubbing from July to
+      January reads as the city changing rather than the legend rescaling
+      underneath it.`,
+  },
+  {
+    id: 'year',
+    target: '#time',
+    place: 'top',
+    title: 'A year, not a day',
+    body: (d) => `The strip is the data it selects: one column per day, its height
+      the day's temperature range, coloured by the maximum, with the overnight
+      minimum as the base — so the ${d.year.annual.tropical_nights} nights the city
+      never dropped below 26 °C stand out as thick warm bars rather than as a
+      statistic. ${d.year.annual.days_above_35} days of
+      ${d.days.length} passed 35 °C, and the pipeline found the heat-wave episodes
+      by run length rather than being told where they were.
+      <br /><br />
+      <b>Drag</b> to scrub. The ticks underneath mark the thirteen days actually
+      solved at full facade resolution — the green one is the FortyGuard-measured
+      heat-wave day, the grey ones are the twelve monthly representative days. Any
+      other date is reconstructed from its month, and the readout says so.
+      <br /><br />
+      <b>Day / Month / Season / Year</b> changes what is averaged. Press <b>▶</b> on
+      the year row and watch the shadow line swing: December's noon sun is 26°
+      lower than June's, so a canyon that is half lit in July has a floor in
+      permanent shade in January.`,
   },
   {
     id: 'time',
-    target: '#time',
+    target: '#hours',
     place: 'top',
-    title: 'The day',
-    body: (d) => `${d.meta.hours.length} hours, ${hh(d.meta.hours[0].edt)} to
-      ${hh(d.meta.hours[d.meta.hours.length - 1].edt)} EDT.
-      ${hh(d.meta.hours[d.meta.peak_index].edt)} is the peak and where you started
-      — air ${d.meta.hours[d.meta.peak_index].t_anchor_c.toFixed(1)} °C, sun
-      ${Math.round(d.meta.hours[d.meta.peak_index].sun_alt)}° up.
+    title: 'And the hour within it',
+    body: (d) => `${d.meta.hours.length} solved hours per day, ${hh(d.meta.hours[0].edt)}
+      to ${hh(d.meta.hours[d.meta.hours.length - 1].edt)}.
+      ${hh(d.meta.hours[d.meta.peak_index].edt)} is where you started.
       <br /><br />
-      Press <b>▶</b> to run the day and watch the lit band climb the east walls
-      while the west side stays in shade. The row of figures underneath is the
-      measured weather that drove that hour.`,
-  },
-  {
-    id: 'camera',
-    target: '.camrow',
-    place: 'right',
-    tab: 'view',
-    title: 'Get down into it',
-    body: `<b>Walk the street</b> drops the camera to eye level in a real canyon —
-      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to walk,
-      <kbd>Q</kbd>/<kbd>E</kbd> to move down/up, drag to look,
-      <b>Next street</b> to jump to the next viewpoint. The hint line names the
-      canyon and gives the two wall heights and the width between them.
-      <br /><br />
-      This is the view that makes the point: the temperature you feel on the
-      pavement is set by the walls either side of you, not by the forecast.`,
+      Two axes rather than one slider, because the question worth asking is the
+      same hour in different months. The row of figures underneath is the weather
+      that drove the hour, and the pill on its right says whether you are looking
+      at a measured anchor, a solved day, or a reconstruction.`,
   },
   {
     id: 'ranked',
@@ -131,22 +143,69 @@ const STEPS = [
       against how badly their occupants can cope — age of stock, homes inside,
       the city's own heat-vulnerability index.
       <br /><br />
+      <b>Two orderings, and they disagree.</b> <b>Heat wave</b> asks who is in
+      trouble during an acute event; <b>the year</b> asks whose fabric is loaded all
+      year. They share
+      ${d.ranked.orderings?.agreement?.top50_overlap ?? '—'} of their top fifty.
+      Where a building ranks far higher on the year, its problem is chronic and
+      fabric measures matter; far higher on the wave, and its problem is acute and
+      relief matters.
+      <br /><br />
       Ranking is not a verdict. It is a queue, and the file behind each row shows
       its whole working.`,
   },
   {
     id: 'detail',
-    target: '#side-body',
-    place: 'left',
-    enter: (ui) => ui.showDetail(0),
+    target: '#selcard',
+    place: 'right',
+    // `reveal`, not `enter`: the card does not exist until something is picked,
+    // and the step's target has to be measurable before the step is chosen.
+    reveal: (ui) => ui.showDetail(0),
     title: 'One building',
-    body: `Hours above 35 °C, the longest unbroken run, the hottest wall and the
-      difference between its faces, then temperature up the height of the
-      building with an uncertainty band, then the reasons it ranks where it does,
-      then what can be done about it.
+    body: `The heat wave first: hours above 35 °C, the longest unbroken run, the
+      hottest wall and the difference between its faces. Then <b>the year</b> —
+      accumulated facade dose, sunlit hours, the summer-to-winter swing, and a bar
+      per month showing when this particular wall actually peaks, which is not
+      always July.
       <br /><br />
-      Selecting a row also selects the building in the model, and clicking a
-      building in the model opens its file here.`,
+      Then temperature up the height of the building with its uncertainty band,
+      the reasons it ranks where it does on both orderings, and what can be done
+      about it.
+      <br /><br />
+      The file opens here rather than over the ranking, so working down a list of
+      sixty addresses does not cost you the list sixty times. <b>Close</b>, or
+      <kbd>Esc</kbd>, puts it away.`,
+  },
+  {
+    id: 'diagnose',
+    target: '#tab-diagnose',
+    place: 'right',
+    // Both this step and the next name a pane rather than a tab. There is no
+    // Diagnose tab any more — the schedule and the what-if share one called
+    // Decide — and `showTab` routes both old names to it, so the two steps still
+    // spotlight the right half of one column.
+    tab: 'diagnose',
+    // No explicit guard needed, and adding one would have been dead code:
+    // `_targets` already rejects a node that is `hidden` or inside something
+    // hidden, and `#tab-diagnose` stays hidden until its module mounts. So on a
+    // build without the decision layer this step drops itself, which is exactly
+    // the behaviour the missing-target rule was written for.
+    reveal: (ui) => ui.showDetail(0),
+    title: 'Why, and what to do',
+    body: `A temperature is a finding. This is the answer to the question everybody
+      actually asks, which is <i>so what do I do</i>.
+      <br /><br />
+      Every floor of this building, with the load it drives and the
+      <b>reason</b> it is hot: how much of its excess over the air came from the
+      sun on it, and how much from longwave off the wall opposite. Four buildings
+      can all peak at 53 °C for four different reasons, and those four reasons take
+      four different measures — shading does nothing for a floor whose heat is
+      arriving from the building across the street.
+      <br /><br />
+      Watch the bars swap as you go up. The lower floors are heated by the canyon;
+      the upper floors are heated by the sun. That crossover is where the
+      prescription changes, and it is why this is a schedule rather than a
+      recommendation.`,
   },
   {
     id: 'whatif',
@@ -155,23 +214,64 @@ const STEPS = [
     tab: 'whatif',
     title: 'What if',
     body: `Trees, a cool roof, lighter paving, an awning — each row re-solves that
-      canyon at the hour you are on and reports the change in °C on the road, on
-      the wall, on the air, and on what a body standing there actually exchanges
-      heat with.
+      canyon and reports the change in °C on the road, on the wall, on the air, and
+      on what a body standing there actually exchanges heat with.
       <br /><br />
-      Which is why trees do a great deal on a shallow street and almost nothing
-      on a deep one already in shade. Same intervention, different street,
+      The second table is the one the year makes possible: the same measures at
+      every month's peak, so the <b>cost</b> column is real. Facade shading that
+      removes 4 K in July removes January's solar gain too, and a plan that reports
+      only the July figure is not a plan.
+      <br /><br />
+      Which is also why trees do a great deal on a shallow street and almost
+      nothing on a deep one already in shade. Same intervention, different street,
       different answer.`,
   },
   {
     id: 'ask',
-    target: '#tab-ask',
+    // The analyst opens over the map now rather than living in the left rail,
+    // so the step spotlights the window itself; `tab: 'ask'` still reaches it,
+    // because showTab routes that name to openAnalyst.
+    target: '#analyst-win',
     place: 'right',
     tab: 'ask',
-    title: 'Ask',
-    body: `Plain questions against the dataset — the hottest wall, which streets
-      never cool down, what a given intervention buys. Answers come back with the
-      figures they were computed from, so you can check them against the panels.`,
+    title: 'The analyst',
+    body: `Not a chat box. It is an agent with this model's physics engine, a shell,
+      and twenty tools over the solved fields, and it does work rather than
+      lookups: it re-solves an intervention anywhere in the city over any window,
+      runs Moran's I and Getis-Ord hotspot statistics, writes its own scripts, and
+      allocates a budget.
+      <br /><br />
+      Every tool call appears in the transcript with its arguments and what came
+      back, because the claim is that every number came out of this model and a
+      claim like that is worth what the evidence on screen is worth. It can read
+      the open web, for context this model does not hold — a programme's funding
+      rules, a standard's threshold — and everything it takes from there is
+      labelled EXTERNAL. It may never source a <i>figure</i> from it that this
+      model can produce itself.
+      <br /><br />
+      It also <b>drives this map</b>. Ask it where to act and it will set the layer,
+      scrub the year to the date it is talking about, and light up the buildings it
+      names.`,
+  },
+  {
+    id: 'portfolio',
+    target: () => document.getElementById('open-portfolio'),
+    place: 'left',
+    title: 'The whole programme',
+    body: `Nobody spends money one building at a time. Every measure on every
+      ranked building becomes a candidate, ordered by what it costs per
+      person-hour of exposure it removes, with a budget line you can drag.
+      Everything left of the line is the programme.
+      <br /><br />
+      Two objectives sit side by side and <b>they disagree</b>: efficiency buys the
+      most avoided exposure per dollar, equity buys it for the people least able to
+      cope, and they do not choose the same buildings. That disagreement is a
+      political choice being made either way — the panel puts both columns on
+      screen so it is made deliberately.
+      <br /><br />
+      Every dollar here is <b>assumed</b>, which is a softer tier than measured or
+      modelled, and every one of them is shown as a range with the table it came
+      through.`,
   },
   {
     id: 'photoreal',
@@ -189,9 +289,13 @@ const STEPS = [
     target: () => document.querySelector('#left .fold'),
     place: 'right',
     title: 'Get out of the way',
-    body: `The arrows fold either panel away, and <kbd>Esc</kbd> folds both at
-      once — the fastest route to just looking at the city. The handles at the
-      edge bring them back.`,
+    body: `The chevrons fold this panel, the ranking and the clock away
+      individually — or <kbd>[</kbd> <kbd>]</kbd> <kbd>\\</kbd> from the keyboard,
+      and <kbd>H</kbd> for all three at once, which is the fastest route to just
+      looking at the city.
+      <br /><br />
+      Each one leaves a labelled tab on the wall it slid off — <b>INSPECT</b>,
+      <b>RANKING</b>, the hour — so you can always tell what is coming back.`,
   },
   {
     id: 'done',
@@ -199,11 +303,11 @@ const STEPS = [
     dim: 'full',
     title: 'That is the whole instrument',
     body: `Start anywhere. If you want one route: leave it on
-      <b>Facade temperature</b>, press <b>▶</b> to run the afternoon, then take
-      the top-ranked building and walk its street.
+      <b>Façade temperature</b>, press <b>▶</b> to run the afternoon, then take
+      the top-ranked building and open its file.
       <br /><br />
-      <b>Tour</b> and <b>Film</b> in the masthead replay either of these whenever
-      you want them.`,
+      The <b>?</b> and <b>▶</b> buttons beside the panel title replay this tour
+      and the opening film whenever you want them.`,
     next: 'Start exploring',
   },
 ];
@@ -297,7 +401,18 @@ export class Tour {
       // hidden pane has no box, so the scenario table would read as missing and
       // its step would be skipped — which is why this runs inside the search
       // rather than after it.
+      //
+      // `reveal` is the same idea for a target that does not merely live in a
+      // hidden pane but does not exist yet at all: the card about one building's
+      // file is about `#selcard`, which carries the `hidden` attribute until a
+      // building is picked. Doing that in `enter` was too late — `_usable` had
+      // already read the step as missing and skipped straight past it, which is
+      // how three steps quietly vanished from a twelve-step tour while the dots
+      // still promised twelve.
       if (c.tab) this.ui.showTab?.(c.tab);
+      if (c.reveal) {
+        try { c.reveal(this.ui); } catch (e) { console.warn(`tour step ${c.id} reveal:`, e); }
+      }
       if (this._usable(c)) break;
       n += dir;
     }
@@ -326,7 +441,7 @@ export class Tour {
   }
 
   /** Resolve a step's target to a single element, or null. Steps may name
-   *  several (`['#layers', '#legend']`) and get the union of their boxes. */
+   *  several (`['#layers', '.lblock']`) and get the union of their boxes. */
   _target(s) {
     const list = this._targets(s);
     return list[0] || null;

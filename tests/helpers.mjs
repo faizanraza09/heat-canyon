@@ -37,13 +37,19 @@ export async function openApp(page, { hour, layer } = {}) {
   return { errors, failedRequests };
 }
 
-/** Select a layer by (partial) label. Switches to the View tab first, since the
- *  layer list lives inside it and is hidden while another tab is showing. */
+/** Select a layer by (partial) label. Switches to the Measure tab first, since
+ *  the layer list lives inside it and is hidden while another tab is showing.
+ *
+ *  Matching is diacritic- and case-insensitive: the panel says "Façade
+ *  temperature" and a spec that asks for "Facade temperature" means the same
+ *  layer. Requiring the cedilla at every call site would make the suite fail on
+ *  a copy-edit rather than on a defect. */
 export async function setLayer(page, label) {
   await page.evaluate((l) => {
+    const flat = (t) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     document.querySelector('#tabs button[data-tab="view"]')?.click();
     const b = [...document.querySelectorAll('#layers button')]
-      .find((x) => x.textContent.includes(l));
+      .find((x) => flat(x.textContent).includes(flat(l)));
     if (!b) {
       const have = [...document.querySelectorAll('#layers button')]
         .map((x) => x.textContent.trim()).join(' | ');
@@ -57,7 +63,9 @@ export async function setLayer(page, label) {
 /** Switch the left panel to a named tab: view | whatif | ask. */
 export async function setTab(page, name) {
   await page.evaluate((n) => {
-    const b = document.querySelector(`#tabs button[data-tab="${n}"]`);
+    // 'ask' is not a pane: the analyst opens in its own window over the map.
+    const sel = n === 'ask' ? '#analyst-open' : `#tabs button[data-tab="${n}"]`;
+    const b = document.querySelector(sel);
     if (!b) throw new Error(`no tab ${n}`);
     b.click();
   }, name);
@@ -70,6 +78,32 @@ export async function setHour(page, index) {
     if (!b) throw new Error(`no hour button at index ${i}`);
     b.click();
   }, index);
+  await settle(page);
+}
+
+/** Make sure the vertical air profile is loaded before reading it.
+ *
+ * It is fetched on demand — 4.7 MB per period, and it is the least trustworthy
+ * field in the model — so `data.airAt` returns NaN until something asks for it.
+ * Three tests read it directly and started returning NaN when the fetch became
+ * lazy, which surfaced as `expect(...).toBeGreaterThan(NaN)` rather than as
+ * anything about air temperature.
+ */
+export async function ensureAir(page) {
+  await page.evaluate(() => window.HC.data.ensureAir());
+  await page.waitForFunction(() => window.HC.data.hasAir(), null, { timeout: 60_000 });
+  await settle(page);
+}
+
+/** Wait until the camera has stopped flying itself somewhere.
+ *
+ * Resetting the view and focusing a building are short flights rather than
+ * cuts, so a fixed timeout after clicking one of those controls is a race — and
+ * on software GL it is a race the test loses. `scene.transitioning` covers both
+ * those flights and the opening descent, so this is the one thing to wait on.
+ */
+export async function cameraSettled(page) {
+  await page.waitForFunction(() => !window.HC.scene.transitioning, null, { timeout: 20_000 });
   await settle(page);
 }
 

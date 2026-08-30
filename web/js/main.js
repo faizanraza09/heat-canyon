@@ -33,8 +33,8 @@ async function start() {
   const setLoad = (p, label) => {
     const q = phase[0] + (phase[1] - phase[0]) * p;
     if (film) {
-      $('film-prog').style.width = `${Math.round(q * 100)}%`;
-      $('film-load').textContent = label;
+      $('film-prog').style.transform = `scaleX(${q.toFixed(3)})`;
+      $('film-load').textContent = label.toUpperCase();
     } else {
       boot(q, label);
     }
@@ -66,39 +66,79 @@ async function start() {
     data = await load(setLoad);
   } catch (e) {
     setLoad(1, `failed: ${e.message}`);
-    ($('film-load') || $('boot-msg')).style.color = '#e8674f';
+    // Colour whichever label is actually on screen. Picking `#film-load` by
+    // existence was wrong: the film's card is in the markup even when the film
+    // is off, so with `?intro=0` the failure was reported in an element nobody
+    // could see while the visible one stayed grey.
+    for (const id of ['film-load', 'boot-msg']) {
+      const n = $(id);
+      if (n) n.style.color = 'var(--accent)';
+    }
     return;
   }
 
   phase = film ? [0.82, 1] : [0.85, 1];
+  // The building count belongs on the title card as soon as it is known: it is
+  // the one figure that says what has actually been loaded.
+  const count = `${data.meta.counts.buildings.toLocaleString('en-US')} BUILDINGS`;
+  // Both entrances carry it: the film's card is in the DOM even when the film
+  // is off, so picking one by existence would have silently fed the wrong one.
+  for (const id of ['film-count', 'boot-count']) {
+    const c = $(id);
+    if (c) c.textContent = count;
+  }
   setLoad(0.1, 'building geometry');
   await new Promise((r) => setTimeout(r, 30));
 
   const scene = new Scene($('gl'), data);
 
-  // One colour scale for the whole day, so the ramp means the same thing at
-  // 03:00 as at 15:00 and playing the day reads as the city changing rather
-  // than the legend rescaling underneath it.
+  // The satellite ground the opening descent lands on. Only fetched when the
+  // film is going to play — three megabytes is the right price for a seamless
+  // handover and the wrong one for a reload with `?intro=0`. Not awaited: the
+  // planes appear when they arrive, and the film is a minute from needing them.
+  // The film asks for the same two files, so each is fetched once.
   //
-  // The percentiles are wide on purpose. A 1-99 window came out at 28-45 degC,
-  // but peak-hour surfaces sit at 40-45, which crushed the entire hour of
+  // `prime` follows it and is the reason the handover is smooth. Nothing in
+  // this scene renders while the film is up (see the `paused` flag below), so
+  // without it every program compiles and every buffer uploads on the first
+  // frame after the handoff — measured at 394 ms, a frozen third of a second
+  // landing exactly where the camera is supposed to be falling fastest. Priming
+  // moves that frame behind the loading screen. Not awaited either: it is an
+  // optimisation, and the film must not wait on it.
+  if (film) scene.loadBasemap().then(() => scene.prime());
+
+  // ONE COLOUR SCALE FOR THE WHOLE YEAR, not for the day.
+  //
+  // The ramp has to mean the same thing at 03:00 as at 15:00, or playing the day
+  // reads as the legend rescaling rather than the city changing. Once the platform
+  // covered a year that requirement got stronger, not weaker: scrubbing from July
+  // to January with a per-period scale would show an identical-looking city in
+  // both, and the entire point is that they are 30 K apart. So the domain is taken
+  // from the ANNUAL extremes — the minimum of the annual minima and the maximum of
+  // the annual maxima across every facade band — and it never moves again.
+  //
+  // The percentiles are wide on purpose. A 1-99 window over one day came out at
+  // 28-45 degC while peak-hour surfaces sit at 40-45, which crushed the hour of
   // interest into the top third of the ramp and clipped the hottest 3% to flat
-  // white — the sunlit walls that are the whole point. Going out to 99.8
-  // captures the real daily range (about 28-50 degC) and puts mid-afternoon in
-  // the middle of the ramp, where there is contrast to spend.
+  // white: the sunlit walls that are the whole point. Over the year the same logic
+  // applies at both ends, since a January north wall at -10 degC is as real a
+  // datum as a July west wall at 55.
   scene.setDomains({
-    surface: domain(data.thermal, 0.5, 99.8),
-    air: domain(data.air, 0.5, 99.5),
+    surface: [
+      Math.min(domain(data.annual.t_min, 0.2, 99.8)[0],
+               domain(data.active.surface, 0.2, 99.8)[0]),
+      Math.max(domain(data.annual.t_max, 0.2, 99.8)[1],
+               domain(data.active.surface, 0.2, 99.8)[1]),
+    ],
+    air: domain(data.hourly.t_air_c, 0.5, 99.5),
   });
 
   setLoad(0.9, 'ready');
   const ui = new UI(data, scene);
 
   scene.onPick = (hit) => {
-    if (!hit) { ui.showList(); return; }
-    const a = data.buildings.attrs[hit.building];
-    const idx = data.ranked.items.findIndex((it) => String(it.bin) === String(a?.bin));
-    if (idx >= 0) ui.showDetail(idx);
+    if (!hit) { ui.clearSelection(); return; }
+    ui.showBuilding(hit.building);
   };
 
   // While the film has the screen, the city is a full-resolution render behind
@@ -121,22 +161,81 @@ async function start() {
   };
   requestAnimationFrame(loop);
 
+  /* Which build of the 3D scene is actually running.
+   *
+   * Derived from the presence of the features themselves rather than from a
+   * version string, because a version string is the one thing that cannot go
+   * stale in the same way the code does. It exists because a browser served a
+   * cached `scene.js` alongside a fresh `index.html` for most of a debugging
+   * session: the panel described gestures the renderer had never heard of, and
+   * every screenshot of the result looked like a fresh bug. Any `false` here
+   * means the page is running a renderer older than the interface around it.
+   */
+  const build = {
+    sky: typeof scene._updateSky === 'function',
+    compass: typeof scene.bearing === 'number',
+    pickIndex: !!scene._pick,
+  };
+  if (Object.values(build).some((v) => !v)) {
+    console.warn('HeatCanyon: the 3D scene is older than the interface around '
+      + 'it — a cached scene.js. Reload with the cache cleared.', build);
+  }
+
   // Debug handle. Exposed deliberately: this is a visualisation whose output is
   // geometry, and being able to poke at the scene graph from the console is how
   // you find out why something looks wrong.
   window.HC = { data, scene, ui, film };
 
+  /* One command that says what the camera is actually doing.
+   *
+   * Every camera fault in this project has been reported as a picture — "I
+   * clicked walk and got a wall" — and a picture cannot distinguish between an
+   * eye in the wrong place, an eye in the right place pointing the wrong way,
+   * and a frame that simply is not being drawn any more. This prints all
+   * three, plus what the geometry says is in front of the camera, so the next
+   * report is a diagnosis rather than a screenshot. */
+  window.HC.diag = () => {
+    const s = scene, d = data;
+    const c = s.camera.position;
+    const dir = new (c.constructor)();
+    s.camera.getWorldDirection(dir);
+    const hl = Math.hypot(dir.x, dir.z) || 1;
+    const bearing = ((Math.atan2(dir.x / hl, -dir.z / hl) * 180) / Math.PI + 360) % 360;
+    const out = {
+      transitioning: s.transitioning,
+      descentStuck: !!s._descent,
+      basemap: s._basemapK ?? 0,
+      photoreal: s.photorealOn,
+      camera: [+c.x.toFixed(1), +c.y.toFixed(2), +c.z.toFixed(1)],
+      cameraBearingDeg: +bearing.toFixed(1),
+      // How tall the surface model says the ground under the camera is: a large
+      // number with the camera low is an eye inside a building.
+      groundUnderCameraM: +d.heightAt(c.x, -c.z).toFixed(1),
+      fov: s.camera.fov,
+      viewport: [innerWidth, innerHeight, window.devicePixelRatio],
+      hour: s.hour,
+      layer: s.layer,
+      build,
+    };
+    console.log(JSON.stringify(out, null, 1));
+    return out;
+  };
+
   bootDone();
   console.log('HeatCanyon ready', {
+    build,
     buildings: data.buildings.n,
     panels: data.facades.n,
     quads: scene.nQuad,
-    hours: data.meta.hours.length,
+    hoursPerPeriod: data.meta.hours.length,
+    solvedPeriods: 1 + (data.year.periods.months || []).length,
+    yearDays: data.days.length,
+    yearWindow: data.year.window,
   });
 
   if (film) {
     setLoad(1, 'ready');
-    await runFilm(film, data, scene, resume);
+    await runFilm(film, data, scene, ui, resume);
   } else {
     revealApp();
   }
@@ -164,46 +263,72 @@ async function start() {
 }
 
 /** Hand the film its cues and wait for it to be done with the screen. */
-function runFilm(film, data, scene, resume) {
+function runFilm(film, data, scene, ui, resume) {
   return new Promise((resolve) => {
     const done = (why) => { resume(); revealApp(); resolve(why); };
 
     const begin = $('film-begin');
     const straight = $('film-straight');
     begin.disabled = false;
-    begin.textContent = 'Begin';
+    // The runtime is on the button, so the choice to watch is an informed one.
+    const runtime = (t) => {
+      begin.innerHTML = `Watch the film&nbsp;&nbsp;·&nbsp;&nbsp;${t}`;
+    };
+    // ...and it is re-printed if it changes. It can change exactly once: the
+    // film asks the server for its narration while this card is up, and a beat
+    // whose recorded line is longer than its shot is stretched to fit it. A
+    // button that promised two forty-two over a film that runs three fifty is
+    // the sort of small lie that makes a viewer stop believing the rest.
+    film.onRuntime = runtime;
+    runtime(film.runtimeLabel(data));
 
     const play = () => {
       begin.removeEventListener('click', play);
       film.play(data, {
-        // The city starts falling while the globe is still on screen, so the
-        // cross-fade lands on a moving frame. It keeps flying for a few seconds
-        // past the fade, under the first caption, and settles into the default
-        // view on its own.
-        onHandoff: (dur) => { resume(); scene.flyIn({ seconds: Math.max(7, dur + 5) }); },
-        onSkip: () => { resume(); scene._abortFly(); },
+        // What the storyboard's beats drive from chapter three onward. The film
+        // stops being a picture of the tool there and starts being the tool.
+        ctx: { ui, scene, data },
+        /* The film's descent drives this camera directly, in this scene's own
+         * metres, so for the last seconds of the fall both canvases are drawing
+         * the same viewpoint and the globe going is a photograph turning into
+         * the model.
+         *
+         * This was briefly a dissolve between two independent pictures, which
+         * is what the design prototype does and is the only thing that works if
+         * the descent has to be six seconds long. The three-minute cut gives it
+         * twelve, which is enough to travel the distance honestly — and the
+         * walkthrough after the handoff needs the camera down over the city
+         * regardless, so there is nothing left to save by cheating it. */
+        onHandoff: () => { resume(); scene.beginDescent(); },
+        onPose: (pose) => scene.setDescentPose(pose),
+        // Whatever ends the descent — the beat finishing, or someone pressing
+        // skip halfway down — the camera continues from exactly where it is
+        // into the opening view rather than cutting to it. The photographic
+        // ground is held for a moment first: chapter three is about to talk
+        // about a building standing on it.
+        onLanded: () => scene.endDescent(3.4, 2.0),
+        onSkip: () => { resume(); scene.endDescent(1.1); scene._abortFly(); },
         onReveal: () => { resume(); revealApp(); },
       }).then(done);
     };
 
     begin.addEventListener('click', play);
     straight.addEventListener('click', () => { film.skip(); done('straight'); });
-    $('film-skip').addEventListener('click', () => film.skip());
+    // Everything else on the transport bar — skip, sound, chapter stepping,
+    // play/pause and the segment scrubber — is wired by the film itself, which
+    // is the only thing that knows where the beats are.
+    film.bindTransport();
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') film.skip();
     });
 
-    const soundBtn = $('film-sound');
-    soundBtn.setAttribute('aria-pressed', String(film.sound));
-    soundBtn.addEventListener('click', () => {
-      film.setSound(!film.sound);
-      soundBtn.setAttribute('aria-pressed', String(film.sound));
-    });
-
-    // The strap under the title comes from the same event metadata the model
-    // ran on, so the card names the actual heat wave rather than a slogan.
-    $('film-title-strap').textContent =
-      `${data.meta.event.label}. A street-level account of one afternoon in ${data.meta.aoi.label}.`;
+    // The strap is not touched here. It used to be rewritten from the loaded
+    // event metadata, which meant the title card said one thing on first paint
+    // and a different thing a few seconds later — and the placeholder it
+    // replaced advertised a single afternoon, which is the opposite of what
+    // this is. The tagline in the markup describes the instrument, not the run,
+    // so there is nothing to swap in. The dates and counts belong on the atlas,
+    // where they are attached to the numbers they qualify.
   });
 }
 

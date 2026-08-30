@@ -10,7 +10,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { openApp, facadeColorStats } from './helpers.mjs';
+import { ensureAir, openApp, facadeColorStats } from './helpers.mjs';
 
 test('boots with no page errors or failed requests', async ({ page }) => {
   const { errors, failedRequests } = await openApp(page);
@@ -21,8 +21,13 @@ test('boots with no page errors or failed requests', async ({ page }) => {
 
 test('data arrays are internally consistent', async ({ page }) => {
   await openApp(page);
+  await ensureAir(page);
   const d = await page.evaluate(() => {
     const { data } = window.HC;
+    // The fields moved when the platform became a year: the solved arrays now live
+    // on a PERIOD rather than on the dataset, because there are thirteen of them
+    // and only the one being shown is loaded.
+    const p = data.active;
     return {
       buildings: data.buildings.n,
       ringCount: data.buildings.rings.length,
@@ -30,14 +35,20 @@ test('data arrays are internally consistent', async ({ page }) => {
       panels: data.facades.n,
       bands: data.facades.bands,
       hours: data.meta.hours.length,
-      thermal: data.thermal.length,
-      air: data.air.length,
+      thermal: p.surface.length,
+      air: p.air.length,
       sigma: data.airSigma.length,
-      sunlitBytes: data.sunlit.length,
+      sunlitBytes: p.lit.length,
+      gamma: data.gamma.length,
       xy: data.facades.xy.length,
       azLen: data.facades.az.length,
       baseLen: data.facades.base.length,
       topLen: data.facades.top.length,
+      annualPlanes: Object.entries(data.annual)
+        .filter(([k]) => k !== 'monthly_mean' && k !== 'month_of_max')
+        .map(([k, v]) => [k, v.length]),
+      monthlyMean: data.annual.monthly_mean.length,
+      periodKeys: 1 + data.year.periods.months.length,
     };
   });
 
@@ -46,14 +57,25 @@ test('data arrays are internally consistent', async ({ page }) => {
   // Every panel needs exactly one temperature per band per hour.
   expect(d.thermal).toBe(d.panels * d.bands * d.hours);
   expect(d.air).toBe(d.thermal);
-  expect(d.sigma).toBe(d.thermal);
   // Sunlit is a bit per cell, packed to bytes.
   expect(d.sunlitBytes).toBe(Math.ceil(d.thermal / 8));
+  // The uncertainty on the vertical air profile depends on height and enclosure
+  // only, so it is ONE plane rather than one per hour — 0.6 MB instead of 4.7.
+  expect(d.sigma).toBe(d.panels * d.bands);
+  // dT_surface/dT_air, one value per panel-band.
+  expect(d.gamma).toBe(d.panels * d.bands);
   // Four coordinates per panel: two endpoints.
   expect(d.xy).toBe(d.panels * 4);
   expect(d.azLen).toBe(d.panels);
   expect(d.baseLen).toBe(d.panels);
   expect(d.topLen).toBe(d.panels);
+  // Every annual plane is one value per panel-band; the monthly one is twelve.
+  expect(d.annualPlanes.length).toBeGreaterThanOrEqual(12);
+  for (const [name, len] of d.annualPlanes) {
+    expect(len, `${name} should be one value per panel-band`).toBe(d.panels * d.bands);
+  }
+  expect(d.monthlyMean).toBe(12 * d.panels * d.bands);
+  expect(d.periodKeys).toBe(13);
 });
 
 test('facade mesh has one quad per panel-band and no stray geometry', async ({ page }) => {

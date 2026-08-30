@@ -1,0 +1,97 @@
+{
+ "credit": "USGS NAIP \u00b7 Esri, Maxar, Earthstar Geographics",
+ "sources": {
+  "naip": "USGS NAIP (public domain)",
+  "esri": "Esri World Imagery"
+ },
+ "lon0": -73.9825,
+ "lat0": 40.754000000000005,
+ "m_per_deg_lon": 84400.0,
+ "m_per_deg_lat": 111132.0,
+ "levels": [
+  {
+   "key": "l0",
+   "file": "l0.jpg",
+   "px": 1024,
+   "span_m": 1800000,
+   "source": "esri",
+   "app": false,
+   "west": -84.64600710900474,
+   "east": -63.31899289099526,
+   "south": 32.655522513767416,
+   "north": 48.852477486232594,
+   "res_m_px": 1757.8125,
+   "gain": 0.886
+  },
+  {
+   "key": "l1",
+   "file": "l1.jpg",
+   "px": 1024,
+   "span_m": 600000,
+   "source": "esri",
+   "app": false,
+   "west": -77.53700236966824,
+   "east": -70.42799763033176,
+   "south": 38.05450750458914,
+   "north": 43.45349249541087,
+   "res_m_px": 585.9375,
+   "gain": 1.1873
+  },
+  {
+   "key": "l2",
+   "file": "l2.jpg",
+   "px": 1024,
+   "span_m": 200000,
+   "source": "esri",
+   "app": false,
+   "west": -75.16733412322274,
+   "east": -72.79766587677726,
+   "south": 39.854169168196385,
+   "north": 41.653830831803624,
+   "res_m_px": 195.3125,
+   "gain": 1.3848
+  },
+  {
+   "key": "l3",
+   "file": "l3.jpg",
+   "px": 2048,
+   "span_m": 64000,
+   "source": "naip",
+   "app": false,
+   "west": -74.36164691943128,
+   "east": -73.60335308056872,
+   "south": 40.466054133822844,
+   "north": 41.041945866177166,
+   "res_m_px": 31.25,
+   "gain": 0.9925
+  },
+  {
+   "key": "l4",
+   "file": "l4.jpg",
+   "px": 2048,
+   "span_m": 18600,
+   "source": "naip",
+   "app": true,
+   "west": -74.09268957345972,
+   "east": -73.87231042654028,
+   "south": 40.670315732642266,
+   "north": 40.837684267357744,
+   "res_m_px": 9.08203125,
+   "gain": 0.9913
+  },
+  {
+   "key": "l5",
+   "file": "l5.jpg",
+   "px": 2048,
+   "span_m": 7000,
+   "source": "naip",
+   "app": true,
+   "west": -74.0239691943128,
+   "east": -73.9410308056872,
+   "south": 40.72250592088688,
+   "north": 40.78549407911313,
+   "res_m_px": 3.41796875,
+   "gain": 1.0
+  }
+ ]
+}

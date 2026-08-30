@@ -249,7 +249,24 @@ data/env_params/*
 
 # HeatCanyon build artifacts
 .venv/
+# The solved fields. `web/data/*.bin` alone was not enough once the year arrived:
+# a gitignore pattern containing a slash is anchored, so it matched the top-level
+# binaries and NOT web/data/month_07/thermal.bin — twelve monthly periods and the
+# annual planes, about 130 MB, would have gone straight into the repository.
 web/data/*.bin
+web/data/**/*.bin
+
+# web/data/vo/ is NOT ignored, and that is the point. Those are the opening
+# film's narration — one MP3 per line, read by ElevenLabs, about three and a half
+# megabytes. Committing them is the same bargain as the FortyGuard responses
+# above: they cost money to make, they are deterministic given the script, and
+# shipping them means a fresh clone plays the film with the real voice, offline,
+# having spent nothing. Take them out and every clone either buys them again or
+# gets the browser's speech synthesiser.
+#
+# `web/data/vo/lines.json` is the index — key to the sentence it is a recording
+# of — which is what makes a directory of hashes something a person can audit and
+# prune. See docs/HEATCANYON.md, "The voice".
 
 # HeatCanyon caches ARE shipped, deliberately: the FortyGuard responses cost
 # credits and the NYC Open Data pulls take minutes, so committing them makes the
@@ -270,3 +287,39 @@ node_modules/
 # The built assets under web/data/ are committed; these raw sources are not.
 data/globe/*
 !data/globe/.gitkeep
+
+# The analyst's workspaces and durable run transcripts. One directory per run
+# under .agent/runs/<run_id>/ holding frames.jsonl, status.json, and whatever
+# scripts and charts the agent wrote. Useful locally, not repository content.
+.agent/
+
+# …except the one recorded turn the opening walkthrough plays back.
+#
+# Chapter five of the film shows the analyst working rather than describing it,
+# and what it shows is a real turn — fifty-six tool calls, six re-solves of the
+# canyon physics — replayed from its own JSONL by the server. Asking live on
+# camera would cost minutes of waiting and money on every play, and would put
+# whatever the model said that afternoon in front of whoever is watching.
+#
+# It is checked in because the film depends on it and a run directory is not
+# reproducible: clear it and chapter five plays with an empty console.
+#
+# Re-including one file out of an ignored tree takes five lines, and the order
+# matters. Git will not look inside an excluded directory, so each level has to
+# be re-admitted before the level below it can be excluded again — hence the
+# alternation: open `.agent/runs/`, shut every run in it, open this one, shut
+# everything in this one, then name the two files the replay actually reads. The
+# workspace of scratch scripts the turn wrote stays out.
+!.agent/
+!.agent/runs/
+.agent/runs/*
+!.agent/runs/r17880442193644fa/
+.agent/runs/r17880442193644fa/*
+!.agent/runs/r17880442193644fa/frames.jsonl
+!.agent/runs/r17880442193644fa/status.json
+
+# The design brief this overhaul was worked from — a 10 MB zip of reference
+# imagery that was an INPUT to the work, not part of it. The result is in
+# web/css/ and web/js/; the brief does not need to ship with it.
+Design Overhaul Request.zip
+*:Zone.Identifier

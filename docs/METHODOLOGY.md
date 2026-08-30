@@ -55,7 +55,21 @@ day would have wasted credits and proved nothing.
 | Heat Vulnerability Index | NYC Open Data `4mhf-duep` | `hvi` 1–5 by 2020 ZCTA |
 | Street trees | NYC Open Data `uvpi-gqnh` | 2015 census, species and diameter |
 | Street-level sensors | NYC Open Data `qdq3-9eqn` | 84 Manhattan sensors, 2018/19, °F |
-| Radiation and wind | ERA5 via Open-Meteo archive | hourly GHI, DNI, wind — used to *validate* |
+| **The whole temporal axis** | **ERA5 via Open-Meteo archive** | **8,760 hours: air temperature, humidity, dew point, cloud, wind, GHI/DNI/DHI** |
+
+That last row is the one that changed. ERA5 used to appear here only as the
+reference the solar reconstruction is *validated against*; it is now the source of
+the entire year, bias-corrected against FortyGuard on the one overlapping day. It
+costs nothing and needs no credential, which is why a year was reachable at all —
+8,760 FortyGuard heatmap calls would be 37 million credits against a 2 million
+budget. Its grid cell over Midtown is about 25 km and contains open water and New
+Jersey, so it is a regional 2 m temperature rather than an urban one, and the
+calibration and its limits are in [YEAR.md](YEAR.md).
+
+**Its wind is in km/h by default.** A cached response carrying km/h into
+`Met.wind_10m`, which is m/s, is a 3.6× error in the convective coefficient. It
+was silently cancelling a second error in that coefficient's intercept, and both
+survived until the year forced them apart — see §6.
 
 ### Measured — the opening film only (no key, no cost)
 
@@ -297,14 +311,45 @@ temperature stops moving (typically 5–7 iterations). Guessing that environment
 as "air plus six degrees" — the usual shortcut — gets the enclosure backwards,
 understating shaded facades in deep canyons and overstating them in open ones.
 
-`h_c = 2.0 + 3.8u`. The intercept matters: the widely quoted McAdams
-`5.7 + 3.8u` is a **combined** surface conductance whose 5.7 is mostly a
-linearised radiative coefficient (≈5 W m⁻² K⁻¹ at 290 K). Using it alongside an
-explicit longwave term counts radiation roughly twice — a ~50% over-estimate of
-the turbulent flux at 1 m/s, which damps the diurnal swing and pulls facades
-toward air temperature: plausible answers for the wrong reason. Since this engine
-computes sky view factors precisely so the radiative term can be explicit, the
-convective coefficient is convective only.
+`h_c = 5.8 + 3.8u`, **and this intercept has been wrong twice in opposite
+directions.** It sets the entire surface-to-air temperature difference the engine
+exists to compute, so the history is worth writing down.
+
+*First*, `5.7`, from McAdams. That is a **combined** surface conductance whose
+5.7 is mostly a linearised radiative coefficient (≈5 W m⁻² K⁻¹ at 290 K), so
+using it alongside an explicit longwave term counted radiation roughly twice — a
+~50% over-estimate of the turbulent flux at 1 m/s, which damps the diurnal swing
+and pulls facades toward air temperature.
+
+*Then* `2.0`, described as a free-convection value for a vertical surface in still
+air. Diagnosing McAdams as combined was right; substituting a free-convection
+value for the **intercept of a forced-convection correlation** was not. Palyvos
+(2008), reviewing convective-only correlations for building envelopes, gives for
+vertical walls `7.4 + 4.0V` windward and `4.2 + 3.5V` leeward. Both intercepts are
+convective-only and both are far above 2.0.
+
+A large wind hides a small intercept: at 12 m/s the intercept is 4% of `h_c`. The
+2.0 was introduced while the wind fed to this function was **3.6× too large** —
+Open-Meteo returns km/h and the value was being read as m/s — so the two errors
+cancelled and both were invisible. Fixing the units for the year put the canyon
+wind where it belongs, 0.3 to 3 m/s, where the intercept is a *third* of `h_c`,
+and peak facade temperatures went to 68 °C: about 15 K above anything a
+thermographic survey of masonry reports.
+
+The current form is the mean of the two Palyvos correlations, since this engine
+has no orientation dependence. That it lands numerically close to McAdams is a
+coincidence of the literature, not a retreat: the 5.8 is a measured convective
+intercept, the 5.7 was convection plus radiation, and the explicit longwave term
+stays. Free convection on a hot wall is still omitted, but the omission is now
+**bounded** rather than open: the vertical-plate correlation `1.31·ΔT^(1/3)` gives
+under 4 W m⁻² K⁻¹ at a 30 K excess, which moves `h_c` by under 5% in cube-sum with
+a forced term of 11 — inside the spread between windward and leeward.
+
+The lesson is in the validation suite rather than only in this paragraph.
+`v_facade_envelope` now asserts that the 99.9th-percentile peak facade temperature
+lands inside 45–65 °C and that under 1% of the day exceeds 60 °C, because **both**
+wrong intercepts produced fields that looked plausible in every summary statistic.
+That check would have caught either one.
 
 Canyon wind: `u = u_above · exp(−0.386·H/W)`. This is *not* traceable to Masson
 (2000), which uses a prognostic scheme with no closed exponential law; treat
@@ -410,10 +455,47 @@ while *raising* pedestrian MRT in a deep canyon, because reflected shortwave has
 to go somewhere: a real, documented trade-off that a surface-temperature map
 would hide entirely.
 
+## 8a. The year
+
+The temporal axis has its own document, [YEAR.md](YEAR.md), because it introduces
+a second physics engine, a calibration, a reconstruction and a shading short cut,
+and each of those needs its own account. In brief:
+
+- **8,760 hours** of ERA5 reanalysis from Open-Meteo — free, no key — bias-corrected
+  against FortyGuard on the one day both cover, with a 24-value diurnal offset
+  curve. The correction's *seasonality* is unvalidated and labelled as such.
+- **Three tiers.** The FortyGuard-measured event day and twelve monthly
+  representative days at full facade resolution with ray-traced shadows; an
+  8,760-hour accumulation with analytic canyon shading for the annual totals. A
+  month's representative day is the real day whose diurnal profile sits closest to
+  that month's mean, not a synthetic average — an averaged day has an averaged sun.
+- **Any other date** is that month's field plus a measured `dT_surface/dT_air`
+  (1.007 ± 0.005 K/K) times the day's air-temperature departure, checked against a
+  full re-solve on deliberately awkward days.
+- **A second engine**, `heatcanyon/yearsolve.py`, because 8,760 hours at facade
+  resolution is unreachable one panel at a time. It is a vectorised mirror of
+  `physics.py` and is required to agree with it to **1×10⁻⁶ K**, not to the 0.01 K
+  the fixed point converges to. Nothing in it may be improved independently.
+- **Two orderings** of the same buildings — event-day and annual — that share
+  about a quarter of their top fifty, both published with the measured agreement
+  between them.
+
+## 8b. The analyst
+
+Also its own document, [AGENT.md](AGENT.md). The previous analyst was a
+hand-written tool-use loop with six read-only queries; it could not invent a
+number and it also could not do any *work*. It is now a Claude Agent SDK turn with
+twenty in-process MCP tools over the solved model, three specialists, a shell and
+a workspace — it re-solves interventions, runs Moran's I and Getis-Ord Gi\* with a
+false-discovery correction, writes its own scripts, and drives the map. It has no
+web access, deliberately, because its authority is that every number came from
+this model.
+
 ## 9. Validation
 
-`python -m heatcanyon.cli validate` — 12 checks pass, 2 print as explicitly
-UNVALIDATED rather than being quietly omitted.
+`python -m heatcanyon.cli validate` — 20 checks pass, 4 print as explicitly
+UNVALIDATED rather than being quietly omitted. Plus 62 `pytest` unit tests over
+the year module, the vector engine and the analyst's tool surface.
 
 | Check | Result |
 |---|---|
@@ -429,20 +511,55 @@ UNVALIDATED rather than being quietly omitted.
 | Timezone convention | pass |
 | Canyon width vs street record | +14.7 m median, 99.6% consistent |
 | Raster vs analytic SVF | 0.092 mean absolute |
+| Vector year solver vs scalar engine | agree to 1e-6 K, 0 mask disagreements |
+| ERA5 bias correction vs FortyGuard | residual < 0.05 K on the fitted day |
+| Annual seasonality ordering | July > January by 15 K, June solar > 2× December |
+| Annual facade totals: aspect ordering | south > north by more than 1.5× |
+| Annual facade totals: no clipping | 0% of cells at the representable ceiling |
+| Analytic vs ray-traced shading | ground band only, over-estimate published |
+| Peak facade temperature envelope | p99.9 inside 45–65 °C |
+| Day-within-month reconstruction | vs a full re-solve on the worst-case days |
 | **Air temperature at height** | **UNVALIDATED — no public data exists** |
 | **Facade surface temperature** | **UNVALIDATED — no satellite sees a wall** |
+| **The year's air temperature** | **UNVALIDATED seasonally — one overlapping day** |
+| **Per-tile annual metrics** | **UNVALIDATED — a composite, not a measurement** |
 
-`npx playwright test` — 22 browser tests, including nine that render the page and
-inspect pixels. Four real rendering bugs were found by looking at screenshots
-that every array-level assertion had passed: corrupt roof triangles drawing 3 km
-streaks, a clipped colour ramp, ground-texture aliasing, and a camera that walked
-east while looking west.
+`npx playwright test` — 80 browser tests, including nine that render the page and
+inspect pixels, twelve over the year control, and eight over the analyst console
+(one of which drives a live turn and checks the figure it reports against the
+data). Four
+real rendering bugs were found by looking at screenshots that every array-level
+assertion had passed: corrupt roof triangles drawing 3 km streaks, a clipped
+colour ramp, ground-texture aliasing, and a camera that walked east while looking
+west.
+
+The year added two more of the same species, both invisible to every summary
+statistic. The annual sunlit-hours plane was **silently saturating at 3,276.7
+hours** — Int16 at a scale of 10 cannot hold 4,400, and 3,276.7 is a
+plausible-looking number for "sunlit hours per year". And a stride of 24 over the
+annual accumulation sampled **only midnight**, producing a year with zero sunlit
+hours everywhere. Both writers now raise on overflow, the stride is nudged to a
+value coprime with 24, and both failures have a check.
 
 ## 10. Limits and next steps
 
 - **The vertical dimension is unvalidated.** Closing it needs measurements at
   height: an instrumented tower, a UAV profile, or facade-mounted sensors. That
   is the first roadmap item.
+- **The year's bias correction rests on one overlapping day**, so its seasonality
+  is an extrapolation. Two routes close it: NYC's Hyperlocal Temperature
+  Monitoring network publishes summer-season street-level series, which would
+  validate the correction across one season for free; or a second FortyGuard
+  purchase on a winter day, 4,220 credits, which would test the extrapolation
+  directly. Neither is claimed here.
+- **The annual tier's shading is analytic.** Sunlit hours are a measured
+  over-estimate in the ground band at corners, plazas and intersections. Closing
+  it means ray-marching 8,760 solar positions, which is affordable if the solar
+  positions are quantised and memoised — the monthly tier already does that and
+  needs 53 ray-marches for 96 hours.
+- **The tile field's year is a composite.** One clear July day's measured spatial
+  anomaly carried across 365 days, which is an upper case for urban heat island
+  intensity. A second heatmap purchase on an overcast day would bound how much.
 - **Footprint geometry is ~2017 photogrammetry.** Heights come from the
   maintained table so they stay current, but the 124 buildings completed since
   the 2017 LiDAR flight are drawn as flat extrusions rather than measured

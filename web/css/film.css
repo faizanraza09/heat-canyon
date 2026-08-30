@@ -1,120 +1,140 @@
-/* The opening film's furniture: title card, captions, chapter marks, readouts.
+/* The opening film's furniture: title card, chapter marks, ticker, captions and
+ * the transport bar along the bottom.
  *
- * Kept in its own sheet because none of it survives the first ninety seconds.
- * The application's own stylesheet should not have to carry a layer that is
- * deleted from the DOM before the user touches anything.
+ * Kept in its own sheet because none of it survives the opening: everything here
+ * is removed from the DOM before the user touches a control, and the
+ * application's own stylesheet should not have to carry a layer that is deleted.
  *
- * The one rule that matters here: after the cross-fade, this overlay is still
- * present — the last three captions play over the live city — so everything in
- * it must be transparent and click-through by default, with only the two
- * controls taking pointer events back.
+ * Three things carry the design:
+ *
+ * The caption is a serif, set left at 30 characters a line and pinned above the
+ * transport bar rather than centred across the frame. Centred captions were
+ * fighting the model for the middle of the screen and reading as subtitles on a
+ * video; set left in Instrument Serif they read as the film's own voice, and
+ * they leave the centre of the frame to the city, which is the thing being
+ * talked about.
+ *
+ * The chapter mark is a serif numeral in the accent beside a monospace title
+ * with a rule under it, top left. The ticker — the source of whatever figure is
+ * being quoted — sits diagonally opposite, top right. Between them they frame
+ * the image without either of them being in it.
+ *
+ * The transport bar is a real transport bar: chapter segments proportional to
+ * their own length, a running clock, and named controls. An earlier version had
+ * only SOUND and SKIP, which meant the only way to see a chapter again was to
+ * reload the page.
+ *
+ * One rule matters structurally: after the cross-fade this overlay is still
+ * present — the last captions play over the live city — so everything in it is
+ * transparent and click-through by default, with only the transport bar taking
+ * pointer events back.
  */
 
 #film {
   position: fixed; inset: 0; z-index: 300;
-  color: #f2ece4;
+  color: var(--t1);
   transition: opacity .9s ease;
-  --film-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
 }
 #film[hidden] { display: none; }
 #film.over { opacity: 0; pointer-events: none; }
 #film.playing { pointer-events: none; }
-#film.playing #film-controls { pointer-events: auto; }
+#film.playing #film-bar { pointer-events: auto; }
 
 #film-gl {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   display: block;
-  background: #02030a;
+  background: var(--bg);
   transition: opacity .1s linear;   /* driven per-frame by the storyboard */
 }
 
-/* Vignette and grain. Both are doing the same job as the fog in the 3D scene:
-   giving a flat, unlit image somewhere to fall away to at the edges. */
+/* Vignette and grain, matching the ones over the city exactly — the cut from
+   the globe to the model should not also be a cut in the grade. */
 #film-vignette {
   position: absolute; inset: 0; pointer-events: none;
-  background:
-    radial-gradient(ellipse 120% 85% at 50% 45%, transparent 42%, rgba(0,0,0,.72) 100%),
-    linear-gradient(to bottom, rgba(0,0,0,.35), transparent 22%, transparent 72%, rgba(0,0,0,.55));
+  background: radial-gradient(120% 90% at 50% 45%,
+    rgba(10, 9, 8, 0) 38%, rgba(10, 9, 8, 0.55) 78%, rgba(10, 9, 8, 0.9) 100%);
 }
 #film-grain {
-  position: absolute; inset: -50%; pointer-events: none;
-  opacity: .05; mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
-  animation: grain 1.1s steps(4) infinite;
-}
-@keyframes grain {
-  0%   { transform: translate(0, 0); }
-  25%  { transform: translate(-3%, 2%); }
-  50%  { transform: translate(2%, -3%); }
-  75%  { transform: translate(-2%, -2%); }
-  100% { transform: translate(0, 0); }
+  position: absolute; inset: 0; pointer-events: none;
+  opacity: 0.05; mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* The warm wash that carries the cut from orbit into the city. */
+/* The warm wash that carries the cut from orbit into the city. Graded to the
+   heat ramp's top end rather than to a generic white flare, so the brightest
+   frame in the film is still a temperature. */
 #film-flash {
   position: absolute; inset: 0; pointer-events: none; opacity: 0;
-  background: radial-gradient(circle at 50% 52%, #fff3e0 0%, #f7c98a 35%, #c66b2e 70%, #2a1206 100%);
+  background: radial-gradient(circle at 50% 52%,
+    #F7E7BE 0%, #E8A64E 34%, #C7602A 66%, #3E1A40 88%, #0A0908 100%);
   mix-blend-mode: screen;
 }
 
-/* Letterbox. Retracts at the end, handing the full frame to the application. */
-.film-bar {
-  position: absolute; left: 0; right: 0; height: 0; background: #000;
-  pointer-events: none; z-index: 4;
-  transition: height 1.1s cubic-bezier(.2,.7,.2,1);
-}
-.film-bar.top { top: 0; }
-.film-bar.bottom { bottom: 0; }
-#film.playing .film-bar { height: 5.2vh; }
-#film.over .film-bar { height: 0; }
+/* ------------------------------------------------------------- title card
 
-/* ------------------------------------------------------------- title card */
+   Set left against the turning globe rather than centred over it. The globe is
+   drawn off to the right for exactly this reason (see drawGlobe's cx in
+   film.js), so the type has a dark quarter of the frame to sit in and the
+   planet is not being covered by the words about it.                          */
 
 #film-title {
   position: absolute; inset: 0; z-index: 6;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 18px; text-align: center; padding: 24px;
-  background: radial-gradient(ellipse 90% 70% at 50% 50%, rgba(2,3,10,.55), rgba(2,3,10,.94));
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 0 6vw; max-width: 980px;
   transition: opacity .7s ease;
 }
 #film.playing #film-title { opacity: 0; pointer-events: none; }
 
 #film-title .kicker {
   margin: 0; font-family: var(--mono); font-size: 11px; letter-spacing: .34em;
-  text-transform: uppercase; color: #8d97a8;
+  color: var(--t5); animation: hcRise 620ms var(--ease) both;
 }
 #film-title h1 {
-  margin: 0; font-family: var(--film-serif); font-weight: 400;
-  font-size: clamp(52px, 9vw, 128px); line-height: .92; letter-spacing: -.015em;
-  background: linear-gradient(180deg, #fff8ee 12%, #f0b46a 96%);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  margin: 22px 0 0; font-family: var(--serif); font-weight: 400;
+  font-size: clamp(64px, 9.5vw, 148px); line-height: .9; letter-spacing: -.02em;
+  color: var(--t0); animation: hcMask 1000ms var(--ease) 110ms both;
+}
+#film-title .rule {
+  width: 96px; height: 1px; background: var(--accent); transform-origin: left;
+  margin: 34px 0 26px; animation: hcRule 620ms var(--ease) 520ms both;
 }
 #film-title .strap {
-  margin: 0; max-width: 46ch; font-size: 14.5px; line-height: 1.65; color: #9aa3b2;
+  margin: 0; max-width: 44ch; font-size: 18px; line-height: 1.62; color: var(--t3);
+  text-wrap: pretty; animation: hcRise 620ms var(--ease) 600ms both;
 }
-#film-title .cta { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+#film-title .cta {
+  display: flex; gap: 14px; flex-wrap: wrap; margin-top: 40px;
+  animation: hcRise 620ms var(--ease) 700ms both;
+}
 #film-title button {
-  font: inherit; font-size: 13px; cursor: pointer; border-radius: 999px;
-  padding: 11px 26px; transition: all .18s ease;
-  border: 1px solid #f0b46a; background: #f0b46a; color: #1a1005; font-weight: 600;
-  letter-spacing: .02em;
+  all: unset; box-sizing: border-box; cursor: pointer; border-radius: var(--r);
+  font-family: var(--sans); font-size: 14px; font-weight: 500; letter-spacing: .01em;
+  padding: 14px 26px;
+  border: 1px solid var(--t0); background: var(--t0); color: var(--bg);
+  transition: background 220ms ease, border-color 220ms ease,
+              color 220ms ease, transform 220ms var(--ease);
 }
-#film-title button:hover:not(:disabled) { background: #ffd39a; border-color: #ffd39a; }
-#film-title button:disabled { opacity: .35; cursor: default; }
+#film-title button:hover:not(:disabled) { background: #FFFFFF; border-color: #FFFFFF; transform: translateY(-2px); }
+#film-title button:disabled { opacity: .38; cursor: default; }
 #film-title button.ghost {
-  background: transparent; color: #97a1b0; border-color: rgba(255,255,255,.16); font-weight: 500;
+  background: transparent; color: var(--t2); border-color: rgba(237, 231, 220, .24);
 }
-#film-title button.ghost:hover { color: #e6e9ee; border-color: rgba(255,255,255,.4); }
+#film-title button.ghost:hover {
+  background: transparent; color: var(--t0); border-color: rgba(237, 231, 220, .6);
+}
 
-#film-title .progress {
-  width: 260px; height: 2px; background: rgba(255,255,255,.10); overflow: hidden; margin-top: 6px;
+#film-title .boot { margin-top: 54px; max-width: 420px; animation: hcRise 620ms ease 840ms both; }
+#film-title .bar {
+  height: 1px; background: rgba(237, 231, 220, .14); position: relative; overflow: hidden;
 }
-#film-title .progress i {
-  display: block; height: 100%; width: 0; background: #f0b46a; transition: width .3s ease;
+#film-title .bar i {
+  position: absolute; inset: 0; display: block; background: var(--t5);
+  transform: scaleX(0); transform-origin: left; transition: transform .3s ease;
 }
-#film-title .load {
-  margin: 0; font-family: var(--mono); font-size: 11px; color: #6b7484; min-height: 14px;
+#film-title .brow {
+  display: flex; justify-content: space-between; margin-top: 10px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .22em; color: var(--t7);
 }
 
 /* -------------------------------------------------------------------- HUD */
@@ -123,131 +143,259 @@
 #film-hud[hidden] { display: none; }
 
 #film-chaptercard {
-  position: absolute; top: calc(5.2vh + 26px); left: 34px;
-  display: flex; align-items: baseline; gap: 14px;
-  opacity: 0; transform: translateY(6px);
+  position: absolute; top: 40px; left: 6vw;
+  display: flex; align-items: baseline; gap: 18px;
 }
-#film-chaptercard.in { animation: chapter 5.5s ease forwards; }
-@keyframes chapter {
-  0%   { opacity: 0; transform: translateY(8px); }
-  12%  { opacity: 1; transform: translateY(0); }
-  78%  { opacity: 1; transform: translateY(0); }
-  100% { opacity: .0; transform: translateY(0); }
-}
+/* Both the chapter mark and the ticker sit over the image, and by chapter four
+   the image is a lit planet filling the frame — so both carry a shadow. Without
+   it the graticule read straight through the letterforms. */
 #film-chapno {
-  font-family: var(--film-serif); font-size: 40px; line-height: 1; color: #f0b46a;
+  font-family: var(--serif); font-size: 34px; line-height: 1; color: var(--accent);
+  text-shadow: 0 1px 14px rgba(10, 9, 8, .95);
 }
+#film-chaptercard .ct { display: block; }
 #film-chapter {
-  font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: .30em;
-  text-transform: uppercase; color: #cdd3dc;
-  padding-bottom: 3px; border-bottom: 1px solid rgba(240,180,106,.4);
+  display: block; font-family: var(--mono); font-size: 11px; font-weight: 400;
+  letter-spacing: .3em; text-transform: uppercase; color: var(--t2);
+  text-shadow: 0 1px 12px rgba(10, 9, 8, .95);
+}
+#film-chaptercard .crule {
+  display: block; margin-top: 9px; width: 168px; height: 1px;
+  background: rgba(237, 231, 220, .2);
 }
 
+/* The ticker. It exists to keep the film honest: every claim the narration makes
+   has its source named on screen while it is being made. */
 #film-readout {
-  position: absolute; left: 34px; bottom: calc(5.2vh + 26px);
+  position: absolute; top: 44px; right: 6vw; text-align: right;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em;
+  color: var(--t7); line-height: 1.9;
+  text-shadow: 0 1px 12px rgba(10, 9, 8, .95);
   opacity: 0; transition: opacity .8s ease;
-  font-family: var(--mono);
 }
-#film-readout.in { opacity: .82; }
-#film-readout-label {
-  margin: 0 0 6px; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: #7f8898;
-}
-#film-readout-value { margin: 6px 0 0; font-size: 12.5px; color: #dfe4ea; letter-spacing: .06em; }
-#film-spark { display: block; width: 340px; height: 62px; }
+#film-readout.in { opacity: 1; }
+#film-caption.in { opacity: 1; }   /* legacy hook; the entrance is hcCap now */
+#film-readout-label { white-space: nowrap; }
+#film-readout-value { color: var(--t5); white-space: nowrap; }
+#film-spark { display: block; width: 300px; height: 54px; margin: 8px 0 0 auto; }
 #film-spark[hidden] { display: none; }
 
 #film-marker {
   position: absolute; top: 0; left: 0; opacity: 0;
   will-change: transform; transition: opacity .5s ease;
-  display: flex; align-items: center; gap: 9px;
+  display: flex; align-items: center; gap: 10px;
   /* Clear of the outermost expanding ring, so the label never sits inside it. */
   padding-left: 62px;
 }
 #film-marker i {
   position: absolute; left: 0; top: 50%; width: 9px; height: 9px; margin-top: -4.5px;
-  border: 1px solid #ffb257; border-radius: 50%;
-  box-shadow: 0 0 12px rgba(255,178,87,.8);
+  border: 1px solid var(--accent); border-radius: 50%;
+  box-shadow: 0 0 12px rgba(217, 84, 46, .8);
 }
 #film-marker b {
-  font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .26em;
-  color: #fff2dd; text-shadow: 0 1px 10px rgba(0,0,0,.9);
+  font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .26em;
+  color: var(--t0); text-shadow: 0 1px 10px rgba(10, 9, 8, .9);
 }
 #film-marker span {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; color: #ffb257; opacity: .85;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; color: var(--accent);
 }
 
 #film-caption {
-  position: absolute; left: 50%; bottom: calc(5.2vh + 46px); transform: translateX(-50%);
-  margin: 0; width: min(60ch, 78vw); text-align: center;
-  font-size: clamp(16px, 1.45vw, 22px); line-height: 1.58; letter-spacing: .002em;
-  color: #f4efe7; text-shadow: 0 2px 26px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.8);
-  opacity: 0; transition: opacity .55s ease;
+  position: absolute; left: 6vw; right: 6vw; bottom: 132px; margin: 0;
+  max-width: 30ch;
+  font-family: var(--serif); font-weight: 400;
+  font-size: clamp(26px, 2.5vw, 38px); line-height: 1.3; letter-spacing: -.005em;
+  color: var(--t0); text-wrap: pretty;
+  text-shadow: 0 2px 30px rgba(10, 9, 8, .9);
+  opacity: 0; transition: opacity .4s ease;
 }
 #film-caption.in { opacity: 1; }
 
-#film-controls {
-  position: absolute; top: calc(5.2vh + 22px); right: 30px;
-  display: flex; gap: 8px;
-}
-#film-controls button {
-  font: inherit; font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em;
-  text-transform: uppercase; cursor: pointer; padding: 7px 14px; border-radius: 999px;
-  background: rgba(10,14,22,.55); color: #97a1b0;
-  border: 1px solid rgba(255,255,255,.14);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  transition: all .18s ease;
-}
-#film-controls button:hover { color: #f4efe7; border-color: rgba(255,255,255,.42); }
-#film-controls button[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
-
+/* Imagery credit. Off until there is imagery to credit — it comes up with the
+   first satellite level, about nine hundred kilometres out, and stays for the
+   rest of the descent. Set at the very bottom of the type scale and well under
+   half opacity: it has to be readable and it must not compete with the line the
+   voice is speaking. */
 #film-credit {
-  position: absolute; right: 30px; bottom: calc(5.2vh + 26px); margin: 0;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em;
-  text-transform: uppercase; color: #6b7484; text-align: right; max-width: 46ch;
-  line-height: 1.7;
+  position: absolute; left: 6vw; bottom: 106px; margin: 0;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+  color: var(--t7); text-transform: uppercase;
+  opacity: 0; transition: opacity 1.2s ease; pointer-events: none;
+}
+#film.imagery #film-credit { opacity: .62; }
+#film.overcity #film-credit { bottom: 150px; }
+
+/* ---------------------------------------------------------- transport bar */
+
+#film-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 72px; z-index: 7;
+  display: flex; align-items: center; gap: 22px; padding: 0 6vw;
+  background: linear-gradient(to bottom, rgba(10, 9, 8, 0) 0%, rgba(10, 9, 8, .86) 46%);
+  border-top: 1px solid rgba(237, 231, 220, .1);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
 
-/* Once the cut has landed, the captions lift clear of where the time scrubber
-   will be. The readouts stay for now — the panels are still down, and the
-   figures being quoted are worth having on screen while they are quoted. */
-#film.overcity #film-caption { bottom: calc(5.2vh + 132px); }
-#film.overcity #film-marker { opacity: 0 !important; }
+#film-bar button {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--t5); transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+#film-bar button:hover { color: var(--t0); }
+#film-prev, #film-next { width: 26px; height: 26px; }
+#film-bar button.round {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid rgba(237, 231, 220, .34); color: var(--t0);
+}
+#film-bar button.round:hover { border-color: var(--t0); background: rgba(237, 231, 220, .08); }
 
-/* On the closing line the interface assembles, and everything of the film's
-   that wants a corner gets out of its way. */
+#film-segs { flex: 1; display: flex; align-items: center; gap: 5px; height: 40px; min-width: 0; }
+#film-segs .seg {
+  height: 100%; min-width: 0; cursor: pointer;
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+}
+#film-segs .seg .tr { width: 100%; height: 2px; background: rgba(237, 231, 220, .16); overflow: hidden; }
+#film-segs .seg .tr i {
+  display: block; height: 100%; background: var(--t1);
+  transform: scaleX(0); transform-origin: left;
+}
+#film-segs .seg .n {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .2em;
+  color: var(--t8); transition: color 240ms ease;
+}
+#film-segs .seg.on .n { color: var(--t0); }
+
+#film-time {
+  flex: none; font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+  color: var(--t5); min-width: 92px; text-align: right;
+}
+
+#film-bar button.txt {
+  padding: 6px 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: .2em;
+  border-bottom: 1px solid transparent;
+}
+#film-bar button.txt:hover { color: var(--t0); border-bottom-color: rgba(237, 231, 220, .5); }
+
+/* On the closing line the interface assembles, and everything of the film's that
+   wants a corner gets out of its way.
+
+   The transport bar included. It is a full-width bar at the bottom of the frame
+   and the application's clock is a centred pill at the bottom of the same frame;
+   left up, the two sat on top of each other for the length of the closing
+   caption. By this point the bar has nothing left to offer — the film is over in
+   a few seconds either way — so it goes rather than being squeezed somewhere.
+
+   The caption moves too. It is set left at 6vw, which is clear of everything
+   while the panels are still down and directly underneath the left panel the
+   moment they are not, so for the closing line it moves into the gap between
+   them — the one part of the frame the interface does not want. */
+/* And they leave faster than the interface arrives. Both are triggered by the
+   same beat, so at the ticker's own 0.8s fade and the bar's 0.7s there was a
+   window of a few hundred milliseconds where the film's chrome and the panels
+   were both on screen — the ticker sitting across the ranking's heading. A third
+   of a second out against the panels' 1.1s in leaves the corner clear before
+   anything else wants it. */
 #film.closing #film-readout,
-#film.closing #film-credit,
-#film.closing #film-chaptercard { opacity: 0 !important; }
-#film.closing #film-controls {
-  top: auto; bottom: calc(5.2vh + 22px); right: auto;
-  left: 50%; transform: translateX(-50%);
+#film.closing #film-chaptercard {
+  opacity: 0 !important;
+  transition: opacity .35s ease !important;
 }
-#film.closing #film-sound { display: none; }
+#film.closing #film-marker { opacity: 0 !important; }
+#film.overcity #film-marker { opacity: 0 !important; }
+#film.closing #film-bar {
+  opacity: 0; pointer-events: none; transition: opacity .35s ease;
+}
+#film.closing #film-caption {
+  left: calc(var(--inset) * 2 + var(--wl));
+  right: calc(var(--inset) * 2 + var(--wr));
+  max-width: 36ch;
+}
 
 /* --------------------------------------------------- the application below
 
    The panels are held back while the film runs and come up in sequence behind
-   the closing captions, so the interface assembles itself rather than
-   appearing all at once the instant the overlay leaves.                     */
+   the closing captions, so the interface assembles itself rather than appearing
+   all at once the instant the overlay leaves.                                */
 
-#left, #side, #time { transition: opacity 1.1s ease, transform 1.1s cubic-bezier(.2,.7,.2,1); }
 body.film-running #left,
 body.film-running #side,
 body.film-running #time,
-body.film-running #hover { opacity: 0; pointer-events: none; }
+body.film-running #hover,
+body.film-running #credits,
+body.film-running .rehandle,
+body.film-running #unfold-bottom-wrap { opacity: 0; pointer-events: none; }
 body.film-running #left { transform: translateX(-14px); }
 body.film-running #side { transform: translateX(14px); }
 body.film-running #time { transform: translateY(16px); }
+
+/* The panels animate themselves in on mount (hcLeft/hcRight/hcUp in app.css).
+   With the film running that mount happened behind the overlay, so the entrance
+   was spent before anyone could see it — hence the transition here, which is
+   what actually brings them up when the film hands over. */
+#left, #side, #time { transition: opacity 1.1s ease, transform 1.1s var(--ease); }
 #left  { transition-delay: 0s; }
 #side  { transition-delay: .16s; }
 #time  { transition-delay: .32s; }
 
-/* The replay control, tucked into the masthead. It shares its row and its
-   styling with the tour chip beside it, so both live in `.brandbtns` in
-   tour.css rather than being positioned twice from two sheets. */
-#left .brand { position: relative; }
+@media (max-width: 1000px) {
+  #film-readout { display: none; }
+  #film-caption { max-width: 26ch; font-size: clamp(20px, 4.4vw, 28px); bottom: 108px; }
+  #film-bar { gap: 14px; padding: 0 4vw; }
+  #film-time { min-width: 78px; }
+}
 
-@media (max-width: 900px) {
-  #film-readout, #film-credit { display: none; }
-  #film-caption { width: 86vw; bottom: calc(5.2vh + 30px); }
+@media (prefers-reduced-motion: reduce) {
+  #film-title .kicker, #film-title h1, #film-title .rule,
+  #film-title .strap, #film-title .cta, #film-title .boot { animation: none; }
+  #film-caption, #film-chaptercard { transition: none; }
+}
+
+/* ------------------------------------------------- the film over the tool
+
+   From chapter three the film is not a picture with a caption on it, it is the
+   application with a caption on it — and the application already owns both
+   edges of the screen. The left panel runs to about a quarter of the width, the
+   ranking runs back the same distance from the right, and the film's own
+   furniture was laid out for a frame with nothing in it: the caption crossed the
+   layer list, the chapter mark sat on the panel's masthead, and the ticker
+   printed its provenance line straight through "WHERE TO ACT FIRST".
+
+   So over the city it moves into the middle, which is the one column the
+   interface leaves empty. The caption goes to the top of it, not the bottom,
+   because the bottom is where the time scrubber lives and a caption above a
+   scrubber leaves neither enough room. Centred, narrower, and on a soft scrim,
+   because the model behind it is pale and moving.
+
+   The ticker goes out entirely. Its job was to keep the source of a claim on
+   screen while the claim was made, and from here the panels do that better than
+   it can: every figure the captions quote is visible in the interface behind
+   them, in the pane it came from.                                            */
+
+#film.overcity #film-readout { opacity: 0 !important; }
+
+#film.overcity #film-caption {
+  left: 27%; right: 27%; bottom: auto; top: 108px;
+  max-width: none; text-align: center;
+  font-size: clamp(22px, 1.7vw, 30px);
+  text-shadow: 0 2px 22px rgba(10, 9, 8, .95), 0 0 60px rgba(10, 9, 8, .8);
+}
+
+#film.overcity #film-chaptercard {
+  left: 50%; top: 54px; transform: translateX(-50%);
+  right: auto; text-align: center;
+}
+
+/* The brief and the analyst are full-screen documents, and while one is up the
+   middle column is not empty any more. The caption drops to the foot of the
+   screen, clear of both, and keeps its scrim. */
+body:has(#brief:not([hidden])) #film.overcity #film-caption,
+body:has(#analyst:not([hidden])) #film.overcity #film-caption {
+  /* Below the document, above the transport bar, which is 72px tall and owns
+     the foot of the screen. At 26px the line was printed straight through the
+     scrubber. */
+  top: auto; bottom: 88px; left: 8%; right: 8%;
+  font-size: clamp(20px, 1.5vw, 26px);
+}
+body:has(#brief:not([hidden])) #film.overcity #film-chaptercard,
+body:has(#analyst:not([hidden])) #film.overcity #film-chaptercard {
+  opacity: 0;
 }

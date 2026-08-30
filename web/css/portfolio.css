@@ -1,0 +1,562 @@
+/* The programme — the portfolio view.
+ *
+ * This sheet adds no colour, no typeface, no radius and no easing. Everything
+ * here is assembled from the tokens already declared at the top of app.css, and
+ * the two or three values that are not tokens — a column width, a chart margin —
+ * are geometry rather than language.
+ *
+ * WHY THE WINDOW IS A COPY AND NOT A VARIATION
+ *
+ * The first block below is #analyst-win's geometry with the ids changed: the
+ * same 62% scrim over the same 3px backdrop blur, the same min(1080px, 92vw) by
+ * min(760px, 86vh), the same 4px radius on the same hairline, the same 240ms
+ * fade against the same 320ms settle on var(--ease). That is deliberate to the
+ * pixel. These are siblings — two full-screen views that open over the model and
+ * give it back on Escape — and a reader who has opened one has learned how the
+ * other behaves. A window that were 40px wider or 20ms slower would teach them
+ * that these are two different mechanisms, which is exactly the thing four new
+ * surfaces built in parallel are at risk of doing.
+ *
+ * THE ONE PLACE COLOUR CARRIES MEANING
+ *
+ * --money and --cost, and only on money. The heat ramp is not used anywhere in
+ * this view: a panel sitting over a city painted in the ramp must not put a
+ * second temperature on the screen, and a dollar is not a temperature. The
+ * severity stripe on a table row uses the --sev-* ramp, which is the shell's own
+ * warm neutral climbing to the accent and reads as "more" rather than "hotter".
+ * --accent appears three times in the whole sheet: the sigil, the crosshair
+ * under the pointer, and the active state of a control. Never on data.
+ *
+ * ASSUMED FIGURES
+ *
+ * `.asm` is scoped to this window rather than declared globally, because the
+ * decision layer's four surfaces were built in parallel against the same token
+ * and two of them declaring the same global class is a merge conflict waiting to
+ * happen. The treatment is the one app.css describes: a dotted underline in
+ * --assumed, and nothing else. It is on every capital cost, every kilowatt-hour
+ * and every tonne on this screen, because not one of those was measured.
+ */
+
+/* ============================================================== the window */
+
+#pf { position: fixed; inset: 0; z-index: 200; }
+#pf[hidden] { display: none; }
+
+#pf-scrim {
+  position: absolute; inset: 0;
+  background: rgba(10, 9, 8, 0.62);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 240ms ease;
+}
+#pf.on #pf-scrim { opacity: 1; }
+
+#pf-win {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, calc(-50% + 14px));
+  width: min(1080px, 92vw); height: min(760px, 86vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel-solid);
+  border: 1px solid var(--line-panel); border-radius: var(--r2);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, .6), 0 2px 10px rgba(0, 0, 0, .5);
+  opacity: 0;
+  transition: opacity 240ms ease, transform 320ms var(--ease);
+}
+#pf.on #pf-win { opacity: 1; transform: translate(-50%, -50%); }
+
+#pf-win .phead { flex: none; }
+#pf-win .plede { max-width: 78ch; }
+#pf-win .icon { width: auto; padding: 0 7px; height: 22px; }
+
+#pf-body {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  /* The header is a flex sibling rather than a sticky child, so the body
+     genuinely scrolls under a hard edge. At the boundary that cuts a line of
+     type in half horizontally, and a half-height glyph row reads as a
+     rendering fault rather than as "there is more above" — it was mistaken for
+     one during review. A short fade at the top edge only, applied to the
+     scroller itself so it travels with the content rather than sitting over it
+     as an overlay that would also dim the first row when scrolled to the top.
+     `to bottom` with an opaque first stop means no fade at rest. */
+  -webkit-mask-image: linear-gradient(to bottom,
+    transparent 0, #000 14px, #000 100%);
+  mask-image: linear-gradient(to bottom,
+    transparent 0, #000 14px, #000 100%);
+}
+/* At the very top there is nothing above to fade from, and masking the first
+   14px of the ledge would clip the first heading. `scroll-timeline` is not
+   broadly enough supported to drive this, so the class is toggled in
+   portfolio.js on scroll. */
+#pf-body.at-top { -webkit-mask-image: none; mask-image: none; }
+
+@media (max-width: 760px), (max-height: 560px) {
+  #pf-win { width: 96vw; height: 92vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #pf-scrim, #pf-win { transition: none; }
+}
+
+/* The nameplate, built the way the analyst's is: a sigil that is the thing the
+   window is about, a serif wordmark, and one line of monospace saying what it
+   is. Here the sigil is the curve itself with the budget line standing in it. */
+#pf-name { display: flex; align-items: baseline; gap: 10px; letter-spacing: 0; }
+#pf-name .sigil {
+  width: 19px; height: 19px; flex: none; color: var(--accent);
+  align-self: center; transform: translateY(-1px);
+}
+#pf-name .wordmark {
+  font-family: var(--serif); font-size: 27px; font-weight: 400;
+  letter-spacing: .01em; color: var(--t0); line-height: 1;
+}
+#pf-name .role {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--t7); white-space: nowrap;
+}
+
+/* The standing fact line under the lede: what this view is reading, and which
+   engine answered. The second half matters — a view that quietly computes in the
+   browser while implying a solver ran is how a platform gets disbelieved — so it
+   is on the same line as the counts rather than in a corner. */
+.pfmeta {
+  margin: 10px 0 0; font-family: var(--mono); font-size: 9.5px;
+  line-height: 1.9; letter-spacing: .12em; text-transform: uppercase; color: var(--t7);
+}
+.pfmeta .src { color: var(--t8); }
+
+/* ------------------------------------------------------------- assumptions */
+
+#pf-win .asm {
+  border-bottom: 1px dotted var(--assumed);
+  padding-bottom: 1px; cursor: help;
+}
+
+/* --------------------------------------------------------- the fixture note
+
+   First thing in the scroller, not a badge in a corner. Every figure below it is
+   affected, and a badge is the shape a reader's eye learns to skip. */
+
+.pf-fixture {
+  display: flex; align-items: baseline; gap: 12px;
+  margin: 0; padding: 12px 22px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(217, 84, 46, .06);
+}
+.pf-fixture .tag {
+  flex: none; font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--accent);
+}
+.pf-fixture .txt { font-size: 11.5px; line-height: 1.6; color: var(--t4); text-wrap: pretty; }
+
+/* -------------------------------------------------------------- a section */
+
+.pfsec { padding: 20px 22px 22px; border-bottom: 1px solid var(--line); }
+.pfsec:last-child { border-bottom: 0; }
+
+.pfsec-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 14px; margin-bottom: 8px;
+}
+.pfsec-head .klabel {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--t5);
+}
+.pfsec-right {
+  flex: none; font-family: var(--mono); font-size: 9.5px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--t8);
+}
+.pfsec-lede {
+  margin: 0 0 16px; max-width: 74ch;
+  font-size: 12px; line-height: 1.65; color: var(--t5); text-wrap: pretty;
+}
+.pfgloss {
+  margin: 6px 0 0; font-size: 11px; line-height: 1.55; color: var(--t7); text-wrap: pretty;
+}
+
+/* ============================================================= 1. the curve */
+
+.pfcurve-grid { display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 22px; }
+.pfplot-wrap { min-width: 0; }
+
+.pfplot {
+  position: relative; width: 100%; height: 296px;
+  cursor: col-resize; outline: none;
+  border-radius: var(--r);
+  transition: box-shadow 200ms var(--ease);
+}
+/* The plot is a slider and takes the keyboard, so it has to be able to say that
+   it has focus. A ring rather than a border, so nothing reflows when it lands. */
+.pfplot:focus-visible { box-shadow: 0 0 0 1px var(--line-hi); }
+.pfsvg { display: block; overflow: visible; }
+
+.pf-grid { stroke: var(--line-faint); stroke-width: 1; shape-rendering: crispEdges; }
+.pf-axis { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
+
+/* The programme is a tinted COLUMN rather than a filled area under the curve.
+   On this chart x is already money, so the area under the line is dollars
+   squared per person-hour — nothing at all — and filling it would invite exactly
+   the reading it cannot support. A full-height tint says "this region"; it
+   cannot be misread as "this quantity". */
+.pf-funded-col { fill: rgba(178, 96, 63, .10); }
+
+.pf-line { fill: none; stroke-linejoin: miter; }
+.pf-line.on { stroke: var(--t1); stroke-width: 1.4; }
+.pf-line.off { stroke: var(--t7); stroke-width: 1; }
+
+.pf-budget { stroke: var(--t0); stroke-width: 1; shape-rendering: crispEdges; }
+.pf-handle { fill: var(--t0); }
+.pf-budget-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+  fill: var(--t0); font-variant-numeric: tabular-nums;
+}
+
+.pf-ytick, .pf-xtick {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .06em;
+  fill: var(--t7); font-variant-numeric: tabular-nums;
+}
+.pf-cap {
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: .18em; fill: var(--t8);
+}
+
+/* The one place the accent touches the chart: where the pointer is. */
+.pf-xhair { stroke: var(--accent); stroke-width: 1; opacity: .55; shape-rendering: crispEdges; }
+.pf-dot { fill: var(--accent); }
+
+/* The scale switch reuses .ordsw's shape — the design's existing answer to "two
+   mutually exclusive choices" — at the size a section header can carry. */
+.pfscale.ordsw { padding: 0; gap: 6px; flex: none; }
+.pfscale.ordsw button { flex: none; padding: 5px 11px; font-size: 11px; }
+
+/* ---- the readout under the plot
+
+   A fixed row, not a floating tooltip. A tooltip over a stepped chart covers the
+   steps either side of the one it is describing, and a row can carry a capex
+   RANGE without turning into a card. With nothing hovered it reads the candidate
+   at the margin, which is the most useful thing it could hold by default. */
+.pfreadout {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px;
+  margin-top: 12px; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--panel-tint);
+  min-height: 38px;
+}
+.pfreadout .lab {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--t8); flex: none;
+}
+.pfreadout .addr {
+  font-family: var(--serif); font-size: 16px; color: var(--t0); line-height: 1;
+}
+.pfreadout .msr { font-size: 11.5px; color: var(--t4); }
+.pfreadout .v {
+  font-family: var(--mono); font-size: 12px; color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+.pfreadout .v i {
+  font-style: normal; margin-left: 5px; font-size: 9px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--t8);
+}
+.pfreadout .tag {
+  margin-left: auto; flex: none;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--t7);
+  border: 1px solid var(--line); border-radius: var(--r); padding: 3px 7px;
+}
+.pfreadout .tag.in { color: var(--money); border-color: rgba(127, 166, 106, .34); }
+
+/* ---- the rail: the programme in six figures */
+
+.pfrail { min-width: 0; }
+.pfbig {
+  padding-bottom: 14px; margin-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.pfbig .klabel {
+  display: block; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .2em; text-transform: uppercase; color: var(--t7);
+}
+/* The one figure on this screen the reader came to choose, so it is the one
+   figure allowed to be large, and it is set in the serif for the same reason an
+   address is: it is a name for the decision, not a measurement of it. */
+.pfbig .fig {
+  display: block; margin-top: 6px;
+  font-family: var(--serif); font-size: 42px; line-height: .95;
+  letter-spacing: -.01em; color: var(--t0);
+  font-variant-numeric: tabular-nums;
+}
+.pfbig .sub {
+  display: block; margin-top: 7px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--t7);
+}
+
+.pfstats { margin: 0; display: flex; flex-direction: column; gap: 11px; }
+.pfstats div { display: flex; flex-direction: column; gap: 3px; }
+.pfstats dt {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--t7);
+}
+.pfstats dd {
+  margin: 0; font-family: var(--mono); font-size: 14px; color: var(--t1);
+  font-variant-numeric: tabular-nums; line-height: normal;
+}
+.pfstats dd i {
+  display: block; font-style: normal; margin-top: 3px;
+  font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--t8);
+}
+
+/* ============================================================ 2. the ledger
+
+   One paragraph with room around it. It is the only prose in this view meant to
+   be lifted out of it, so it gets the serif and a measure short enough to read
+   at a glance from across a table. */
+
+.pfpara {
+  margin: 4px 0 0; max-width: 62ch;
+  font-family: var(--serif); font-size: 21px; line-height: 1.5;
+  color: var(--t2); letter-spacing: .002em; text-wrap: pretty;
+}
+.pfpara b { color: var(--t0); font-weight: 400; font-variant-numeric: tabular-nums; }
+.pfpara .asm { border-bottom-color: var(--assumed); }
+.pffoot {
+  margin: 14px 0 0; max-width: 70ch;
+  font-size: 11.5px; line-height: 1.6; color: var(--t6); text-wrap: pretty;
+}
+
+/* ====================================================== 3. two objectives
+
+   Built as a sibling of the two orderings in the right-hand panel, down to
+   reusing .ordsw for the switch and .note for the overlap figure. There was no
+   reason to invent a second visual language for the same idea applied to money,
+   and every reason not to. */
+
+.pfobj-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.pfpick .klabel {
+  display: block; margin-bottom: 7px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--t8);
+}
+.pfpick .ordsw { padding: 0; gap: 6px; }
+.pfpick .ordsw button { padding: 7px 0; font-size: 11.5px; }
+
+.pfobj-stat {
+  margin: 16px 0 0; padding: 10px 11px;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 9.5px; line-height: 1.9;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--t6);
+}
+.pfobj-stat b { color: var(--t0); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.pfobj-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 16px; }
+.pfcol { min-width: 0; }
+.pfcol h4 {
+  margin: 0; font-family: var(--serif); font-size: 19px; font-weight: 400;
+  color: var(--t0); line-height: 1.1;
+}
+.pflist { list-style: none; margin: 12px 0 0; padding: 0; }
+.pflist li {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 5px 0 5px 8px; border-left: 1px solid transparent;
+  border-bottom: 1px solid var(--line-faint);
+}
+/* A row this column funds and the other does not. The mark is a hairline and a
+   monospace tag rather than a colour: the accent belongs to the cursor, and any
+   other colour on a row of buildings would be read as a temperature by a reader
+   who has spent the last ten minutes looking at the model behind this window. */
+.pflist li.only { border-left-color: var(--line-hi); background: rgba(237, 231, 220, .03); }
+.pflist .n {
+  flex: none; width: 18px; font-family: var(--mono); font-size: 10px;
+  color: var(--t8); font-variant-numeric: tabular-nums;
+}
+.pflist .a {
+  flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: var(--t2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pflist .m {
+  flex: none; font-family: var(--mono); font-size: 9px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--t7);
+}
+/* The rule between "this column's programme" and "what this column funds that
+   the other drops". It is a label on a hairline rather than a heading, because
+   the second list is a continuation of the first and a second <h4> would read as
+   a second column. */
+.pfcolrule {
+  display: flex; align-items: center; gap: 10px; margin: 14px 0 8px;
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--t8);
+}
+.pfcolrule::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+/* Two lines by construction. On one line it wrapped, and a monospace line that
+   wraps mid-figure at .1em letter-spacing leaves an orphaned word hanging under
+   a column of addresses, which looked like a bug in the layout rather than a
+   long sentence. */
+.pfcolfoot {
+  display: flex; flex-direction: column; gap: 3px; margin: 12px 0 0;
+  font-family: var(--mono); font-size: 9.5px; line-height: 1.6;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--t7);
+  font-variant-numeric: tabular-nums;
+}
+.pfcolfoot b { color: var(--t1); font-weight: 500; }
+
+.pfobj-read { margin: 18px 0 0; max-width: 78ch; }
+.pfobj-read .rd {
+  display: block; font-size: 13.5px; line-height: 1.65; color: var(--t3); text-wrap: pretty;
+}
+.pfobj-read .nt {
+  display: block; margin-top: 10px;
+  font-size: 11.5px; line-height: 1.6; color: var(--t6); text-wrap: pretty;
+}
+
+/* ============================================================== 4. phasing */
+
+.pfphases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.pfphase {
+  padding: 14px 15px; border: 1px solid var(--line); border-radius: var(--r2);
+  background: var(--panel-tint);
+}
+.pfphase.empty { opacity: .42; }
+.ph-h { display: flex; align-items: baseline; gap: 9px; }
+.ph-n {
+  font-family: var(--serif); font-size: 30px; line-height: .9; color: var(--t0);
+  font-variant-numeric: tabular-nums;
+}
+.ph-l {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--t4);
+}
+.ph-bar { height: 2px; background: rgba(237, 231, 220, .1); margin: 13px 0 12px; }
+/* The bar is share of person-hours avoided — a benefit, not a sum of money — so
+   it is deliberately NOT --money. It was, briefly, and a green bar under a
+   dollar figure reads as "this much of the budget" to everyone who looks at it
+   for less than a second, which is everyone. */
+.ph-bar i { display: block; height: 100%; background: var(--t4); transition: width 320ms var(--ease); }
+.ph-stats { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.ph-stats div { min-width: 0; }
+.ph-stats dt {
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--t8);
+}
+.ph-stats dd {
+  margin: 3px 0 0; font-family: var(--mono); font-size: 11.5px; color: var(--t2);
+  font-variant-numeric: tabular-nums; line-height: normal;
+}
+
+/* ================================================================ 5. table */
+
+.pffilters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px;
+}
+.pfq {
+  all: unset; box-sizing: border-box; width: 168px; padding: 6px 9px;
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  font-family: var(--sans); font-size: 12px; line-height: normal; color: var(--t1);
+  transition: border-color 200ms ease;
+}
+.pfq::placeholder { color: var(--t8); }
+.pfq:focus { border-color: var(--line-hi); }
+
+.pfchips { display: flex; gap: 5px; }
+/* A hairline between the two chip groups. Without it "NIGHT PURGE" and the lead
+   time's "ALL" sat 12px apart and read as one run of ten choices rather than as
+   two independent filters. */
+.pfchips + .pfchips { padding-left: 12px; border-left: 1px solid var(--line); }
+.pfchips button, .pfonly {
+  all: unset; box-sizing: border-box; cursor: pointer; padding: 5px 9px;
+  border: 1px solid rgba(237, 231, 220, .14); border-radius: var(--r);
+  font-family: var(--mono); font-size: 9px; line-height: normal;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--t6);
+  transition: all 240ms var(--ease);
+}
+.pfchips button:hover, .pfonly:hover { color: var(--t1); border-color: rgba(237, 231, 220, .3); }
+.pfchips button[aria-pressed="true"], .pfonly[aria-pressed="true"] {
+  background: rgba(237, 231, 220, .1); border-color: var(--line-hi); color: var(--t0);
+}
+/* Deliberately NOT pushed right with `margin-left: auto`. At this window width
+   the filter row wraps, and an auto margin left the toggle stranded alone on a
+   second line hard against the right edge, reading as a stray control rather
+   than as the last of the filters. Wrapping in sequence puts it at the start of
+   the second row where the eye is already going. */
+.pfonly { margin-left: 4px; }
+
+.pftable-wrap { overflow-x: auto; }
+.pftab {
+  width: 100%; border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+/* Not sticky. `.pftable-wrap` carries overflow-x so the columns can scroll
+   sideways in a narrow window, which makes that box the nearest scrolling
+   ancestor and leaves `position: sticky` sticking to something that never
+   scrolls vertically. The page is 25 rows instead — see the note in
+   portfolio.js. */
+.pftab th {
+  text-align: left; padding: 7px 14px 7px 0; cursor: pointer;
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--line-ctl);
+  font-family: var(--mono); font-size: 8.5px; font-weight: 400;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--t7);
+  white-space: nowrap; transition: color 200ms ease;
+}
+.pftab th:hover { color: var(--t2); }
+.pftab th:focus-visible { outline: 1px solid var(--line-hi); outline-offset: -1px; }
+/* The sort marker is a caret drawn in the header's own :after, so the column
+   width does not change when the sort moves. An arrow glyph inserted into the
+   label shifted every column right of it by 8px on each click. */
+.pftab th i { display: inline-block; width: 9px; }
+.pftab th[aria-sort="ascending"] i::after { content: '\2191'; color: var(--t3); }
+.pftab th[aria-sort="descending"] i::after { content: '\2193'; color: var(--t3); }
+.pftab th.c-num { text-align: right; padding-left: 14px; }
+
+.pftab td {
+  padding: 6px 14px 6px 0; border-bottom: 1px solid var(--line-faint);
+  font-family: var(--mono); font-size: 11px; color: var(--t3);
+  white-space: nowrap;
+}
+.pftab tbody tr { cursor: pointer; transition: background 160ms ease; }
+.pftab tbody tr:hover { background: rgba(237, 231, 220, .05); }
+.pftab tbody tr:focus-visible { outline: 1px solid var(--line-hi); outline-offset: -1px; }
+.pftab tbody tr.sel { background: rgba(237, 231, 220, .08); }
+
+/* Funded rows are brighter, unfunded ones recede. It is the same distinction the
+   curve makes with stroke weight, made here with value — and it is the only
+   thing in the table that changes when the budget line moves, so it has to be
+   visible without being a second colour. */
+.pftab tbody tr td { opacity: .55; }
+.pftab tbody tr.in td { opacity: 1; }
+
+.pftab td.c-addr {
+  font-family: var(--sans); font-size: 12.5px; color: var(--t1);
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+  padding-left: 0;
+}
+.pftab td.c-msr, .pftab td.c-lead {
+  font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--t6);
+}
+.pftab td.c-num { text-align: right; padding-left: 14px; }
+.pftab th:last-child, .pftab td:last-child { padding-right: 0; }
+.pftab td.c-num.money { color: var(--money); }
+.pftab td.c-num.dim { color: var(--t7); }
+
+/* The severity stripe: the candidate's own priority, five steps, in the shell's
+   warm neutral climbing to the accent. Not the temperature ramp — see the note
+   at the top of this sheet. */
+.pftab .sev {
+  display: inline-block; width: 2px; height: 11px; margin-right: 9px;
+  vertical-align: -1px; background: var(--sev-0);
+}
+.pftab .sev.s1 { background: var(--sev-1); }
+.pftab .sev.s2 { background: var(--sev-2); }
+.pftab .sev.s3 { background: var(--sev-3); }
+.pftab .sev.s4 { background: var(--sev-4); }
+
+.pfpager {
+  display: flex; align-items: center; gap: 16px; margin-top: 12px;
+}
+.pfpager .pgn {
+  flex: 1; text-align: center;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--t7); font-variant-numeric: tabular-nums;
+}
+.pfpager button[disabled] { opacity: .3; cursor: default; pointer-events: none; }
+
+/* Every animated property in this sheet, off. */
+@media (prefers-reduced-motion: reduce) {
+  .ph-bar i, .pftab tbody tr, .pfchips button, .pfonly, .pfplot { transition: none; }
+}

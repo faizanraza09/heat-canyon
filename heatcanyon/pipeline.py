@@ -19,6 +19,17 @@ Outputs, all under ``web/data/``:
   canyons.json     canyon cross-sections with morphology
   ranked.json      the prioritised building list with full score decomposition
   scenarios.json   scenario deltas at representative canyons
+
+And, since the platform shows a year rather than an afternoon:
+
+  year.json        the hourly meteorology, 365 daily records, 12 monthly records,
+                   seasons, heat-wave episodes, the bias correction and its residuals
+  month_NN/*.bin   twelve solved days, one per month, same shape as the event day's
+                   binaries; fetched by the browser only for the month being shown
+  annual/*.bin     per-panel-per-band annual totals and extremes
+  sens.bin         dT_surface/dT_air per panel per band, for day-within-month scrubbing
+
+  See heatcanyon/tiers.py for what each temporal tier is and is not.
 """
 
 from __future__ import annotations
@@ -41,12 +52,17 @@ from . import nyc
 from . import physics as P
 from . import scenarios as SC
 from . import solar
+from . import tiers as T
+from . import year as Y
+from . import yearsolve as YS
 
 OUT = Path("web/data")
 
 #: The diurnal hours we bought from FortyGuard, as (API GMT-5 hour, wall-clock EDT).
-HOURS = [(2, 3), (5, 6), (8, 9), (11, 12), (14, 15), (17, 18), (20, 21), (23, 0)]
-PEAK_INDEX = 4          # 14:00 GMT-5 = 15:00 EDT, the anchor hour
+#: Defined once in ``tiers`` so the event day and the twelve monthly days are
+#: sampled identically and can be compared hour for hour.
+HOURS = T.HOURS
+PEAK_INDEX = T.PEAK_INDEX   # 14:00 GMT-5 = 15:00 EDT, the anchor hour
 N_BANDS = 10            # facade height bands
 # Ten rather than six. Six put a single band across 70 m of a 400 m tower, which
 # is coarser than the shadow line it is meant to resolve and visibly faceted at
@@ -54,8 +70,16 @@ N_BANDS = 10            # facade height bands
 # solve, and it is the resolution at which a climbing shadow actually reads as a
 # gradient rather than a staircase.
 STUDY_DATE = (2026, 7, 2)
+STUDY_DATE_STR = f"{STUDY_DATE[0]}-{STUDY_DATE[1]:02d}-{STUDY_DATE[2]:02d}"
 WAVE = ("2026-06-29", "2026-07-05")
 THRESHOLD_C = 35.0
+
+#: Every hour of the year is solved by default. A stride is offered because the
+#: annual accumulation is the one part of this build measured in minutes rather
+#: than seconds, and a developer changing the renderer should not have to pay for
+#: it on every run. Anything but 1 is recorded in meta.json, so a shipped build
+#: cannot quietly be a sampled one.
+YEAR_STRIDE = 1
 
 
 # ------------------------------------------------------------------ helpers
@@ -114,18 +138,97 @@ class TileField:
         }
 
 
-def _q16(values, scale: float = 100.0) -> bytes:
-    """Quantise to Int16. 0.01 K precision is far finer than the model's skill."""
+def _event_day_indices(ym: "Y.YearMet") -> list[int]:
+    """The 24 hourly indices of the study day inside the year series."""
+    try:
+        return [int(i) for i in ym.day_slice(STUDY_DATE_STR)]
+    except ValueError:
+        return list(range(24))
+
+
+def _nearest_hour_slot(hour_edt: int) -> int:
+    """Which of the eight bought hours stands for a given wall-clock hour.
+
+    Cyclic nearest: hour 1 belongs to the 00:00 slot, not the 03:00 one. Written
+    out because getting it wrong puts the pre-dawn anomaly on the afternoon and
+    silently inverts the spatial pattern for a third of every day.
+    """
+    best, best_d = 0, 99
+    for i, (_g5, edt) in enumerate(HOURS):
+        d = min((hour_edt - edt) % 24, (edt - hour_edt) % 24)
+        if d < best_d:
+            best, best_d = i, d
+    return best
+
+
+def _spearman(a, b) -> float:
+    """Spearman rank correlation. Both inputs are already ranks."""
+    x = np.asarray(a, dtype=np.float64)
+    y = np.asarray(b, dtype=np.float64)
+    if x.size < 3:
+        return float("nan")
+    x = x - x.mean(); y = y - y.mean()
+    den = math.sqrt(float((x * x).sum()) * float((y * y).sum()))
+    return round(float((x * y).sum() / den), 4) if den else float("nan")
+
+
+def _plane_stats(arr) -> dict:
+    """Min / mean / percentiles of one annual plane, for the legend and the agent."""
+    a = np.asarray(arr, dtype=np.float64).reshape(-1)
+    a = a[np.isfinite(a)]
+    if not a.size:
+        return {}
+    return {
+        "min": round(float(a.min()), 3), "max": round(float(a.max()), 3),
+        "mean": round(float(a.mean()), 3), "median": round(float(np.median(a)), 3),
+        "p05": round(float(np.percentile(a, 5)), 3),
+        "p95": round(float(np.percentile(a, 95)), 3),
+        "n": int(a.size),
+    }
+
+
+def _q16(values, scale: float = 100.0, *, name: str = "") -> bytes:
+    """Quantise to Int16. 0.01 K precision is far finer than the model's skill.
+
+    Raises rather than clipping. Silent clipping cost a whole annual plane: the
+    facade sunlit-hours field at a scale of 10 saturated at 3,276.7 hours, and
+    because 3,276.7 is a plausible-looking number for "sunlit hours per year" the
+    field looked fine in every summary statistic — only the suspiciously round
+    maximum gave it away. A quantisation that cannot represent its input is a
+    build error, not a rounding.
+    """
     a = np.asarray(values, dtype=np.float64) * scale
-    a = np.clip(np.round(a), -32768, 32767).astype("<i2")
-    return a.tobytes()
+    lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
+    if lo < -32768 or hi > 32767:
+        raise ValueError(
+            f"_q16 overflow{f' on {name}' if name else ''}: scaled range "
+            f"{lo:.1f}..{hi:.1f} does not fit Int16 at scale {scale:g}. "
+            f"Lower the scale or use _q16u.")
+    return np.round(a).astype("<i2").tobytes()
+
+
+def _q16u(values, scale: float = 1.0, *, name: str = "") -> bytes:
+    """Quantise a non-negative field to UInt16 — twice the headroom of Int16.
+
+    The annual counting and dose planes are all non-negative and all have ranges
+    an Int16 cannot hold at a useful precision: 4,400 sunlit hours, 800 kWh/m2 of
+    incident shortwave, tens of thousands of degree-hours. Spending the sign bit
+    on them was the whole problem.
+    """
+    a = np.asarray(values, dtype=np.float64) * scale
+    lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
+    if lo < 0 or hi > 65535:
+        raise ValueError(
+            f"_q16u overflow{f' on {name}' if name else ''}: scaled range "
+            f"{lo:.1f}..{hi:.1f} does not fit UInt16 at scale {scale:g}.")
+    return np.round(a).astype("<u2").tobytes()
 
 
 # ------------------------------------------------------------------- driver
 
 
 def build(area_key: str = "midtown", verbose: bool = True,
-          use_lidar: bool = True) -> dict:
+          use_lidar: bool = True, year_stride: int = YEAR_STRIDE) -> dict:
     t_start = time.time()
     area = aoi_mod.get(area_key)
     proj = G.Projector(area)
@@ -197,7 +300,16 @@ def build(area_key: str = "midtown", verbose: bool = True,
     dsm, lidar_report = dsm_flat, None
     if use_lidar:
         surf = lidar.surface_for(dsm_flat, proj, log=log)
-        dsm, lidar_report = lidar.refine_dsm(dsm_flat, surf, buildings, log=log)
+        # Whether anything independent vouches for each footprint's height.
+        # A BBL carrying a PLUTO floor count is one whose join to the tax lot
+        # worked; the truncated footprints are the ones joined to the viaduct or
+        # rail yard beneath them, which has no floors. See refine_dsm.
+        height_trusted = [
+            bool((lots.get(b.get("bbl") or "") or {}).get("floors"))
+            for b in buildings
+        ]
+        dsm, lidar_report = lidar.refine_dsm(
+            dsm_flat, surf, buildings, height_trusted=height_trusted, log=log)
 
     svf_grid = G.svf_raster(dsm, n_azimuth=32, max_radius_m=250.0)
     lambda_p = dsm.built_fraction
@@ -238,56 +350,11 @@ def build(area_key: str = "midtown", verbose: bool = True,
                         best, bd = i, dd
         return best
 
-    # ------------------------------------------------- per-hour meteorology
-    mets: list[P.Met] = []
-    suns = []
-    for idx, (gmt5, edt) in enumerate(HOURS):
-        # Wall-clock EDT hour = GMT-5 hour + 1.
-        hour_edt = (gmt5 + 1) % 24
-        om_i = min(23, hour_edt)
-        # Anchor air temperature comes from FortyGuard; humidity, wind and cloud
-        # come from the FortyGuard env series where available, radiation from the
-        # reconstruction validated in scripts/validate.py.
-        rh = env_params["relative_humidity_percent"][gmt5]
-        cloud = min(1.0, env_params["cloud_cover_octas"][gmt5] / 100.0)
-        sun = solar.sun_position(area.center[1], area.center[0],
-                                 STUDY_DATE[0], STUDY_DATE[1], STUDY_DATE[2],
-                                 hour_edt + 0.5, utc_offset=-4.0)
-        dni, dhi = solar.sky_irradiance(sun, cloud)
-        anchor = float(np.median(hourly[idx].vals)) if len(hourly[idx].vals) else 35.0
-        mets.append(P.Met(
-            t_air_2m=anchor, rh_percent=rh,
-            wind_10m=float(om["wind_speed_10m"][om_i]),
-            wind_dir=float(om["wind_direction_10m"][om_i]),
-            cloud_fraction=cloud, dni=dni, dhi=dhi, hour_edt=float(hour_edt),
-        ))
-        suns.append(sun)
-
-    # ---------------------------------- shadow rasters, one per bought hour
-    shadows = []
-    for sun in suns:
-        shadows.append(
-            G.shadow_raster(dsm, sun.altitude, sun.azimuth, max_radius_m=500.0)
-            if sun.up else np.zeros(dsm.shape, dtype=bool)
-        )
-    log(f"shadows: {len(shadows)} rasters computed from the 3D scene")
-
-    # ------------------------------------------------ solve facade thermals
+    # ---------------------------------------------- panel -> canyon, material
     n_pan = len(facades)
-    n_hr = len(HOURS)
-    therm = np.zeros((n_hr, n_pan, N_BANDS), dtype=np.float32)
-    sunlit_bits = np.zeros((n_hr, n_pan, N_BANDS), dtype=bool)
-    # Per-band sky view factor. Already computed inside the solve; exporting it
-    # lets the renderer do physically real ambient occlusion instead of the
-    # crude orientation-only shading it had, which is most of why the scene
-    # looked like flat cardboard.
-    svf_band = np.zeros((n_pan, N_BANDS), dtype=np.float32)
-    air_prof = np.zeros((n_hr, n_pan, N_BANDS), dtype=np.float32)
-    air_sig = np.zeros((n_hr, n_pan, N_BANDS), dtype=np.float32)
-
     pan_canyon = np.full(n_pan, -1, dtype=np.int32)
     pan_material = np.zeros(n_pan, dtype=np.int8)
-    MATS = ["brick", "limestone", "concrete", "steel_glass", "glass_curtain"]
+    MATS = YS.MATS
 
     for pi, fpanel in enumerate(facades):
         mx, my = fpanel.mid
@@ -313,72 +380,372 @@ def build(area_key: str = "midtown", verbose: bool = True,
         )
         cstates.append(st)
 
-    log(f"solving {n_pan:,} panels x {N_BANDS} bands x {n_hr} hours "
-        f"= {n_pan*N_BANDS*n_hr:,} surface energy balances...")
+    # The whole scene as flat arrays, once. Every tier below solves against this
+    # single object, so the event day, the twelve monthly days and the 8,760-hour
+    # accumulation cannot be looking at slightly different geometry.
+    statics = YS.statics_from_scene(
+        facades, canyons, pan_canyon, pan_material, cstates,
+        d=d_disp, z0=z0, lambda_p=lambda_p, n_bands=N_BANDS)
+    svf_band = statics.svf_wall.astype(np.float32)
+    shadows = T.ShadowCache(dsm)
+    cell_i, cell_j = T.panel_cells(facades, dsm)
 
-    for hi in range(n_hr):
-        met, sun, shadow = mets[hi], suns[hi], shadows[hi]
-        # Pre-solve the air profile per canyon per band-height once.
-        for pi, fpanel in enumerate(facades):
-            ci = pan_canyon[pi]
-            st = cstates[ci] if ci >= 0 else P.CanyonState(
-                svf=0.8, h_mean=10.0, width_m=40.0, aspect_ratio=0.25,
-                bearing=0.0, asymmetry=0.0, lambda_p=lambda_p, d=d_disp, z0=z0)
-            c = canyons[ci] if ci >= 0 else None
-            h_wall = max(fpanel.top_m - fpanel.base_m, 3.0)
-            h_opp = 0.0
-            if c is not None:
-                # The opposing wall is the one on the far side from this facade.
-                h_opp = c.h_left if c.h_right <= c.h_left else c.h_right
-                h_opp = max(h_opp, 1.0)
-            W = st.width_m
-            mat = MATS[int(pan_material[pi])]
-            u_base = P.canyon_wind(met.wind_10m, st.aspect_ratio)
+    # ------------------------------------------------------------- the year
+    # ERA5 via Open-Meteo, bias-corrected against the one day FortyGuard also
+    # covers. See heatcanyon/year.py for why this is the only source that can
+    # supply a year of hourly radiation without a credential, and exactly what
+    # the correction does and does not claim.
+    fg_by_hour: dict[int, float] = {}
+    for idx, (gmt5, _edt) in enumerate(HOURS):
+        vals = hourly[idx].vals
+        if len(vals):
+            fg_by_hour[(gmt5 + 1) % 24] = float(np.median(vals))
 
-            mx, my = fpanel.mid
-            for bi in range(N_BANDS):
-                z = h_wall * (bi + 0.5) / N_BANDS
-                svf_w = G.svf_wall_point(z, h_opp, W)
-                if hi == 0:
-                    svf_band[pi, bi] = svf_w
-                # Sunlit test: sample the 3D shadow raster a little way out from
-                # the wall at this height. A panel is lit only if the sun is on
-                # its side and nothing blocks the ray.
-                cos_i = solar.cos_incidence_vertical(sun, fpanel.azimuth)
-                lit = False
-                if sun.up and cos_i > 0.0:
-                    # Height above which the beam clears the opposing wall.
-                    z_sh = solar.facade_sunlit_height(sun, st.bearing, h_opp, W)
-                    lit = z >= z_sh
-                    # Cross-check against the raster for the ground band, which
-                    # catches obstructions the 2-D canyon form cannot see.
-                    if bi == 0:
-                        i0, j0 = dsm.xy_to_ij(mx, my)
-                        if 0 <= i0 < dsm.shape[0] and 0 <= j0 < dsm.shape[1]:
-                            lit = lit and bool(shadow[i0, j0])
-                sunlit_bits[hi, pi, bi] = lit
-                irr = solar.wall_irradiance(sun, fpanel.azimuth, met.cloud_fraction,
-                                            svf_w, sunlit=lit)
-                t_air = P.air_temperature_at_height(max(z, 2.0), met, st, 0.4)
-                air_prof[hi, pi, bi] = t_air
-                air_sig[hi, pi, bi] = P.air_temperature_uncertainty(max(z, 2.0), st)
-                frac = min(1.0, z / max(st.h_mean, 1.0))
-                u = u_base + (met.wind_10m - u_base) * frac**1.5
-                lm = P.Met(t_air, met.rh_percent, met.wind_10m, met.wind_dir,
-                           met.cloud_fraction, met.dni, met.dhi, met.hour_edt)
-                therm[hi, pi, bi] = P.surface_temperature(
-                    lm, st, irr["total"], svf_w, material=mat, wind=u,
-                    t_surroundings=met.t_air_2m + 5.0, max_iter=14,
-                )
-        log(f"  hour {HOURS[hi][1]:02d}:00 EDT done "
-            f"(surface {therm[hi].min():.1f} to {therm[hi].max():.1f} C)")
+    raw = Y.load(bias=None)
+    era5_by_hour = {}
+    for h_edt in fg_by_hour:
+        i = raw.index_of(STUDY_DATE_STR, h_edt)
+        if i is not None:
+            era5_by_hour[h_edt] = float(raw.t_air_raw[i])
+    bias = Y.fit_bias(era5_by_hour, fg_by_hour, fitted_on=STUDY_DATE_STR)
+    ym = Y.load(bias=bias)
+    log(f"year: {ym.start} to {ym.end}, {len(ym):,} hours, "
+        f"bias {bias.offsets.min():+.1f} to {bias.offsets.max():+.1f} K by hour")
+    year_annual = ym.annual()
+    log(f"year: {year_annual['days_above_35']} days over 35 C, "
+        f"{year_annual['tropical_nights']} tropical nights, "
+        f"{year_annual['hours_above_35']:.0f} hours over 35 C")
+
+    # ------------------------------------------- the event day's meteorology
+    # The anchor stays FortyGuard's measured field and the humidity and cloud
+    # stay FortyGuard's env series — those are the purchased products and the
+    # tier the validation applies to. Wind and radiation come from the year
+    # series, which fixes a real units bug: the one-day Open-Meteo cache carries
+    # wind in km/h and it was being read straight into Met.wind_10m, which is
+    # m/s. A 3.6x wind overstates the convective coefficient h_c = 2 + 3.8u and
+    # damps every facade's surface-to-air excess.
+    mets: list[P.Met] = []
+    suns = []
+    for idx, (gmt5, edt) in enumerate(HOURS):
+        hour_edt = (gmt5 + 1) % 24
+        yi = ym.index_of(STUDY_DATE_STR, hour_edt)
+        rh = env_params["relative_humidity_percent"][gmt5]
+        cloud = min(1.0, env_params["cloud_cover_octas"][gmt5] / 100.0)
+        sun = solar.sun_position(area.center[1], area.center[0],
+                                 STUDY_DATE[0], STUDY_DATE[1], STUDY_DATE[2],
+                                 hour_edt + 0.5, utc_offset=-4.0)
+        anchor = float(np.median(hourly[idx].vals)) if len(hourly[idx].vals) else 35.0
+        mets.append(P.Met(
+            t_air_2m=anchor, rh_percent=rh,
+            wind_10m=float(ym.wind[yi]) if yi is not None else 3.0,
+            wind_dir=float(ym.wind_dir[yi]) if yi is not None else 250.0,
+            cloud_fraction=cloud,
+            dni=float(ym.dni[yi]) if yi is not None else 0.0,
+            dhi=float(ym.dhi[yi]) if yi is not None else 0.0,
+            hour_edt=float(hour_edt),
+        ))
+        suns.append(sun)
+
+    log(f"solving {n_pan:,} panels x {N_BANDS} bands x {len(HOURS)} hours "
+        f"for the event day...")
+    event = T.solve_day(
+        label="event", date=STUDY_DATE_STR, mets=mets, suns=suns, st=statics,
+        shadows=shadows, cell_i=cell_i, cell_j=cell_j,
+        anchor_source="FortyGuard /v1/heatmap 2 m air temperature (measured product)",
+        keep_analytic=True, want_terms=True, log=log)
+    therm = event.surface
+    air_prof = event.air
+    air_sig = event.air_sigma
+    sunlit_bits = event.lit
+    shadows_event = list(event.ground_sun)
+    shade_audit = T.shading_discrepancy(event)
+    log(f"shading audit: analytic over-estimates the ground band by "
+        f"{shade_audit['mean_over_estimate_hours_per_band']:.3f} h per band "
+        f"over 8 hours ({shade_audit['ground_band_disagreement_fraction']*100:.2f}% of cells)")
+
+    # ------------------------------------------------ twelve monthly tiers
+    month_tiers: list[T.DayTier] = []
+    for rec in ym.months:
+        m_mets, m_suns = [], []
+        yy, mm, dd = (int(rec.rep_date[:4]), int(rec.rep_date[5:7]),
+                      int(rec.rep_date[8:10]))
+        for gmt5, _edt in HOURS:
+            hour_edt = (gmt5 + 1) % 24
+            yi = ym.index_of(rec.rep_date, hour_edt)
+            if yi is None:
+                yi = ym.index_of(rec.rep_date, 12) or 0
+            off = float(ym.utc_offset[yi])
+            m_suns.append(solar.sun_position(area.center[1], area.center[0],
+                                             yy, mm, dd, hour_edt + 0.5,
+                                             utc_offset=off))
+            m_mets.append(P.Met(
+                t_air_2m=float(ym.t_air[yi]), rh_percent=float(ym.rh[yi]),
+                wind_10m=float(ym.wind[yi]), wind_dir=float(ym.wind_dir[yi]),
+                cloud_fraction=float(ym.cloud[yi]), dni=float(ym.dni[yi]),
+                dhi=float(ym.dhi[yi]), hour_edt=float(hour_edt),
+            ))
+        tier = T.solve_day(
+            label=f"{rec.label[:3]} {rec.rep_date}", date=rec.rep_date,
+            mets=m_mets, suns=m_suns, st=statics, shadows=shadows,
+            cell_i=cell_i, cell_j=cell_j,
+            anchor_source="ERA5 reanalysis, bias-corrected (heatcanyon/year.py)",
+            want_terms=True)
+        month_tiers.append(tier)
+        log(f"  month {rec.month:02d} {rec.label[:3]} rep {rec.rep_date} "
+            f"(rms {rec.rep_rms_k:.2f} K) surface "
+            f"{tier.surface.min():.1f} to {tier.surface.max():.1f} C")
+    log(f"shadow cache: {shadows.misses} ray-marches for "
+        f"{shadows.misses + shadows.hits} solar positions")
+
+    # ------------------------------------- the day-within-month sensitivity
+    probe_hours = [(t.mets[PEAK_INDEX], t.suns[PEAK_INDEX]) for t in month_tiers]
+    probe_hours += [(t.mets[1], t.suns[1]) for t in month_tiers[::3]]
+    gamma, gamma_report = T.sensitivity(
+        mets=[m for m, _ in probe_hours], suns=[s for _, s in probe_hours],
+        st=statics)
+    log(f"sensitivity dTs/dTair: mean {gamma_report['mean']:.3f} K/K, "
+        f"p05-p95 {gamma_report['p05']:.3f}-{gamma_report['p95']:.3f}")
+
+    # ------------------------------------------ audit the day reconstruction
+    # 365 solves at one hour, so the interface can print the error of the field it
+    # is actually painting instead of a caveat about reconstructions in general.
+    recon = T.reconstruction_audit(ym, statics, month_tiers, gamma, log=log)
+    for rec in ym.days:
+        got = recon.per_day.get(rec.date)
+        if got:
+            rec.recon_p50_k = got["p50"]
+            rec.recon_p95_k = got["p95"]
+            rec.recon_solved = bool(got["solved"])
+    recon_meta = recon.summary()
+    log(f"reconstruction: median day p95 {recon_meta['p95_error_median_k']:.2f} K, "
+        f"worst {recon_meta['p95_error_worst_k']:.2f} K on "
+        f"{recon_meta['worst_day']['date']} ({recon.seconds:.0f}s)")
+
+    # ---------------------------------------------- the annual accumulation
+    log(f"accumulating the year over {len(ym)//max(1,year_stride):,} hours "
+        f"(stride {year_stride})...")
+    annual = T.accumulate_year(ym, statics, stride=year_stride, log=log)
+    log(f"year solved in {annual.seconds:.0f}s: facade sunlit hours "
+        f"{annual.sun_hours.mean():.0f} mean, "
+        f"{annual.sun_hours.max():.0f} max; degree-hours over 35 C "
+        f"{annual.degree_hours_35.mean():.0f} mean")
 
     # ------------------------------------------------------- write binaries
-    (OUT / "thermal.bin").write_bytes(_q16(therm.reshape(-1)))
-    (OUT / "air.bin").write_bytes(_q16(air_prof.reshape(-1)))
-    (OUT / "air_sigma.bin").write_bytes(_q16(air_sig.reshape(-1)))
-    packed = np.packbits(sunlit_bits.reshape(-1))
-    (OUT / "sunlit.bin").write_bytes(packed.tobytes())
+    # The event day keeps the filenames it has always had, at the top level, so
+    # a client that knows nothing about the year still loads exactly what it did
+    # before. Each month lands in its own directory with the identical shape, and
+    # the browser fetches one month at a time — 4.7 MB when you scrub into
+    # October, rather than 56 MB before the first frame.
+    sh_step = max(1, int(round(6.0 / dsm.res)))
+
+    def write_day(tier: T.DayTier, dest: Path) -> dict:
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "thermal.bin").write_bytes(_q16(tier.surface.reshape(-1)))
+        (dest / "air.bin").write_bytes(_q16(tier.air.reshape(-1)))
+        # air_sigma is NOT written per period. The uncertainty on the vertical
+        # air profile is a function of height and canyon enclosure only — it does
+        # not depend on the hour or the day — so the top-level copy serves every
+        # period. It was being written thirteen times, 4.7 MB each, before that
+        # was noticed.
+        (dest / "sunlit.bin").write_bytes(
+            np.packbits(tier.lit.reshape(-1)).tobytes())
+        stack = np.stack([g[::sh_step, ::sh_step] for g in tier.ground_sun], axis=0)
+        (dest / "ground_sun.bin").write_bytes(
+            np.packbits(stack.reshape(-1)).tobytes())
+        return {
+            "date": tier.date,
+            "anchor_source": tier.anchor_source,
+            "hours": [{
+                "gmt5": g5, "edt": edt,
+                "t_anchor_c": round(tier.mets[i].t_air_2m, 2),
+                "rh": round(tier.mets[i].rh_percent, 1),
+                "cloud": round(tier.mets[i].cloud_fraction, 2),
+                "wind_10m": round(tier.mets[i].wind_10m, 2),
+                "dni": round(tier.mets[i].dni), "dhi": round(tier.mets[i].dhi),
+                "sun_alt": round(tier.suns[i].altitude, 1),
+                "sun_az": round(tier.suns[i].azimuth, 1),
+                "sky_c": round(tier.mets[i].sky_temperature, 1),
+                "surface_min_c": round(float(tier.surface[i].min()), 1),
+                "surface_max_c": round(float(tier.surface[i].max()), 1),
+                "lit_fraction": round(float(tier.lit[i].mean()), 4),
+            } for i, (g5, edt) in enumerate(HOURS)],
+        }
+
+    event_meta = write_day(event, OUT)
+    # ONE plane, not eight. The uncertainty on the vertical air profile is a
+    # function of height and canyon enclosure only, so `DayTier.air_sigma` is the
+    # same (panel, band) array repeated once per hour — and writing it that way
+    # shipped 4.7 MB where 0.6 MB says the same thing, on every first load, for a
+    # chart the visitor may never open.
+    (OUT / "air_sigma.bin").write_bytes(_q16(event.air_sigma[0].reshape(-1)))
+    # The event day's own copies of the two rasters the top level already carries
+    # under different names, so the loader can treat "the event" as a thirteenth
+    # selectable period with no special case.
+    (OUT / "event").mkdir(parents=True, exist_ok=True)
+    for name in ("thermal.bin", "air.bin", "sunlit.bin", "ground_sun.bin"):
+        (OUT / "event" / name).write_bytes((OUT / name).read_bytes())
+
+    month_meta = []
+    for rec, tier in zip(ym.months, month_tiers):
+        d = write_day(tier, OUT / f"month_{rec.month:02d}")
+        d.update(month=rec.month, label=rec.label, rep_rms_k=round(rec.rep_rms_k, 3))
+        month_meta.append(d)
+    _m7 = sorted((OUT / "month_07").iterdir())
+    log(f"months: 12 x {len(_m7)} binaries written "
+        f"({sum(f.stat().st_size for f in _m7)/1e6:.1f} MB each, "
+        f"{', '.join(f.name for f in _m7)})")
+
+    # -------------------------------------------------------- annual planes
+    # One file per quantity, all (n_panel, n_band). Int16 at 0.01 precision for
+    # temperatures, and a coarser scale for the counting fields whose range is
+    # far larger than a kelvin: 4,000 sunlit hours will not fit in an Int16 at
+    # centi-precision, so hours are stored at 0.1 h and doses at 0.01 kWh.
+    ann = OUT / "annual"
+    ann.mkdir(parents=True, exist_ok=True)
+    # (scale, dtype). The counting and dose planes are non-negative with ranges an
+    # Int16 cannot hold — 4,400 sunlit hours, hundreds of kWh/m2, tens of thousands
+    # of degree-hours — so they go to UInt16. Both writers raise on overflow.
+    plane_spec = {
+        "sun_hours": (4.0, "uint16"),
+        "dose_kwh": (20.0, "uint16"),
+        "absorbed_kwh": (20.0, "uint16"),
+        "degree_hours_35": (1.0, "uint16"),
+        "degree_hours_40": (1.0, "uint16"),
+        "hours_above_35": (4.0, "uint16"),
+        "t_max": (100.0, "int16"), "t_min": (100.0, "int16"),
+        "t_mean": (100.0, "int16"), "summer_mean": (100.0, "int16"),
+        "winter_mean": (100.0, "int16"), "swing": (100.0, "int16"),
+        "winter_sun_share": (10000.0, "uint16"),
+    }
+    for name, (scale, dtype) in plane_spec.items():
+        arr = np.asarray(getattr(annual, name)).reshape(-1)
+        writer = _q16u if dtype == "uint16" else _q16
+        (ann / f"{name}.bin").write_bytes(writer(arr, scale, name=name))
+    # ---- the attribution planes: WHY each band is hot, not just how hot.
+    #
+    # Taken at each band's OWN hottest hour of the event day rather than at a
+    # fixed hour, because the hour a band peaks is itself a function of which way
+    # it faces — an east wall peaks at ten and a west wall at five, and reading
+    # both at three in the afternoon would attribute the east wall's heat to a
+    # sun that had left it four hours earlier.
+    #
+    # Scaled terms, so the three sum exactly to the observed rise. See
+    # physics.SurfaceTerms.scaled.
+    if event.dt_solar is not None:
+        # TWO SAMPLINGS, AND THE DIFFERENCE BETWEEN THEM IS THE POINT.
+        #
+        # The first pass took each band's terms at that band's OWN hottest hour,
+        # which produced 0.4% trap-dominated across 294,150 panel-bands — and on
+        # reflection that number is a tautology rather than a finding. A band is
+        # at its hottest *because* the sun is on it; sampling there asks "what
+        # made this surface peak" and the answer is always the sun, everywhere,
+        # for every facade that gets any sun at all.
+        #
+        # A prescription is not chosen against one instant. It is chosen against
+        # the hours that carry the load, and over those hours a band in a deep
+        # slot spends most of its time shaded and hot — hot because the wall
+        # opposite is radiating at it, which is a different problem needing a
+        # different measure. So the planes the schedule actually selects on are
+        # the WORKING means: the terms averaged over the hours this band is
+        # above 30 degC, which is the population a cooling system is sized for.
+        #
+        # Both ship. `_peak` answers "why is this wall's maximum what it is",
+        # `_mean` answers "what should be done about it", and confusing the two
+        # is how a shading measure gets specified for a floor that never sees
+        # the sun.
+        surf_e = event.surface
+        hottest = np.argmax(surf_e, axis=0)                 # (P,B)
+        pick = np.ogrid[:surf_e.shape[1], :surf_e.shape[2]]
+
+        hot = surf_e > 30.0                                 # (H,P,B)
+        n_hot = hot.sum(axis=0)
+        # A band that never clears 30 degC has no working hours to average, so
+        # it falls back to every daylight hour rather than to zero. Zero would
+        # read as "no solar driver", which for a north wall in January is nearly
+        # true and for a north wall in July is not.
+        lit_any = event.lit.any(axis=(1, 2))
+        fallback = np.broadcast_to(lit_any[:, None, None], hot.shape)
+        use = np.where(n_hot[None, :, :] > 0, hot, fallback)
+        w = use.astype(np.float32)
+        wsum = np.maximum(w.sum(axis=0), 1e-6)
+
+        def _mean_over(arr):
+            return (arr * w).sum(axis=0) / wsum
+
+        term_planes = {
+            "dt_solar_peak": event.dt_solar[hottest, pick[0], pick[1]],
+            "dt_trap_peak": event.dt_trap[hottest, pick[0], pick[1]],
+            "dt_sky_peak": event.dt_sky[hottest, pick[0], pick[1]],
+            # The linearisation error at the same hour, published rather than
+            # absorbed: the scaled terms above have had it divided out, and a
+            # reviewer is entitled to see how large the correction was.
+            "dt_residual_peak": event.residual[hottest, pick[0], pick[1]],
+            "dt_solar_mean": _mean_over(event.dt_solar),
+            "dt_trap_mean": _mean_over(event.dt_trap),
+            "dt_sky_mean": _mean_over(event.dt_sky),
+        }
+        for name, arr in term_planes.items():
+            (ann / f"{name}.bin").write_bytes(
+                _q16(np.asarray(arr).reshape(-1), 100.0, name=name))
+            plane_spec[name] = (100.0, "int16")
+
+        trap_peak = float((term_planes["dt_trap_peak"]
+                           > term_planes["dt_solar_peak"]).mean())
+        trap_mean = float((term_planes["dt_trap_mean"]
+                           > term_planes["dt_solar_mean"]).mean())
+        log(f"attribution, at each band's own peak hour: "
+            f"solar {term_planes['dt_solar_peak'].mean():.2f} K, "
+            f"trap {term_planes['dt_trap_peak'].mean():.2f} K, "
+            f"sky {term_planes['dt_sky_peak'].mean():.2f} K; "
+            f"{100.0 * trap_peak:.1f}% trap-dominated")
+        log(f"attribution, over each band's working hours: "
+            f"solar {term_planes['dt_solar_mean'].mean():.2f} K, "
+            f"trap {term_planes['dt_trap_mean'].mean():.2f} K, "
+            f"sky {term_planes['dt_sky_mean'].mean():.2f} K; "
+            f"{100.0 * trap_mean:.1f}% trap-dominated "
+            f"(this is the plane the prescription selects on)")
+
+    (ann / "month_of_max.bin").write_bytes(
+        annual.month_of_max.astype(np.uint8).reshape(-1).tobytes())
+    (ann / "monthly_mean.bin").write_bytes(
+        _q16(annual.monthly_mean.reshape(-1), 100.0, name="monthly_mean"))
+    (ann / "monthly_sun_hours.bin").write_bytes(
+        _q16u(annual.monthly_sun_hours.reshape(-1), 10.0, name="monthly_sun_hours"))
+    # dTs/dTair, one byte per panel-band, encoded (gamma - 0.5) * 200 so the byte
+    # covers 0.50 to 1.775 K/K at 0.005 resolution. Measured values cluster just
+    # above 1.0 — a facade's surface temperature tracks the air almost one for one
+    # once the radiation term is fixed, and slightly more than one because a
+    # warmer air mass also raises the radiative sky temperature it exchanges with.
+    # A plain `gamma * 250` byte would have clipped anything above 1.02, which the
+    # upper tail reaches.
+    SENS_OFFSET, SENS_SCALE = 0.5, 200.0
+    (OUT / "sens.bin").write_bytes(
+        np.clip(np.round((gamma - SENS_OFFSET) * SENS_SCALE), 0, 255)
+        .astype(np.uint8).reshape(-1).tobytes())
+    annual_meta = {
+        "hours_solved": annual.hours,
+        "stride": annual.stride,
+        "sampled": annual.stride != 1,
+        "seconds": round(annual.seconds, 1),
+        "shading": "analytic canyon form (see heatcanyon/tiers.py)",
+        "planes": {name: {"scale": scale, "dtype": dtype}
+                   for name, (scale, dtype) in plane_spec.items()},
+        "extra_planes": {
+            "month_of_max": {"scale": 1, "dtype": "uint8"},
+            "monthly_mean": {"scale": 100.0, "dtype": "int16",
+                             "shape": [12, "panel", "band"]},
+            "monthly_sun_hours": {"scale": 10.0, "dtype": "uint16",
+                                  "shape": [12, "panel", "band"]},
+        },
+        "stats": {
+            "sun_hours": _plane_stats(annual.sun_hours),
+            "dose_kwh": _plane_stats(annual.dose_kwh),
+            "degree_hours_35": _plane_stats(annual.degree_hours_35),
+            "t_max": _plane_stats(annual.t_max),
+            "swing": _plane_stats(annual.swing),
+            "winter_sun_share": _plane_stats(annual.winter_sun_share),
+        },
+    }
 
     # Coarse height grid, for collision in the walker. The browser needs to know
     # where the buildings are so a pedestrian cannot stroll through a tower, and
@@ -483,10 +850,9 @@ def build(area_key: str = "midtown", verbose: bool = True,
     # Cast shadows on the ground, per hour, from the same ray-traced masks the
     # physics used. Painting these onto the ground plane is exact rather than
     # decorative: it is the identical geometry that decided which facade bands
-    # were sunlit.
-    sh_step = max(1, int(round(6.0 / dsm.res)))
-    sh_stack = np.stack([sh[::sh_step, ::sh_step] for sh in shadows], axis=0)
-    (OUT / "ground_sun.bin").write_bytes(np.packbits(sh_stack.reshape(-1)).tobytes())
+    # were sunlit. Already written per period by `write_day`; the metadata block
+    # is assembled here because it describes the grid, which is shared.
+    sh_stack = np.stack([sh[::sh_step, ::sh_step] for sh in shadows_event], axis=0)
     shadow_meta = {
         "nx": int(sh_stack.shape[2]), "ny": int(sh_stack.shape[1]),
         "res": round(dsm.res * sh_step, 3),
@@ -507,6 +873,11 @@ def build(area_key: str = "midtown", verbose: bool = True,
         d_disp=d_disp, z0=z0, log=log, t_start=t_start, N_BANDS=N_BANDS,
         grid_meta=grid_meta, shadow_meta=shadow_meta, massing_meta=massing_meta,
         lidar_report=lidar_report, use_lidar=use_lidar,
+        ym=ym, bias=bias, annual=annual, statics=statics, event=event,
+        month_tiers=month_tiers, event_meta=event_meta, month_meta=month_meta,
+        annual_meta=annual_meta, gamma=gamma, gamma_report=gamma_report,
+        shade_audit=shade_audit, year_annual=year_annual, year_stride=year_stride,
+        recon_meta=recon_meta,
     )
 
 
@@ -522,6 +893,9 @@ def _finish(**kw) -> dict:
     env_params = kw["env_params"]; om = kw["om"]; dsm = kw["dsm"]; svf_grid = kw["svf_grid"]
     lambda_p = kw["lambda_p"]; h_bar = kw["h_bar"]; d_disp = kw["d_disp"]; z0 = kw["z0"]
     log = kw["log"]; t_start = kw["t_start"]; NB = kw["N_BANDS"]
+    ym: Y.YearMet = kw["ym"]; annual: T.AnnualFields = kw["annual"]
+    month_tiers: list[T.DayTier] = kw["month_tiers"]
+    event: T.DayTier = kw["event"]
 
     n_hr = len(HOURS)
 
@@ -591,9 +965,45 @@ def _finish(**kw) -> dict:
             svf_mean = float(np.mean([
                 cstates[pan_canyon[p]].svf if pan_canyon[p] >= 0 else 0.8 for p in panels
             ]))
+            # The year, rolled up over this building's own panels and bands.
+            # Means for anything per-band (an average band's sunlit hours is a
+            # comparable quantity between a walk-up and a tower); maxima for the
+            # extremes; the modal month for the peak.
+            # Modal month of the annual maximum over this building's panel-bands.
+            # np.unique rather than np.bincount: bincount needs a non-negative
+            # integer array and quietly returns an all-zero histogram if the dtype
+            # or the mask is not what you assumed, which reads downstream as "no
+            # month" — every building reported month_of_peak 0 for one build before
+            # that was traced. unique(return_counts) cannot fail that way.
+            mom = np.asarray(annual.month_of_max[pidx], dtype=np.int32).reshape(-1)
+            mvals, mcounts = np.unique(mom[mom > 0], return_counts=True)
+            annual_rec = {
+                "kh35": float(annual.degree_hours_35[pidx].mean()),
+                "kh40": float(annual.degree_hours_40[pidx].mean()),
+                "sun_hours": float(annual.sun_hours[pidx].mean()),
+                "dose_kwh": float(annual.dose_kwh[pidx].mean()),
+                "absorbed_kwh": float(annual.absorbed_kwh[pidx].mean()),
+                "t_max": float(annual.t_max[pidx].max()),
+                "t_mean": float(annual.t_mean[pidx].mean()),
+                "summer_mean": float(annual.summer_mean[pidx].mean()),
+                "winter_mean": float(annual.winter_mean[pidx].mean()),
+                "swing": float(annual.swing[pidx].mean()),
+                "hours_above_35": float(annual.hours_above_35[pidx].mean()),
+                # Named for what it is at BUILDING level. `month_of_max` is the
+                # per-panel-band plane; this is the modal month over a building's
+                # panels, and `exposure.attach_annual` reads it under this name.
+                # The two names were out of step for one build and every building
+                # reported month 0, which read as "no data" rather than as a typo.
+                "month_of_peak": int(mvals[int(np.argmax(mcounts))]) if mvals.size else 0,
+                "monthly_mean_c": [float(annual.monthly_mean[m][pidx].mean())
+                                   for m in range(12)],
+                "monthly_sun_hours": [float(annual.monthly_sun_hours[m][pidx].mean())
+                                      for m in range(12)],
+            }
         else:
             face_peak = face_min = worst_t = float("nan")
             spread = 0.0; dose_kwh = 0.0; worst_az = 0.0; svf_mean = 0.8
+            annual_rec = {}
 
         rec = {
             "i": bi, "bin": b.get("bin"), "bbl": b.get("bbl"),
@@ -650,24 +1060,109 @@ def _finish(**kw) -> dict:
             facade_spread_k=spread,
             hvi=hvi.get(zipc or ""),
         ))
+        EX.attach_annual(exposures[-1], annual_rec)
+
+        # The nine figures the building card needs, onto the footprint record.
+        #
+        # `ranked.json` carries the full dossier but is the top 150, and the
+        # interface keyed selection on membership in it — so 5,179 of the 5,329
+        # footprints answered a hover with a name and a height and then did
+        # nothing at all when clicked. Widening `ranked.json` to all 4,044
+        # scored buildings would be a 16 MB payload for prose almost nobody
+        # opens; these nine numbers are about 150 KB onto a file the page
+        # already fetches, and they are every figure the card's grids show.
+        #
+        # `rec` is already in `b_out` — appended by reference above, before the
+        # AOI test — so filling it in here is what reaches the output.
+        rec.update({
+            "exc_h": round(ex_h, 2) if ex_h == ex_h else 0.0,
+            "per_h": round(pe_h, 2) if pe_h == pe_h else 0.0,
+            "air_c": round(pk, 2) if pk == pk else 0.0,
+            "svf": round(svf_mean, 3),
+            "fac_c": round(face_peak, 2) if face_peak == face_peak else 0.0,
+            "fac_k": round(spread, 2),
+            "mrt_c": round(mrt, 2),
+            "wbgt_c": round(wbgt, 2),
+            "fac_kwh": round(dose_kwh, 3),
+        })
 
     EX.score_all(exposures, assessed_per_unit)
-    log(f"scored {len(exposures):,} buildings inside the AOI")
+    EX.score_annual(exposures)
+    log(f"scored {len(exposures):,} buildings inside the AOI "
+        f"on the event day and on the year")
+    _mop = {}
+    for e in exposures:
+        _mop[e.annual_month_of_peak] = _mop.get(e.annual_month_of_peak, 0) + 1
+    log("  month of annual facade peak: "
+        + ", ".join(f"{k or 'unset'}:{v}" for k, v in sorted(_mop.items())))
+
+    # How far apart the two orderings are. Published rather than smoothed over:
+    # if the year and the heat wave agreed about where to act, the year would not
+    # have been worth computing.
+    wave_order = [e.bin for e in sorted(exposures, key=lambda x: -x.priority_score)]
+    year_order = [e.bin for e in sorted(exposures, key=lambda x: -x.annual_priority_score)]
+    top50_overlap = len(set(wave_order[:50]) & set(year_order[:50]))
+    rank_of = {b: i for i, b in enumerate(wave_order)}
+    moved = sorted(
+        ((abs(rank_of[b] - i), b, rank_of[b], i) for i, b in enumerate(year_order)),
+        reverse=True)[:5]
+    ordering_report = {
+        "top50_overlap": top50_overlap,
+        "top10_overlap": len(set(wave_order[:10]) & set(year_order[:10])),
+        "spearman": _spearman([rank_of[b] for b in year_order],
+                              list(range(len(year_order)))),
+        "biggest_movers": [{"bin": b, "wave_rank": w + 1, "year_rank": y + 1,
+                            "moved": int(d)} for d, b, w, y in moved],
+        "reading": (
+            "The heat-wave ordering and the annual ordering are different "
+            "questions and give different answers. A building that ranks far "
+            "higher on the year has chronic facade load; one that ranks far "
+            "higher on the wave has trapped air during an acute event. Where "
+            "they agree the case is strong on both grounds."
+        ),
+    }
+    log(f"orderings: {top50_overlap}/50 buildings in both top fifties, "
+        f"Spearman {ordering_report['spearman']:.3f}")
 
     # Write scores back onto the building records for the 3D view.
+    #
+    # Both POPULATION ranks go on as well, over everything scored rather than over
+    # the ranked 150. Without them a client can only report a building's position
+    # inside a sample that was itself selected by event-day priority, and the two
+    # numbers differ enough to mislead: one building sat 39th in the sample and
+    # 98th in the population.
     score_by_bin = {e.bin: e for e in exposures}
+    wave_rank = {e.bin: i + 1 for i, e in enumerate(
+        sorted(exposures, key=lambda x: -x.priority_score))}
+    annual_rank = {e.bin: i + 1 for i, e in enumerate(
+        sorted(exposures, key=lambda x: -x.annual_priority_score))}
     for rec in b_out:
         e = score_by_bin.get(rec.get("bin"))
         if e:
+            rec["pr_rank"] = wave_rank.get(e.bin)
+            rec["apr_rank"] = annual_rank.get(e.bin)
             rec["ex"] = round(e.exposure_score, 1)
             rec["vu"] = round(e.vulnerability_score, 1)
             rec["pr"] = round(e.priority_score, 1)
+            rec["aex"] = round(e.annual_exposure_score, 1)
+            rec["apr"] = round(e.annual_priority_score, 1)
+            rec["mop"] = e.annual_month_of_peak
+            rec["swing"] = round(e.annual_swing_k, 1)
+            rec["sunh"] = round(e.annual_sun_hours)
+            # The two headline annual quantities, on EVERY scored building rather
+            # than only the ranked 150. A live turn asked for the top three by
+            # annual facade dose across the whole area, found the field missing
+            # from the compact record, and had to substitute the annual exposure
+            # SCORE for the dose itself — a reasonable proxy reported as if it
+            # were the thing. Cheap to carry, so it is carried.
+            rec["akh"] = round(e.annual_facade_kh35, 1)
+            rec["adose"] = round(e.annual_dose_kwh, 1)
 
     (OUT / "buildings.json").write_text(json.dumps({
         "n": len(b_out), "materials": MATS,
         "attrs": b_out,
         "rings": b_rings,
-    }, separators=(",", ":")))
+    }, separators=(",", ":"), allow_nan=False))
 
     # --------------------------------------------------------------- facades
     fx = []
@@ -682,7 +1177,7 @@ def _finish(**kw) -> dict:
         "top": [round(f.top_m, 1) for f in facades],
         "canyon": [int(c) for c in pan_canyon],
         "mat": [int(m) for m in pan_material],
-    }, separators=(",", ":")))
+    }, separators=(",", ":"), allow_nan=False))
 
     # --------------------------------------------------------------- canyons
     c_out = []
@@ -702,7 +1197,7 @@ def _finish(**kw) -> dict:
             # the true middle of the canyon cross-section.
             "dl": round(c.d_left, 1), "dr": round(c.d_right, 1),
         })
-    (OUT / "canyons.json").write_text(json.dumps(c_out, separators=(",", ":")))
+    (OUT / "canyons.json").write_text(json.dumps(c_out, separators=(",", ":"), allow_nan=False))
 
     # ----------------------------------------------------------------- tiles
     def tile_payload(features, field, digits=2):
@@ -719,12 +1214,98 @@ def _finish(**kw) -> dict:
         return out
 
     peak_layer = _tiles_from(hourly)
+
+    # ---------------------------------------------------- the tile field, year
+    #
+    # FortyGuard measured this field on one day. The year needs it on 365, and
+    # 8,760 more heatmap calls is 37 million credits against a 2 million budget.
+    #
+    # So the SPATIAL structure and the TEMPORAL level are separated. What
+    # FortyGuard measured that reanalysis cannot see is the pattern *within* the
+    # study area: which tiles run hot relative to their neighbours, at each hour
+    # of the day. That pattern is a product of morphology — plan density, sky
+    # view, materials — and morphology does not change between March and August.
+    # The level, which reanalysis can supply for every hour of the year, is the
+    # AOI-wide air temperature.
+    #
+    # The transfer is therefore: tile(day, hour) = AOI_air(day, hour)
+    #                                            + anomaly(tile, hour-of-day).
+    #
+    # Two limits, stated rather than buried. (1) The anomaly is measured on ONE
+    # day, a clear July heat-wave day, and urban heat island intensity is known
+    # to be larger under clear calm conditions than under cloud and wind — so the
+    # anomaly is an upper case, and a cloudy February day's real pattern is
+    # flatter than this reproduces. (2) It is an anomaly of a modelled/measured
+    # FortyGuard product, so it inherits whatever that product's spatial skill
+    # is. Both are recorded in `meta.json` under `year.tile_transfer`.
+    tile_anom = []
+    tile_anom_stats = []
+    for i in range(n_hr):
+        vals = hourly[i].vals
+        med = float(np.median(vals)) if len(vals) else 0.0
+        rows = tile_payload_from_field(hourly[i], proj)
+        tile_anom.append([[x, y, round(v - med, 3)] for x, y, v in rows])
+        anom = np.array([r[2] for r in tile_anom[-1]]) if rows else np.zeros(0)
+        tile_anom_stats.append({
+            "hour_edt": HOURS[i][1], "aoi_median_c": round(med, 3),
+            "anomaly_min": round(float(anom.min()), 3) if anom.size else None,
+            "anomaly_max": round(float(anom.max()), 3) if anom.size else None,
+            "anomaly_p90_minus_p10": round(
+                float(np.percentile(anom, 90) - np.percentile(anom, 10)), 3)
+                if anom.size else None,
+        })
+
+    # Per-tile annual metrics, from the transfer. The AOI hourly series is
+    # reanalysis; the per-tile offset is FortyGuard's measured pattern; the
+    # product is labelled as the composite it is.
+    hour_slot = np.array([_nearest_hour_slot(int(h)) for h in range(24)])
+    anom_by_tile = np.array([[row[2] for row in tile_anom[i]] for i in range(n_hr)]) \
+        if tile_anom and tile_anom[0] else np.zeros((n_hr, 0))
+    n_tiles = anom_by_tile.shape[1]
+    t_tile_hours = (ym.t_air[:, None]
+                    + anom_by_tile[hour_slot[ym.hour_of_day], :]) if n_tiles else None
+
+    if t_tile_hours is not None:
+        night = (ym.hour_of_day >= 22) | (ym.hour_of_day <= 6)
+        per_day_night_min = np.full((ym.n_days, n_tiles), np.inf, dtype=np.float32)
+        for di in range(ym.n_days):
+            k = np.where((ym.day_index == di) & night)[0]
+            if len(k):
+                per_day_night_min[di] = t_tile_hours[k].min(axis=0)
+        tile_year = {
+            "hours_above_35": [round(float(v), 1)
+                               for v in (t_tile_hours > 35.0).sum(axis=0)],
+            "hours_above_32": [round(float(v), 1)
+                               for v in (t_tile_hours > 32.0).sum(axis=0)],
+            "degree_hours_35": [round(float(v), 1) for v in
+                                np.maximum(t_tile_hours - 35.0, 0).sum(axis=0)],
+            "tropical_nights": [int(v) for v in
+                                (per_day_night_min > 26.0).sum(axis=0)],
+            "mean_c": [round(float(v), 2) for v in t_tile_hours.mean(axis=0)],
+            "max_c": [round(float(v), 2) for v in t_tile_hours.max(axis=0)],
+            "cdd": [round(float(v), 1) for v in
+                    np.maximum(t_tile_hours - 18.0, 0).sum(axis=0) / 24.0],
+        }
+        tile_year_stats = {k: _plane_stats(v) for k, v in tile_year.items()}
+    else:
+        tile_year, tile_year_stats = {}, {}
+
     tiles = {
         "hours": [{"gmt5": g5, "edt": edt} for g5, edt in HOURS],
         "grid_m": 60,
         "air": [tile_payload_from_field(hourly[i], proj) for i in range(n_hr)],
+        "anomaly": tile_anom,
+        "anomaly_stats": tile_anom_stats,
         "exceedance": tile_payload(_tiles(exc), "value", 2),
         "persistence": tile_payload(_tiles(per), "value", 2),
+        "year": tile_year,
+        "year_stats": tile_year_stats,
+        "year_note": (
+            "Annual per-tile metrics are a composite: FortyGuard's measured "
+            "within-AOI anomaly pattern carried onto the bias-corrected ERA5 "
+            "hourly level. Not a measurement of any of the 364 days FortyGuard "
+            "did not see."
+        ),
         "stats": {
             "air": [hourly[i].stats for i in range(n_hr)],
             "exceedance": f_exc.stats,
@@ -733,13 +1314,34 @@ def _finish(**kw) -> dict:
             "daymin": f_daymin.stats,
         },
     }
-    (OUT / "tiles.json").write_text(json.dumps(tiles, separators=(",", ":")))
+    (OUT / "tiles.json").write_text(json.dumps(tiles, separators=(",", ":"), allow_nan=False))
+    log(f"tiles: {n_tiles:,} tiles, {n_hr} measured hours + the year by transfer")
 
     # ---------------------------------------------------------------- ranked
     ranked = []
     for e in exposures[:150]:
         acts = EX.recommend(e)
         ranked.append({
+            "annual": {
+                "facade_kh35": round(e.annual_facade_kh35, 1),
+                "facade_kh40": round(e.annual_facade_kh40, 1),
+                "sun_hours": round(e.annual_sun_hours, 1),
+                "dose_kwh": round(e.annual_dose_kwh, 1),
+                "absorbed_kwh": round(e.annual_absorbed_kwh, 1),
+                "facade_max_c": round(e.annual_facade_max_c, 1),
+                "summer_mean_c": round(e.annual_summer_mean_c, 2),
+                "winter_mean_c": round(e.annual_winter_mean_c, 2),
+                "swing_k": round(e.annual_swing_k, 2),
+                "month_of_peak": e.annual_month_of_peak,
+                "hours_above_35": round(e.annual_hours_above_35, 1),
+                "monthly_mean_c": [round(v, 2) for v in e.annual_monthly_mean_c],
+                "exposure": round(e.annual_exposure_score, 1),
+                "priority": round(e.annual_priority_score, 1),
+                "components": {k: round(v, 3) for k, v in e.annual_components.items()},
+                "reasons": e.annual_reasons,
+                "basis": ("whole year, ERA5 bias-corrected anchor, analytic canyon "
+                          "shading — see heatcanyon/tiers.py"),
+            },
             "bin": e.bin, "bbl": e.bbl, "addr": e.address,
             "lon": e.lon, "lat": e.lat, "h": round(e.height_m, 1), "floors": e.floors,
             "year": e.year_built, "units": e.units_res, "zip": e.zipcode,
@@ -769,11 +1371,129 @@ def _finish(**kw) -> dict:
                 for a in acts
             ],
         })
+    # The annual ordering of the SAME 150 records, as an index list rather than a
+    # second copy: the interface switches between orderings, and shipping the
+    # rows twice would be 400 kB spent on a sort.
+    by_annual = sorted(range(len(ranked)),
+                       key=lambda i: -ranked[i]["annual"]["priority"])
     (OUT / "ranked.json").write_text(json.dumps({
         "n_scored": len(exposures),
-        "weights": {"exposure": EX.EXPOSURE_WEIGHTS, "vulnerability": EX.VULNERABILITY_WEIGHTS},
+        "weights": {"exposure": EX.EXPOSURE_WEIGHTS,
+                    "vulnerability": EX.VULNERABILITY_WEIGHTS,
+                    "annual_exposure": EX.ANNUAL_EXPOSURE_WEIGHTS},
+        "orderings": {
+            "wave": list(range(len(ranked))),
+            "annual": by_annual,
+            "agreement": ordering_report,
+        },
         "items": ranked,
-    }, separators=(",", ":")))
+    }, separators=(",", ":"), allow_nan=False))
+
+    # ------------------------------------------------------- the decision layer
+    #
+    # The per-floor schedule, the priced measures and the programme. Written last
+    # because every one of them reads a product written above, and written inside
+    # a try/except because none of them is load-bearing for the atlas: a build
+    # that cannot produce them still ships twelve layers, two time axes, a street
+    # camera and an analyst. See docs/DECISIONS.md.
+    #
+    # Only the ranked 150 get a full schedule. The other 3,894 scored buildings
+    # carry the four compact fields below, which is what the portfolio table and
+    # the map need; a full schedule for every building would be 38 MB of JSON to
+    # answer a question nobody asks about 3,894 buildings at once.
+    try:
+        from . import decide as DECIDE
+
+        d_agent = None
+        try:
+            from .agent.dataset import Dataset
+            d_agent = Dataset(OUT)
+        except Exception as exc:  # noqa: BLE001
+            log(f"decision layer: dataset unavailable ({exc}); skipped")
+
+        if d_agent is not None:
+            t_dec = time.time()
+            floors_out: dict[str, dict] = {}
+            presc_out: dict[str, list] = {}
+            attrs_by_bin = {str(a.get("bin")): a for a in b_out if a.get("bin")}
+            failed = 0
+            for rec in ranked:
+                bn = str(rec["bin"])
+                try:
+                    one = DECIDE.prescriptions_for(d_agent, bn, max_canyons=6)
+                except Exception:  # noqa: BLE001 — one building must not lose the set
+                    failed += 1
+                    continue
+                floors_out[bn] = one["loads"]
+                presc_out[bn] = one["prescriptions"]
+
+            (OUT / "floors.json").write_text(json.dumps({
+                "n": len(floors_out), "bands": N_BANDS,
+                "attributed": bool(event.dt_solar is not None),
+                "basis": ("Conduction from the solved facade surface temperature; "
+                          "envelope from a stated era rule, not a survey. Every "
+                          "figure derived through that rule is a RANGE and is "
+                          "labelled assumed."),
+                "items": floors_out,
+            }, separators=(",", ":"), allow_nan=False))
+
+            unverified = sum(1 for r in EC_CONSTANTS() if not r.get("verified"))
+            (OUT / "prescriptions.json").write_text(json.dumps({
+                "constants_as_of": _constants_as_of(),
+                "unverified": unverified,
+                "items": presc_out,
+            }, separators=(",", ":"), allow_nan=False))
+
+            # The building's own modelled exposure as the headroom, so the
+            # portfolio's interaction model works against a real total
+            # rather than inferring one from the largest single measure.
+            at_risk = {b: float((v or {}).get("person_hours") or 0.0)
+                       for b, v in floors_out.items()}
+            cands = DECIDE.candidates_from(presc_out, attrs_by_bin, at_risk)
+            prog = DECIDE.programme(d_agent, candidates=cands)
+            (OUT / "portfolio.json").write_text(json.dumps({
+                "n": len(cands),
+                "objectives": ["person_hours", "degree_hours", "vulnerable",
+                               "peak_relief"],
+                "candidates": [DECIDE._jsonable(c) for c in cands],
+                "curves": prog.get("curves", {}),
+                "curve": prog.get("curve", []),
+                "allocation": prog.get("allocation"),
+                "phases": prog.get("phases", {}),
+                "disagreement": prog.get("disagreement"),
+                "ledger": prog.get("ledger", ""),
+                "constants": EC_CONSTANTS(),
+                "unverified": unverified,
+            }, separators=(",", ":"), allow_nan=False))
+
+            # The four compact fields, on every scored building, in the spirit of
+            # the existing `akh` and `adose`: a live turn that has to substitute a
+            # score for the quantity it was asked about is a turn that reports a
+            # proxy as if it were the thing.
+            for rec_b in b_out:
+                fl = floors_out.get(str(rec_b.get("bin")))
+                if not fl:
+                    continue
+                rec_b["pkw"] = round(sum(fl["peak_kw"]) / 2, 1)
+                rec_b["amwh"] = round(sum(fl["annual_mwh"]) / 2, 1)
+                doms = [r.get("dominant") for r in fl.get("floors", [])]
+                rec_b["dom"] = (0 if doms.count("solar") >= doms.count("trap")
+                                else 1) if doms else 2
+                recs = [r.get("night_recovery") for r in fl.get("floors", [])]
+                rec_b["nrec"] = (2 if recs.count("good") > len(recs) / 2
+                                 else (0 if recs.count("none") > len(recs) / 2 else 1))
+            (OUT / "buildings.json").write_text(json.dumps({
+                "n": len(b_out), "materials": MATS,
+                "attrs": b_out, "rings": b_rings,
+            }, separators=(",", ":"), allow_nan=False))
+
+            log(f"decision layer: {len(floors_out)} schedules, "
+                f"{sum(len(v) for v in presc_out.values())} measures, "
+                f"{len(cands)} candidates, {unverified} unverified constants"
+                + (f", {failed} buildings failed" if failed else "")
+                + f" ({time.time() - t_dec:.1f}s)")
+    except Exception as exc:  # noqa: BLE001
+        log(f"decision layer: skipped ({type(exc).__name__}: {exc})")
 
     # ------------------------------------------------------------- scenarios
     reps = _representative_canyons(canyons, cstates)
@@ -798,19 +1518,171 @@ def _finish(**kw) -> dict:
                     },
                 } for r in res],
             })
+        # The same interventions, re-solved at every month's peak hour.
+        #
+        # This is the single most useful thing the year adds to the what-if
+        # panel, and it is not a scaling of the July answer: the sun is 26 deg
+        # lower in December than in June over Manhattan, so a canyon that is
+        # half sunlit in July has a floor in permanent shade in January, and the
+        # physics of every intervention changes with it. Facade shading that
+        # removes 4 K of July surface temperature removes solar gain in January
+        # too, when the building wanted it. Cool pavement that raises mean
+        # radiant temperature in a deep canyon in summer does so in winter as
+        # well, when raising it is a benefit rather than a cost.
+        #
+        # Because each row is a real re-solve, the annual columns below are a
+        # sum over twelve solved months rather than a published coefficient
+        # applied twelve times.
+        month_rows = []
+        for rec, tier in zip(ym.months, month_tiers):
+            res = SC.compare(tier.mets[PEAK_INDEX], st, tier.suns[PEAK_INDEX],
+                             max(c.h_left, 1.0), max(c.h_right, 1.0))
+            month_rows.append({
+                "month": rec.month, "label": rec.label[:3], "date": rec.rep_date,
+                "hour_edt": HOURS[PEAK_INDEX][1],
+                "t_air_c": round(tier.mets[PEAK_INDEX].t_air_2m, 2),
+                "sun_alt": round(tier.suns[PEAK_INDEX].altitude, 1),
+                "results": [{
+                    "key": r.key,
+                    "d_facade": round(r.d_facade, 2), "d_ground": round(r.d_ground, 2),
+                    "d_mrt_sun": round(r.d_mrt_sun, 2),
+                    "d_mrt_shade": round(r.d_mrt_shade, 2),
+                    "d_wbgt": round(r.d_wbgt, 2), "d_air": round(r.d_air, 2),
+                } for r in res],
+            })
+
+        # Annual roll-up per scenario: the cooling it delivers in the months when
+        # cooling is wanted, and the heating it removes in the months when it is
+        # not. Summer is June to August, winter December to February, using the
+        # same definitions as `year.SEASONS`.
+        keys = [r["key"] for r in month_rows[0]["results"]] if month_rows else []
+        annual_rows = []
+        for k in keys:
+            per_month = {m["month"]: next(r for r in m["results"] if r["key"] == k)
+                         for m in month_rows}
+            summer = [per_month[m]["d_mrt_sun"] for m in (6, 7, 8) if m in per_month]
+            winter = [per_month[m]["d_mrt_sun"] for m in (12, 1, 2) if m in per_month]
+            all_m = [per_month[m]["d_mrt_sun"] for m in per_month]
+            f_summer = [per_month[m]["d_facade"] for m in (6, 7, 8) if m in per_month]
+            f_winter = [per_month[m]["d_facade"] for m in (12, 1, 2) if m in per_month]
+            annual_rows.append({
+                "key": k,
+                "d_mrt_summer": round(float(np.mean(summer)), 2) if summer else None,
+                "d_mrt_winter": round(float(np.mean(winter)), 2) if winter else None,
+                "d_mrt_year": round(float(np.mean(all_m)), 2) if all_m else None,
+                "d_facade_summer": round(float(np.mean(f_summer)), 2) if f_summer else None,
+                "d_facade_winter": round(float(np.mean(f_winter)), 2) if f_winter else None,
+                "seasonal_penalty": (
+                    round(float(np.mean(winter)) - float(np.mean(summer)), 2)
+                    if summer and winter else None),
+                "best_month": (min(per_month, key=lambda m: per_month[m]["d_mrt_sun"])
+                               if per_month else None),
+                "worst_month": (max(per_month, key=lambda m: per_month[m]["d_mrt_sun"])
+                                if per_month else None),
+            })
+
         sc_out.append({
             "label": label, "canyon": ci, "name": c.name,
             "w": round(c.width_m, 1), "hw": round(c.aspect_ratio, 2),
             "svf": round(c.svf, 3), "bearing": round(c.bearing, 1),
             "asym": round(c.asymmetry, 2), "trees_now": round(st.tree_cover, 2),
             "hours": rows,
+            "months": month_rows,
+            "annual": annual_rows,
         })
     (OUT / "scenarios.json").write_text(json.dumps({
         "catalogue": [{"key": s.key, "title": s.title, "description": s.description,
                        "caveat": s.caveat} for s in SC.SCENARIOS.values()],
         "expected_ranges": SC.EXPECTED_RANGES,
         "sites": sc_out,
-    }, separators=(",", ":")))
+        "annual_note": (
+            "Every monthly row is a full re-solve of that canyon at that month's "
+            "representative-day peak hour, with that month's real solar geometry "
+            "and meteorology. The annual columns are means over the twelve solved "
+            "months, not a published coefficient applied twelve times. A positive "
+            "seasonal_penalty means the intervention does less good in winter than "
+            "in summer, which for a shading measure is the correct sign and is the "
+            "cost of it."
+        ),
+    }, separators=(",", ":"), allow_nan=False))
+    log(f"scenarios: {len(sc_out)} sites x {len(SC.SCENARIOS)} interventions "
+        f"x (3 event hours + 12 months) re-solved")
+
+    # ------------------------------------------------------------------ year
+    # One file, because the browser needs all of it the moment the year timeline
+    # is drawn: 365 daily records to shape the strip, 12 monthly records to label
+    # it, and the hourly series so scrubbing a day shows that day's own curve.
+    # Quantised where it can be — the hourly air temperature is 8,760 values and
+    # 0.01 degC precision on a reanalysis product is three digits of noise.
+    hourly_air = [round(float(v), 2) for v in ym.t_air]
+    year_doc = {
+        "window": [ym.start, ym.end],
+        "days": [d.as_dict() for d in ym.days],
+        "months": [m.as_dict() for m in ym.months],
+        "seasons": ym.seasons(),
+        "annual": kw["year_annual"],
+        "episodes": [e.as_dict() for e in ym.episodes()[:12]],
+        "hourly": {
+            "t_air_c": hourly_air,
+            "t_air_raw_c": [round(float(v), 2) for v in ym.t_air_raw],
+            "apparent_c": [round(float(v), 2) for v in ym.apparent],
+            "rh": [round(float(v)) for v in ym.rh],
+            "wind_ms": [round(float(v), 1) for v in ym.wind],
+            "cloud": [round(float(v), 2) for v in ym.cloud],
+            "ghi": [round(float(v)) for v in ym.ghi],
+            "dni": [round(float(v)) for v in ym.dni],
+            "dhi": [round(float(v)) for v in ym.dhi],
+            "hour_of_day": [int(v) for v in ym.hour_of_day],
+            "day_index": [int(v) for v in ym.day_index],
+            "facade_mean_c": [round(float(v), 2) for v in annual.aoi_hourly_surface],
+            "facade_lit_fraction": [round(float(v), 4) for v in annual.aoi_hourly_lit],
+            "facade_stride": annual.stride,
+        },
+        "thresholds": {
+            "hot_c": Y.T_HOT_C, "warm_c": Y.T_WARM_C,
+            "tropical_night_c": Y.T_TROPICAL_NIGHT_C, "degree_day_base_c": Y.T_BASE_C,
+        },
+        "event_day_in_year": {
+            "date": STUDY_DATE_STR,
+            "day_index": ym.dates.index(STUDY_DATE_STR)
+                         if STUDY_DATE_STR in ym.dates else None,
+            "rank_by_tmax": 1 + sorted(
+                (d.t_max for d in ym.days), reverse=True).index(
+                    next(d.t_max for d in ym.days if d.date == STUDY_DATE_STR))
+                if STUDY_DATE_STR in ym.dates else None,
+            "note": ("The day the rest of the model solves in full, located "
+                     "inside the year so its claim to be the hottest day is "
+                     "checkable rather than asserted."),
+        },
+        "provenance": ym.provenance(),
+        "periods": {
+            "event": kw["event_meta"],
+            "months": kw["month_meta"],
+        },
+        "annual_fields": kw["annual_meta"],
+        "sensitivity": dict(kw["gamma_report"], offset=0.5, scale=200.0,
+                            dtype="uint8", file="sens.bin"),
+        "reconstruction": kw["recon_meta"],
+        "shading_discrepancy": kw["shade_audit"],
+        "tiers": {
+            "event": ("2 July 2026, 8 hours, every panel, ray-traced shadows, "
+                      "FortyGuard measured anchor. The validated tier."),
+            "month": ("12 representative days, 8 hours each, every panel, "
+                      "ray-traced shadows, bias-corrected ERA5 anchor. The fields "
+                      "the browser paints."),
+            "annual": (f"{annual.hours:,} hours, every panel, analytic canyon "
+                       f"shading, accumulated not stored. Totals and extremes only."),
+            "day_within_month": (
+                "month field + dT_surface/dT_air times the day's air-temperature "
+                "departure, plus the surface-to-air excess scaled by the "
+                "irradiance ratio on lit bands. Its error is MEASURED for every "
+                "day against a full re-solve — see `reconstruction` — and the "
+                "interface prints that day's own figure."),
+        },
+    }
+    (OUT / "year.json").write_text(json.dumps(year_doc, separators=(",", ":"), allow_nan=False))
+    log(f"year.json: {len(ym.days)} days, {len(ym.months)} months, "
+        f"{len(ym)} hours, {(OUT/'year.json').stat().st_size/1e6:.1f} MB")
 
     # ------------------------------------------------------------------ meta
     cy = [c for c in canyons if c.is_canyon]
@@ -899,10 +1771,77 @@ def _finish(**kw) -> dict:
         },
         "radiation_reference": {
             "source": "ERA5 reanalysis via Open-Meteo archive (free, no key)",
-            "ghi": om.get("shortwave_radiation"),
-            "wind_10m": om.get("wind_speed_10m"),
-            "t2m": om.get("temperature_2m"),
-            "convention": "preceding-hour mean, local EDT",
+            # Read out of the YEAR series rather than the one-day cache, and in
+            # m/s. The one-day cache carries wind in km/h — Open-Meteo's default
+            # — and it was being read straight into Met.wind_10m, which is m/s.
+            # A 3.6x wind inflates h_c = 2 + 3.8u and damps every facade's
+            # surface-to-air excess, so this is a substantive fix and not a
+            # tidy-up. The new fetch asks for m/s explicitly (scripts/fetch_year.py).
+            "ghi": [round(float(ym.ghi[i]), 1) for i in _event_day_indices(ym)],
+            "wind_10m": [round(float(ym.wind[i]), 2) for i in _event_day_indices(ym)],
+            "wind_unit": "m/s",
+            "t2m": [round(float(ym.t_air_raw[i]), 2) for i in _event_day_indices(ym)],
+            "t2m_bias_corrected": [round(float(ym.t_air[i]), 2)
+                                   for i in _event_day_indices(ym)],
+            "dni": [round(float(ym.dni[i]), 1) for i in _event_day_indices(ym)],
+            "dhi": [round(float(ym.dhi[i]), 1) for i in _event_day_indices(ym)],
+            "convention": "preceding-hour mean, local wall clock",
+            "one_day_cache_units_note": (
+                "data/manhattan/_openmeteo_radiation_2026-07-02.json is kept for "
+                "provenance and its wind_speed_10m field is in km/h. Nothing reads "
+                "it for wind any more."
+            ),
+        },
+        # The year, in summary. The full record is year.json; this is what a
+        # client needs before it decides whether to fetch it.
+        "year": {
+            "window": [ym.start, ym.end],
+            "days": len(ym.days),
+            "hours": len(ym),
+            "months": [{"month": m.month, "label": m.label, "rep_date": m.rep_date,
+                        "tmax_mean": round(m.t_max_mean, 2),
+                        "tmean": round(m.t_mean, 2),
+                        "h35": round(m.hours_above_35, 1),
+                        "trop": m.tropical_nights,
+                        "noon_alt": round(m.sun_noon_altitude, 1)}
+                       for m in ym.months],
+            "annual": kw["year_annual"],
+            "seasons": ym.seasons(),
+            "episodes": [e.as_dict() for e in ym.episodes()[:6]],
+            "stride": kw["year_stride"],
+            "sampled": kw["year_stride"] != 1,
+            "annual_fields": kw["annual_meta"],
+            "sensitivity": dict(kw["gamma_report"], offset=0.5, scale=200.0,
+                                dtype="uint8", file="sens.bin"),
+            "reconstruction": kw["recon_meta"],
+            "shading_discrepancy": kw["shade_audit"],
+            "ordering_agreement": ordering_report,
+            "tile_transfer": {
+                "method": ("tile(day, hour) = AOI air temperature from the "
+                           "bias-corrected ERA5 series + FortyGuard's measured "
+                           "within-AOI anomaly for the nearest of the eight "
+                           "bought hours"),
+                "anomaly_by_hour": tile_anom_stats,
+                "limitations": [
+                    "The anomaly is measured on one clear July heat-wave day. Urban "
+                    "heat island intensity is larger under clear calm conditions, so "
+                    "this is an upper case and a cloudy winter day's real pattern is "
+                    "flatter than the transfer reproduces.",
+                    "It is an anomaly of a FortyGuard product and inherits that "
+                    "product's spatial skill.",
+                    "Nothing here is a measurement of any of the 364 days FortyGuard "
+                    "did not see, and the interface labels it as a composite.",
+                ],
+            },
+            "periods": {
+                "event": {"date": kw["event_meta"]["date"], "dir": "",
+                          "anchor": kw["event_meta"]["anchor_source"]},
+                "months": [{"month": m["month"], "label": m["label"],
+                            "date": m["date"], "dir": f"month_{m['month']:02d}",
+                            "rep_rms_k": m["rep_rms_k"]}
+                           for m in kw["month_meta"]],
+            },
+            "provenance": ym.provenance(),
         },
         "height_grid": kw["grid_meta"],
         "shadow_grid": kw["shadow_meta"],
@@ -912,7 +1851,7 @@ def _finish(**kw) -> dict:
         "spend": json.loads((Path("data/manhattan/_ledger.json")).read_text())
                  if Path("data/manhattan/_ledger.json").exists() else {},
     }
-    (OUT / "meta.json").write_text(json.dumps(meta, separators=(",", ":")))
+    (OUT / "meta.json").write_text(json.dumps(meta, separators=(",", ":"), allow_nan=False))
 
     log(f"wrote {len(list(OUT.iterdir()))} files to {OUT} in {time.time()-t_start:.0f}s")
     return meta
@@ -1096,6 +2035,27 @@ def _representative_canyons(canyons, cstates) -> list[tuple[str, int]]:
     return out
 
 
+def EC_CONSTANTS() -> list[dict]:
+    """The economics constants table, or an empty one if that module is absent."""
+    try:
+        from . import economics
+        return economics.constants_table()
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _constants_as_of() -> str:
+    """The OLDEST `as_of` in the constants table, which is the one that matters.
+
+    A table whose newest entry is this month and whose oldest is four years old
+    is a four-year-old table for any figure that touches the old entry, and
+    reporting the newest date would be the more flattering and less true answer.
+    """
+    rows = EC_CONSTANTS()
+    dates = sorted(str(r.get("as_of") or "") for r in rows if r.get("as_of"))
+    return dates[0] if dates else "unsourced"
+
+
 def _provenance() -> list[dict]:
     """Every data source, what it contributed, and whether it is measured."""
     return [
@@ -1131,6 +2091,11 @@ def _provenance() -> list[dict]:
          "provides": "street-level air temperature, 84 Manhattan sensors, 2018/19",
          "kind": "measured", "cost": "free", "key_required": False},
         {"source": "ERA5 reanalysis via Open-Meteo archive",
-         "provides": "hourly irradiance and wind, used to validate the solar model",
-         "kind": "reanalysis", "cost": "free", "key_required": False},
+         "provides": ("8,760 hours of air temperature, humidity, wind, cloud and "
+                      "beam/diffuse irradiance for the study year — the entire "
+                      "temporal axis, plus the reference the solar reconstruction "
+                      "is validated against"),
+         "kind": "reanalysis (bias-corrected against FortyGuard on the one "
+                 "overlapping day)",
+         "cost": "free", "key_required": False},
     ]

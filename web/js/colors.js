@@ -1,51 +1,82 @@
 /* Colour ramps.
  *
- * Choices, and why:
+ * One heat ramp, used for every quantity the model draws.
  *
- * - Temperature uses **inferno**. It is perceptually uniform (equal steps in
- *   value look like equal steps in colour, so the eye is not misled about where
- *   the gradients are), it is monotonic in lightness so it survives being
- *   printed or screenshotted in greyscale, and it is safe for all three common
- *   forms of colour blindness. It also reads unambiguously as "hot", which
- *   viridis and cividis do not. Turbo is deliberately avoided: it is pretty but
- *   not perceptually uniform, and its green band creates false edges.
+ * This replaces an earlier scheme that gave temperature inferno, duration
+ * cividis and priority a third ramp of its own, on the reasoning that different
+ * physical quantities should not invite comparison. The design overhaul takes
+ * the opposite view and it is the better one for this instrument: the panels
+ * carry one legend, in one place, and the viewer learns to read it once. Five
+ * ramps meant five things to learn and a legend whose meaning changed under the
+ * cursor. Comparability is handled by the axis labels, which always name the
+ * unit, rather than by withholding a shared colour language.
  *
- * - Exposure *duration* uses **cividis**, a different ramp on purpose. Hours
- *   above a threshold is a different physical quantity from temperature, and
- *   giving it the same ramp would invite the viewer to compare two things that
- *   are not comparable.
+ * The ramp itself is inferno's family — near-black indigo through magenta and
+ * orange into a pale cream — desaturated and warmed to sit inside the near-black
+ * #0A0908 shell without vibrating against it. It keeps the two properties that
+ * made inferno the right choice: it is monotonic in lightness, so it survives
+ * greyscale and reads unambiguously as "hot", and it has no green band to throw
+ * false edges. Its stops are deliberately uneven — the hot end is stretched,
+ * because that is where the finding is.
  *
- * - Scenario deltas use a **diverging** ramp centred on zero, because the sign
- *   carries the meaning: some interventions make some metrics worse.
+ * Scenario deltas keep a diverging ramp centred on zero, because there the sign
+ * carries the meaning: some interventions make some metrics worse.
  */
 
-const INFERNO = [
-  [0,0,4],[22,11,57],[66,10,104],[106,23,110],[147,38,103],
-  [188,55,84],[221,81,58],[243,120,25],[252,165,10],[246,215,70],[252,255,164],
+/** The heat ramp, as [position, rgb] stops. Uneven by design. */
+const CANYON = [
+  [0.00, [18, 16, 30]],
+  [0.22, [62, 26, 64]],
+  [0.45, [136, 46, 60]],
+  [0.68, [199, 96, 42]],
+  [0.86, [232, 166, 78]],
+  [1.00, [247, 231, 190]],
 ];
 
-const CIVIDIS = [
-  [0,32,77],[0,48,111],[57,72,107],[87,93,109],[112,113,115],
-  [138,135,121],[166,157,117],[196,181,108],[228,207,91],[255,234,70],
-];
+/** The same stops as a CSS gradient, so a legend swatch and a painted pixel
+ *  cannot drift apart. */
+export const CANYON_CSS =
+  'linear-gradient(90deg, rgb(18,16,30) 0%, rgb(62,26,64) 22%, rgb(136,46,60) 45%,'
+  + ' rgb(199,96,42) 68%, rgb(232,166,78) 86%, rgb(247,231,190) 100%)';
+
+/** Sun and shade is categorical, not continuous: two colours taken from the
+ *  ends of the same ramp so the layer still belongs to it. */
+export const SHADE_RGB = [44, 38, 46];
+export const SUNLIT_RGB = [238, 184, 102];
+export const SUN_CSS =
+  `linear-gradient(90deg, rgb(${SHADE_RGB}) 0 50%, rgb(${SUNLIT_RGB}) 50% 100%)`;
 
 const DIVERGING = [
-  [49,102,177],[95,145,205],[152,190,224],[209,224,238],[244,244,244],
-  [247,220,196],[238,178,143],[218,124,96],[186,66,60],
+  [58, 96, 122], [96, 132, 150], [148, 172, 180], [206, 210, 206], [237, 231, 220],
+  [236, 198, 168], [223, 155, 116], [206, 108, 70], [176, 62, 44],
 ];
 
-const PRIORITY = [
-  [26,26,46],[62,32,62],[100,38,72],[139,44,74],[177,52,70],
-  [209,68,64],[232,95,64],[245,132,79],[250,175,110],[253,214,155],
-];
-
-function ramp(stops, t) {
-  if (!isFinite(t)) return [70, 78, 92];
+/** Interpolate a ramp given as [position, rgb] stops. */
+function stopped(stops, t) {
+  if (!isFinite(t)) return [58, 54, 50];
   t = Math.min(1, Math.max(0, t));
-  const x = t * (stops.length - 1);
-  const i = Math.min(stops.length - 2, Math.floor(x));
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) {
+      const a = stops[i - 1], b = stops[i];
+      const k = (t - a[0]) / (b[0] - a[0]);
+      return [
+        Math.round(a[1][0] + (b[1][0] - a[1][0]) * k),
+        Math.round(a[1][1] + (b[1][1] - a[1][1]) * k),
+        Math.round(a[1][2] + (b[1][2] - a[1][2]) * k),
+      ];
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+/** Interpolate a ramp given as evenly spaced rgb triples. */
+function even(list, t) {
+  if (!isFinite(t)) return [58, 54, 50];
+  t = Math.min(1, Math.max(0, t));
+  const x = t * (list.length - 1);
+  const i = Math.min(list.length - 2, Math.floor(x));
   const f = x - i;
-  const a = stops[i], b = stops[i + 1];
+  const a = list[i], b = list[i + 1];
   return [
     Math.round(a[0] + (b[0] - a[0]) * f),
     Math.round(a[1] + (b[1] - a[1]) * f),
@@ -54,10 +85,10 @@ function ramp(stops, t) {
 }
 
 export const RAMPS = {
-  temperature: (t) => ramp(INFERNO, t),
-  duration:    (t) => ramp(CIVIDIS, t),
-  priority:    (t) => ramp(PRIORITY, t),
-  diverging:   (t) => ramp(DIVERGING, t),
+  temperature: (t) => stopped(CANYON, t),
+  duration:    (t) => stopped(CANYON, t),
+  priority:    (t) => stopped(CANYON, t),
+  diverging:   (t) => even(DIVERGING, t),
 };
 
 export function css(rgb, alpha) {
@@ -66,8 +97,10 @@ export function css(rgb, alpha) {
     : `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
 }
 
-/** CSS linear-gradient string for a legend swatch. */
+/** CSS linear-gradient string for a legend swatch. The heat ramp returns its
+ *  authored stops verbatim rather than a resampled approximation of them. */
 export function gradient(name, steps = 24) {
+  if (name === 'temperature' || name === 'duration' || name === 'priority') return CANYON_CSS;
   const f = RAMPS[name] || RAMPS.temperature;
   const out = [];
   for (let i = 0; i < steps; i++) out.push(css(f(i / (steps - 1))));

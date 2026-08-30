@@ -1,0 +1,510 @@
+/* The building brief — a document, set for reading, and set for ink.
+ *
+ * Everywhere else in this platform the type is doing a hard job in a 340px
+ * column: 9.5px monospace labels, 11.5px values, hierarchy carried by tonal
+ * value because the sizes are already as small as they can usefully go. That is
+ * an instrument panel and it is correct there.
+ *
+ * This is the one surface that is not an instrument panel. It is a page someone
+ * prints, hands across a table, and reads end to end. So it gets the things a
+ * page needs and the panels cannot have: a real display size on the address, a
+ * measure of about 65 characters rather than the full window width, a line
+ * height that suits paragraphs, and space between sections large enough to be
+ * read as structure rather than as padding.
+ *
+ * It adds no colour, no font, no radius and no easing. Every value below is one
+ * of app.css's own tokens, and the few that are not are the print sheet's ink
+ * palette, which is derived from the screen palette rather than invented — see
+ * the block at the bottom.
+ *
+ * ------------------------------------------------------------------- aliasing
+ *
+ * Every colour the document uses is read through a `--brf-*` alias rather than
+ * directly from the shell token. On screen the alias IS the shell token, so
+ * nothing is duplicated and nothing can drift. In print the aliases are
+ * redefined once, in one block, and the whole document — including the fills
+ * inside the SVG chart, which reference the same custom properties — re-inks
+ * itself. Without the aliasing layer the print sheet would have to restate
+ * every rule that mentions a colour, and the two palettes would come apart the
+ * first time one of them changed.
+ */
+
+#brief {
+  position: fixed; inset: 0; z-index: 200;
+
+  /* Screen: the aliases resolve to the shell's own tokens. */
+  --brf-ink:       var(--t0);
+  --brf-body:      var(--t2);
+  --brf-soft:      var(--t4);
+  --brf-label:     var(--t7);
+  --brf-rule:      var(--line);
+  --brf-rule-soft: var(--line-faint);
+  --brf-paper:     var(--panel-solid);
+  --brf-tint:      var(--panel-tint);
+  --brf-accent:    var(--accent);
+  --brf-assumed:   var(--assumed);
+
+  --brf-sev-0: var(--sev-0);
+  --brf-sev-1: var(--sev-1);
+  --brf-sev-2: var(--sev-2);
+  --brf-sev-3: var(--sev-3);
+  --brf-sev-4: var(--sev-4);
+
+  --brf-term-solar: var(--term-solar);
+  --brf-term-trap:  var(--term-trap);
+  --brf-term-sky:   var(--term-sky);
+  --brf-money:      var(--money);
+  --brf-cost:       var(--cost);
+}
+#brief[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- the window
+
+   Deliberately identical to `#analyst-win`: the same inset, the same scrim
+   opacity and blur, the same width and height clamps, the same shadow, the same
+   two-part entrance on the shared easing. Two full-screen windows in one
+   application that opened differently would read as two applications.        */
+
+#brief-scrim {
+  position: absolute; inset: 0;
+  background: rgba(10, 9, 8, 0.62);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 240ms ease;
+}
+#brief.on #brief-scrim { opacity: 1; }
+
+#brief-win {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, calc(-50% + 14px));
+  width: min(1080px, 92vw); height: min(760px, 86vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--brf-paper);
+  border: 1px solid var(--line-panel); border-radius: var(--r2);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, .6), 0 2px 10px rgba(0, 0, 0, .5);
+  opacity: 0;
+  transition: opacity 240ms ease, transform 320ms var(--ease);
+}
+#brief.on #brief-win { opacity: 1; transform: translate(-50%, -50%); }
+
+#brief-win .phead { flex: none; }
+/* The header's three controls are words, not glyphs, so they size to their
+   text the way the analyst's ESC button already does. */
+#brief-win .icon { width: auto; padding: 0 7px; height: 22px; }
+
+#brief-doc {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  outline: none;                 /* it takes focus on open so Escape and the
+                                    scroll keys work; the ring would be noise */
+  padding: 0 clamp(24px, 5vw, 72px) 96px;
+}
+
+@media (max-width: 760px), (max-height: 560px) {
+  #brief-win { width: 96vw; height: 92vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #brief-scrim, #brief-win { transition: none; }
+}
+
+/* ------------------------------------------------------------- the measure
+
+   One column, centred, about 720px wide. Prose inside it is held to 65ch, which
+   is the width at which a reader's eye finds the next line without hunting for
+   it. Charts and tables are allowed the full column, because a chart squeezed
+   to a reading measure is a chart nobody can read.                            */
+
+.brf {
+  max-width: 720px; margin: 0 auto;
+  color: var(--brf-body);
+  font-family: var(--sans); font-size: 14px; line-height: 1.5;
+}
+.brf-p {
+  margin: 0 0 15px; max-width: 65ch;
+  font-size: 14.5px; line-height: 1.75; color: var(--brf-body);
+  text-wrap: pretty;
+}
+.brf-p b { color: var(--brf-ink); font-weight: 500; }
+.brf-p:last-child { margin-bottom: 0; }
+.brf-dim { color: var(--brf-soft); }
+.brf-none { color: var(--brf-label); }
+
+/* The one label style in the platform, unchanged: 10px monospace, uppercase,
+   .12em. Everything that is a label rather than a name uses it. */
+.brf-lab {
+  font-family: var(--mono); font-size: 10px; line-height: normal;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--brf-label);
+}
+.brf-mono { font-family: var(--mono); font-size: .92em; }
+
+/* Every figure in the document is monospace and tabular, so a column of them
+   lines up on the decimal whether or not it is in a table. */
+.brf-val, .brf-big, .brf-tv, .brf-spec, .brf-chart text {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------------- masthead */
+
+.brf-mast { padding: 44px 0 0; }
+.brf-kick {
+  margin: 0; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .34em; color: var(--brf-label);
+}
+.brf-title {
+  margin: 16px 0 0; font-family: var(--serif); font-weight: 400;
+  font-size: clamp(34px, 4.4vw, 48px); line-height: 1.02; letter-spacing: -.015em;
+  color: var(--brf-ink);
+}
+.brf-sub {
+  margin: 14px 0 0; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: .1em; color: var(--brf-label);
+}
+.brf-dateline {
+  margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--brf-rule);
+  font-family: var(--mono); font-size: 10px; line-height: 2;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--brf-label);
+}
+
+/* --------------------------------------------------------- the fixture banner
+
+   Loud by intention, and the only element in the document that is. A printed
+   page carrying placeholder numbers and no warning is the most damaging thing
+   this platform could emit: it would look exactly like the real thing, and it
+   would outlive whatever caveat was spoken over it. It uses the accent because
+   the accent is the interface's one attention colour — this is a warning, not a
+   datum, so the rule about never using the accent for data holds.             */
+
+.brf-fixture {
+  margin: 34px 0 0; padding: 16px 18px;
+  border: 1px solid var(--brf-accent); border-left-width: 3px;
+  border-radius: var(--r);
+  background: rgba(217, 84, 46, .07);
+}
+.brf-fixture .brf-lab { color: var(--brf-accent); letter-spacing: .18em; }
+.brf-fixture p:last-child {
+  margin: 9px 0 0; max-width: 68ch;
+  font-size: 13px; line-height: 1.7; color: var(--brf-body);
+}
+.brf-fixture b { color: var(--brf-ink); font-weight: 500; }
+
+/* The per-section repeat. Invisible on screen — one banner is enough on a
+   surface you scroll — and printed at the head of every section, because each
+   section breaks onto its own page and a reader may only ever hold one sheet. */
+.brf-fixrun { display: none; }
+
+/* ----------------------------------------------------------------- sections */
+
+.brf-sec {
+  margin: 52px 0 0; padding-top: 30px;
+  border-top: 1px solid var(--brf-rule);
+}
+.brf-h {
+  margin: 0 0 22px; font-family: var(--serif); font-weight: 400;
+  font-size: 27px; line-height: 1.15; letter-spacing: -.01em; color: var(--brf-ink);
+  display: flex; align-items: baseline; gap: 16px;
+}
+.brf-hn {
+  flex: none; font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+  color: var(--brf-label);
+}
+.brf-ph {
+  margin: 0 0 8px; font-family: var(--serif); font-weight: 400;
+  font-size: 21px; line-height: 1.2; color: var(--brf-ink);
+  display: flex; align-items: baseline; gap: 13px;
+}
+.brf-pn {
+  flex: none; font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+  color: var(--brf-label);
+}
+
+/* ------------------------------------------------------------ fact grids
+
+   The same label-over-value pair the selection card uses, at document rather
+   than panel scale, and on a four-up grid because a page has the width for it. */
+
+.brf-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 20px 24px; margin: 0 0 24px;
+}
+.brf-facts.brf-tight { gap: 14px 24px; margin: 10px 0 20px; }
+.brf-fact { min-width: 0; }
+.brf-val {
+  margin-top: 6px; font-family: var(--mono); font-size: 14.5px;
+  line-height: 1.35; color: var(--brf-ink); word-break: break-word;
+}
+.brf-money { color: var(--brf-money); }
+.brf-cost  { color: var(--brf-cost); }
+
+/* An assumed figure. A dotted underline in the mid-text tone is the whole
+   treatment — app.css declares the token and says so; this is the rule that
+   spends it. Scoped to this window so it cannot collide with a definition
+   another decision-layer module adds later. */
+#brief .asm {
+  border-bottom: 1px dotted var(--brf-assumed);
+  padding-bottom: 1px; cursor: help;
+}
+
+/* ------------------------------------------------------------------- ranks */
+
+.brf-ranks {
+  display: flex; gap: 56px; flex-wrap: wrap;
+  padding: 22px 0 24px; border-top: 1px solid var(--brf-rule-soft);
+}
+.brf-big {
+  margin-top: 8px; font-family: var(--serif); font-weight: 400;
+  font-size: 42px; line-height: 1; color: var(--brf-ink);
+}
+.brf-of { margin-top: 7px; }
+
+/* ---------------------------------------------------------------- findings
+
+   A wide figure in the left margin and the paragraph beside it. The figure is
+   serif and large because it is a NAME for the finding rather than a value to
+   be compared with the one below it; the argument is in the prose.            */
+
+.brf-find {
+  display: grid; grid-template-columns: 148px 1fr; gap: 28px;
+  margin: 0 0 32px; padding-bottom: 30px;
+  border-bottom: 1px solid var(--brf-rule-soft);
+}
+.brf-find:last-child { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+.brf-findfig { padding-top: 3px; }
+.brf-findfig .brf-big { margin: 0 0 9px; font-size: 38px; }
+.brf-findkick { margin: 0 0 11px; color: var(--brf-accent); letter-spacing: .16em; }
+.brf-findtext .brf-p { margin-bottom: 0; }
+.brf-basis {
+  margin: 12px 0 0; max-width: 62ch;
+  font-family: var(--mono); font-size: 9.5px; line-height: 1.85;
+  letter-spacing: .06em; color: var(--brf-label);
+}
+
+@media (max-width: 720px) {
+  .brf-find { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* ------------------------------------------------------------------ charts */
+
+.brf-fig { margin: 6px 0 22px; }
+.brf-chart { width: 100%; display: block; }
+.brf-chart text { font-family: var(--mono); fill: var(--brf-label); }
+.brf-chart .brf-fnum { font-size: 8.5px; }
+.brf-chart .brf-axt { font-size: 8.5px; letter-spacing: .1em; }
+.brf-chart .brf-rowt { font-size: 8.5px; letter-spacing: .04em; }
+.brf-chart .brf-ax { stroke: var(--brf-rule); stroke-width: 1; }
+.brf-chart .brf-band { stroke: var(--brf-rule-soft); stroke-width: 1; }
+.brf-chart .brf-mark { fill: var(--brf-accent); }
+.brf-chart rect { shape-rendering: crispEdges; }
+
+.brf-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 10px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .12em;
+  color: var(--brf-label);
+}
+.brf-key { display: inline-flex; align-items: center; gap: 6px; }
+.brf-key i { width: 9px; height: 9px; display: inline-block; }
+.brf-key .brf-acc { background: var(--brf-accent); }
+.brf-sevkey i { width: 7px; }
+
+/* ------------------------------------------------------------ prescriptions
+
+   The section the document exists for, so it gets the most room: each measure
+   is a block with its own rule above it, and it is kept off a page break in one
+   piece, because a floor range on one sheet and its price on the next is how a
+   quote comes back wrong.                                                     */
+
+.brf-presc {
+  margin: 30px 0 0; padding: 26px 0 0;
+  border-top: 1px solid var(--brf-rule-soft);
+}
+.brf-presc:first-of-type { border-top: 0; padding-top: 4px; }
+.brf-spec {
+  margin: 0 0 14px; font-family: var(--mono); font-size: 10px;
+  line-height: 1.9; letter-spacing: .12em; color: var(--brf-soft);
+}
+.brf-presc > .brf-lab { display: block; margin: 22px 0 0; }
+.brf-caveats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 22px 28px;
+  padding: 18px 0 0; border-top: 1px solid var(--brf-rule-soft);
+}
+.brf-caveat .brf-p {
+  margin: 8px 0 0; max-width: none; font-size: 13px; line-height: 1.7;
+  color: var(--brf-soft);
+}
+@media (max-width: 640px) { .brf-caveats { grid-template-columns: 1fr; } }
+
+.brf-tail {
+  margin: 18px 0 0; font-size: 12px; line-height: 2; color: var(--brf-soft);
+}
+.brf-tail .brf-lab { display: inline-block; min-width: 130px; }
+.brf-presc-thin .brf-p { max-width: 65ch; }
+
+/* The design's one text button, borrowed exactly rather than restyled. */
+.brf-link {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  font-family: var(--mono); font-size: 10px; line-height: normal;
+  letter-spacing: .16em; color: var(--brf-label);
+  border-bottom: 1px solid transparent;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.brf-link:hover { color: var(--brf-ink); border-bottom-color: var(--line-hi); }
+.brf-portlink { margin: 32px 0 0; }
+
+/* ------------------------------------------------------------------ tables */
+
+.brf-table {
+  width: 100%; border-collapse: collapse; margin: 8px 0 0;
+  font-size: 13px;
+}
+.brf-table th {
+  text-align: left; padding: 0 16px 9px 0;
+  font-family: var(--mono); font-size: 9px; font-weight: 400;
+  letter-spacing: .14em; color: var(--brf-label);
+  border-bottom: 1px solid var(--brf-rule);
+}
+.brf-table td {
+  padding: 11px 16px 11px 0; vertical-align: top;
+  border-bottom: 1px solid var(--brf-rule-soft);
+}
+.brf-table tr:last-child td { border-bottom: 0; }
+.brf-tk { color: var(--brf-body); width: 27%; }
+.brf-tv { font-family: var(--mono); font-size: 12px; color: var(--brf-ink); width: 27%; }
+.brf-ts { font-size: 12px; line-height: 1.65; color: var(--brf-soft); }
+.brf-warnv { color: var(--brf-accent); }
+.brf-consts { margin-top: 30px; }
+.brf-consts .brf-lab { display: block; margin-bottom: 10px; }
+
+/* ---------------------------------------------------------------- colophon */
+
+.brf-colophon {
+  margin: 52px 0 0; padding-top: 22px; border-top: 1px solid var(--brf-rule);
+}
+.brf-colophon .brf-lab { margin-bottom: 10px; }
+/* The last sheet's copy of the standing warning. A long table can spill past
+   its own section's marker, and the colophon is the one block guaranteed to be
+   on the final page. */
+.brf-fixfoot {
+  color: var(--brf-accent); letter-spacing: .18em;
+  padding-bottom: 9px; border-bottom: 1px solid var(--brf-accent);
+}
+.brf-colophon .brf-basis { margin-top: 8px; max-width: 74ch; }
+.brf-empty { padding: 60px 0; font-size: 14.5px; line-height: 1.75; max-width: 60ch; }
+
+/* ==================================================================== print
+
+   The document is the deliverable, so this block is not a courtesy — a Print
+   control that produces a broken page is worse than no Print control.
+
+   The ink palette is DERIVED, not invented. The shell is a warm near-black
+   ground carrying warm off-white text; on paper that relationship inverts, so
+   the ink is the shell's own ground colour lightened just enough to stop it
+   reading as a flat black, and the paper is white. The three attribution hues,
+   the accent, the severity ramp, the money green and the cost brown are the
+   same hues at the darker, less saturated values that survive on white and in a
+   monochrome laser print. Nothing new is introduced; every entry below has a
+   screen counterpart directly above it.                                       */
+
+@media print {
+  @page { size: A4 portrait; margin: 16mm 14mm; }
+
+  /* Only while the brief is open. Printing the application with the brief
+     closed must go on behaving exactly as it did before this file existed. */
+  body.brief-open > *:not(#brief) { display: none !important; }
+  html, body.brief-open {
+    background: #fff !important; height: auto !important; overflow: visible !important;
+  }
+
+  #brief {
+    position: static !important; inset: auto; z-index: auto;
+
+    --brf-ink:       #14110E;   /* from --bg #0A0908, lifted off pure black */
+    --brf-body:      #2E2922;   /* from --t2, inverted for white paper */
+    --brf-soft:      #4B443B;   /* from --t4 */
+    --brf-label:     #6B6259;   /* --t7 unchanged: it already reads on both */
+    --brf-rule:      rgba(20, 17, 14, .34);
+    --brf-rule-soft: rgba(20, 17, 14, .16);
+    --brf-paper:     #FFFFFF;
+    --brf-tint:      transparent;
+    --brf-accent:    #A83E1C;   /* --accent #D9542E, darkened for white */
+    --brf-assumed:   rgba(20, 17, 14, .48);
+
+    --brf-sev-0: rgba(20, 17, 14, .10);
+    --brf-sev-1: rgba(20, 17, 14, .26);
+    --brf-sev-2: rgba(140, 78, 44, .55);
+    --brf-sev-3: rgba(150, 66, 34, .78);
+    --brf-sev-4: #A83E1C;
+
+    --brf-term-solar: #96650F;   /* --term-solar #E0A24B */
+    --brf-term-trap:  #78324F;   /* --term-trap  #A8577C */
+    --brf-term-sky:   #33607B;   /* --term-sky   #5B8CA8 */
+    --brf-money:      #47682F;   /* --money      #7FA66A */
+    --brf-cost:       #8A4426;   /* --cost       #B2603F */
+  }
+
+  /* The window stops being a window: no scrim, no fixed positioning, no
+     shadow, no clipped scroller, no height clamp. */
+  #brief-scrim, #brief-win .phead, .brf-chrome { display: none !important; }
+  #brief-win {
+    position: static !important; transform: none !important;
+    width: auto !important; height: auto !important;
+    max-width: none; max-height: none;
+    display: block; overflow: visible !important;
+    background: #fff !important; border: 0 !important;
+    border-radius: 0; box-shadow: none !important; opacity: 1 !important;
+  }
+  #brief-doc {
+    overflow: visible !important; height: auto !important;
+    padding: 0 !important; min-height: 0;
+  }
+  .brf { max-width: none; color: var(--brf-body); font-size: 10.5pt; }
+
+  /* Colour must actually reach the page: the chart's whole argument is which
+     term is which, and a browser's default is to drop backgrounds. */
+  .brf-chart, .brf-key i, .brf-fixture, .brf-sw {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+
+  /* Type, at paper sizes. Points rather than pixels, because a printer's
+     idea of a pixel is not a reader's. */
+  .brf-mast { padding-top: 0; }
+  .brf-title { font-size: 30pt; }
+  .brf-h { font-size: 17pt; }
+  .brf-ph { font-size: 13.5pt; }
+  .brf-p { font-size: 10.5pt; line-height: 1.6; max-width: none; }
+  .brf-big { font-size: 25pt; }
+  .brf-lab, .brf-kick, .brf-sub, .brf-dateline, .brf-spec, .brf-legend, .brf-basis {
+    color: var(--brf-label);
+  }
+  .brf-table { font-size: 9.5pt; }
+  .brf-tv { font-size: 9pt; }
+  .brf-ts, .brf-caveat .brf-p, .brf-tail { font-size: 9.5pt; }
+
+  /* A section is a unit of argument, so it does not straddle a fold — and a
+     prescription is the unit a contractor quotes from, so it especially does
+     not: a floor range on one sheet and its price on the next is how a job
+     comes back priced for the wrong building. */
+  .brf-sec, .brf-presc, .brf-find, .brf-fixture, .brf-fig, .brf-colophon,
+  .brf-caveats, .brf-ranks {
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  .brf-sec { margin-top: 26pt; padding-top: 16pt; }
+  .brf-h, .brf-ph { break-after: avoid; page-break-after: avoid; }
+
+  /* The standing warning, once per section. Each section is kept whole on a
+     page, so every printed sheet carries at least one of these. */
+  .brf-fixrun {
+    display: block; margin: 0 0 10pt;
+    font-family: var(--mono); font-size: 7.5pt; letter-spacing: .14em;
+    color: var(--brf-accent);
+    border-bottom: 1px solid var(--brf-accent); padding-bottom: 5pt;
+  }
+  .brf-fixture { background: transparent; border-width: 1px 1px 1px 3px; }
+
+  /* The chart is 640 units wide against a 720px column on screen; on paper the
+     column is the page, so it is held to a width that keeps its 8.5px labels
+     from shrinking into the paper. */
+  .brf-fig { max-width: 165mm; }
+  .brf-chart { max-height: 190mm; }
+
+  /* Links print as their text. There is nothing to click on paper, and an
+     underline that leads nowhere is worse than no underline. */
+  .brf-link { border-bottom: 0; color: var(--brf-label); }
+  #brief .asm { border-bottom: 1px dotted var(--brf-assumed); }
+}

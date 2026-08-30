@@ -1,0 +1,117 @@
+/* The year strip.
+ *
+ * The strip is a canvas, so almost nothing here paints the data — year.js does
+ * that. What is here is the frame around it: the aggregate buttons, the month
+ * ruler, the hover readout, and the state the interface enters when an annual
+ * layer is showing and the clock stops meaning anything.
+ */
+
+#time .yearrow #year-host { align-self: stretch; }
+
+#year-host { flex: 1; min-width: 0; }
+
+.yearstrip { display: flex; flex-direction: column; gap: 2px; }
+
+/* ---- the aggregate switch, plus what is currently on screen */
+
+.ymodes {
+  display: flex; align-items: center; gap: var(--s1);
+  font-family: var(--mono); font-size: 10px;
+}
+.ymodes button {
+  all: unset; cursor: pointer; padding: 2px 8px; border-radius: var(--r1);
+  color: var(--text-3); border: 1px solid transparent; transition: all .15s;
+  letter-spacing: .02em;
+}
+.ymodes button:hover { color: var(--text-2); border-color: var(--line); }
+.ymodes button[aria-pressed="true"] {
+  background: var(--accent-dim); color: var(--text);
+  border-color: rgba(78, 168, 222, .4);
+}
+.ynow {
+  margin-left: auto; font-family: var(--mono); font-size: 10px;
+  color: var(--text-2); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 46%;
+}
+.ynow b { color: var(--text); font-weight: 500; }
+.ynow .dim { color: var(--text-3); }
+
+/* ---- the strip itself */
+
+canvas.ystrip {
+  display: block; width: 100%; height: 48px; cursor: crosshair;
+  border-radius: var(--r1);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,0));
+  touch-action: none;         /* the pointer drag is the control */
+}
+
+.yruler {
+  position: relative; height: 11px;
+  font-family: var(--mono); font-size: 9px; color: var(--text-3);
+}
+.yruler i {
+  position: absolute; top: 0; transform: translateX(-50%);
+  font-style: normal; opacity: .8;
+}
+
+/* ---- hover readout. Positioned by year.js, which clamps it inside the strip. */
+
+.ytip {
+  position: absolute; bottom: 100%; transform: translateX(-50%);
+  margin-bottom: 6px; padding: 5px 9px; white-space: nowrap;
+  background: var(--panel-hi); border: 1px solid var(--line-strong);
+  border-radius: var(--r1); box-shadow: var(--shadow);
+  font-family: var(--mono); font-size: 10px; color: var(--text-2);
+  pointer-events: none; z-index: 30;
+}
+.ytip b { color: var(--text); font-weight: 500; }
+.ytip .trop { color: var(--warn); }
+.ytip .ep { color: var(--modelled); }
+.ytip .solved { color: var(--measured); }
+.ytip .recon { color: var(--text-3); }
+#year-host { position: relative; }
+
+/* ---- the provenance mark in the time readout */
+
+#time .sunline .prov {
+  display: inline-block; margin-left: 10px; padding: 2px 9px;
+  border: 1px solid var(--line-ctl); border-radius: 999px;
+  font-size: 9px; letter-spacing: .16em; color: var(--t7);
+}
+#time .sunline .tropmark { color: var(--accent); }
+
+/* ---- an annual layer is showing: the clock has stopped meaning anything.
+   Greying rather than hiding, because the controls have to stay where they were
+   or the layout jumps every time somebody picks a layer. */
+
+#time.frozen #play { opacity: .38; pointer-events: none; }
+#time.frozen .ymodes button { opacity: .5; }
+#time .frozen-note {
+  margin: 0; font-family: var(--mono); font-size: 10px;
+  color: var(--modelled); border-top: 1px solid var(--line);
+  padding-top: var(--s2);
+}
+
+/* ---- a month's binaries are in flight. About 5 MB, once per month. */
+
+#time.loading canvas.ystrip { opacity: .55; }
+#time.loading .ynow::after {
+  content: ' · loading'; color: var(--accent);
+}
+
+/* ---- the analyst's transient caption over the map */
+
+#agent-note {
+  position: absolute; left: 50%; bottom: 168px; transform: translate(-50%, 8px);
+  max-width: 46ch; padding: 7px 13px; z-index: 40;
+  background: var(--panel-hi); border: 1px solid rgba(78, 168, 222, .38);
+  border-radius: 999px; box-shadow: var(--shadow);
+  font-size: 11.5px; color: var(--text-2); text-align: center;
+  opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+}
+#agent-note.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (max-width: 1240px) {
+  canvas.ystrip { height: 40px; }
+}

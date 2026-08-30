@@ -1,0 +1,577 @@
+/* What if — the pane's own sheet.
+ *
+ * Everything here is scoped under `.wi`, the module's root element, so the
+ * decision layer's four surfaces cannot reach into each other or into the
+ * shell. No custom property is declared: every colour, face, radius and easing
+ * comes from `app.css`, which is the design system and the only one there is.
+ *
+ * The panel this lives in is `clamp(296px, 27vw, 366px)` wide. That is the
+ * governing constraint on every decision below: the tables are four and five
+ * columns at 296px of content, the mono labels are 9 to 10px because a smaller
+ * face stops being readable and a larger one wraps, and the type hierarchy is
+ * carried by value rather than by size because the sizes are already as small
+ * as they can usefully go. Nothing here is designed at a comfortable width and
+ * then shrunk.
+ *
+ * Colour discipline, restated because this pane holds three quantities that
+ * would happily borrow each other's palette:
+ *
+ *   --good / --accent   TEMPERATURE. Green cools, red warms. Nothing else.
+ *   --money / --cost    DOLLARS AND KILOWATT-HOURS. Never the temperature ramp:
+ *                       a saving is not a temperature.
+ *   --sev-0..4          SEVERITY on the floor ladder — a single hue ramped by
+ *                       value, so it reads as "more" without reading as
+ *                       "hotter" and cannot be mistaken for the ramp on the
+ *                       model behind the panel.
+ *   --term-solar/trap   THE CAUSE of a floor band's heat. A causal category, so
+ *                       distinguishable hues rather than a ramp.
+ *   --accent            also the cursor and the active control. It is never
+ *                       data, and the one place that looks like an exception —
+ *                       the warm end of the temperature sense — is the shell's
+ *                       own established convention from the pane this replaces.
+ *
+ * `all: unset` on every reset control is followed immediately by
+ * `box-sizing: border-box` and an explicit `line-height`, for the two reasons
+ * app.css records at length: `unset` resets box-sizing out from under the `*`
+ * rule, and `unset` on an inherited property means inherit, which pulls the
+ * body's 1.5 back in and outranks anything set earlier.
+ */
+
+.wi {
+  padding-bottom: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Numbers are monospace and tabular everywhere, without exception, so that a
+   column of figures can be compared by eye rather than by reading. */
+.wi .k, .wi .v, .wi .n, .wi .el, .wi .sp, .wi td, .wi th,
+.wi .wi-lab, .wi .wi-note, .wi .wi-meta, .wi .wi-kv .k, .wi .wi-kv .v {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ blocks */
+
+.wi-blk { padding: 20px 22px 22px; }
+.wi-blk + .wi-blk,
+.wi-sites + .wi-blk,
+.wi-ms + .wi-blk { border-top: 1px solid var(--line); }
+
+.wi-lede {
+  margin: 0 0 4px; font-size: 12.5px; line-height: 1.7;
+  color: var(--t4); text-wrap: pretty;
+}
+.wi-why {
+  margin: 0 0 12px; font-size: 12px; line-height: 1.65;
+  color: var(--t4); text-wrap: pretty;
+}
+.wi-why.wi-dim { color: var(--t6); }
+.wi-why.wi-neg { color: var(--t5); }
+
+.wi-lab {
+  display: block; font-family: var(--mono); font-size: 10px; line-height: normal;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--t7);
+  margin-bottom: 11px;
+}
+.wi-lab.wi-dim { color: var(--t8); }
+
+.wi-note {
+  margin: 12px 0 0; font-family: var(--mono); font-size: 9.5px;
+  line-height: 1.8; letter-spacing: .06em; color: var(--t7); text-transform: uppercase;
+}
+.wi-note.wi-dim { color: var(--t8); }
+.wi-note.wi-warn, .wi-note .warnk { color: var(--cost); }
+.wi-note b { font-weight: 400; }
+
+/* The assumed treatment.
+ *
+ * app.css names `.asm` as the whole treatment for a figure that passed through
+ * an assumption table but declares no rule for it — the decision layer's four
+ * surfaces landed together and the class belongs to whichever declares it. It
+ * is declared here SCOPED to `.wi` so this pane renders correctly on its own
+ * and cannot collide with a global rule if one arrives. A dotted underline in
+ * the mid-text tone, and nothing else: the label has to say "softer than
+ * modelled" without competing with the number it sits under. */
+.wi .asm {
+  border-bottom: 1px dotted var(--assumed);
+  cursor: help;
+}
+
+/* ------------------------------------------------------------- the banners */
+
+/* The standing placeholder-data banner. Full bleed, a severity edge rather than
+   an accent one — the accent is the cursor — and no dismiss control, because a
+   banner that can be dismissed is a banner that is absent from the screenshot
+   somebody makes a decision from. */
+.wi-fix {
+  padding: 11px 22px 12px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid var(--sev-3);
+  background: var(--panel-tint);
+  font-family: var(--mono); font-size: 9px; line-height: 1.75;
+  letter-spacing: .1em; color: var(--t5);
+}
+.wi-off {
+  padding: 11px 22px 12px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid var(--line-ctl);
+  font-family: var(--mono); font-size: 9px; line-height: 1.75;
+  letter-spacing: .1em; color: var(--t7);
+}
+
+/* ------------------------------------------------------------ the building */
+
+.wi-id {
+  font-family: var(--serif); font-size: 25px; line-height: 1.1;
+  color: var(--t0); margin-bottom: 8px; text-wrap: balance;
+}
+.wi-meta {
+  font-family: var(--mono); font-size: 9.5px; line-height: normal;
+  letter-spacing: .1em; color: var(--t7); margin-bottom: 16px;
+}
+
+.wi-hd, .wi-hd2 {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
+.wi-hd { padding: 0 22px; }
+.wi-hd .wi-lab, .wi-hd2 .wi-lab { margin-bottom: 9px; }
+
+/* ---- the measure rows.
+
+   Full bleed with a 2px left edge, the same idiom as the layer list: it is the
+   same kind of control, a thing you turn on. Three lines — what it is, what it
+   does, where it reaches — because the floor range is the half of a
+   prescription that a building-level number throws away. */
+
+.wi-ms { padding: 2px 0 4px; }
+.wi-m { border-left: 2px solid transparent; transition: background 240ms var(--ease); }
+.wi-m.on { border-left-color: var(--accent); background: rgba(237, 231, 220, .05); }
+/* A hairline between rows and not above the first, so the list reads as a set
+   of separate choices rather than as one paragraph of three measures. The
+   faintest of the four weights: these are already separated by an 11px gutter
+   and a full --line here would cut the panel into slices. */
+.wi-m + .wi-m { border-top: 1px solid var(--line-faint); }
+
+.wi-mb {
+  all: unset; box-sizing: border-box; cursor: pointer; display: grid; width: 100%;
+  grid-template-columns: 1fr auto; column-gap: 10px; align-items: baseline;
+  padding: 12px 22px 12px 20px; line-height: normal;
+  transition: background 200ms ease;
+}
+.wi-mb:hover { background: rgba(237, 231, 220, .035); }
+.wi-m.on .wi-mb:hover { background: transparent; }
+.wi-mb .t {
+  font-family: var(--sans); font-size: 12.5px; line-height: 1.35; color: var(--t3);
+  text-wrap: pretty;
+}
+.wi-m.on .wi-mb .t { color: var(--t0); }
+.wi-mb .k { font-family: var(--mono); font-size: 12px; line-height: normal; }
+.wi-mb .f {
+  grid-column: 1 / -1; margin-top: 5px;
+  font-family: var(--mono); font-size: 9px; line-height: normal;
+  letter-spacing: .1em; color: var(--t7);
+}
+
+/* ---- the expanded detail. */
+
+.wi-det { padding: 2px 22px 16px 20px; }
+.wi-det .link { display: inline-block; margin-top: 14px; }
+/* "Does not fix" follows a mono note, and two blocks of text at 12px and 9.5px
+   with no space between them read as one wrapped paragraph in two faces. */
+.wi-det .wi-why.wi-neg { margin: 13px 0 0; }
+
+.wi-kv {
+  display: grid; grid-template-columns: 76px 1fr; column-gap: 12px; row-gap: 8px;
+  align-items: baseline;
+}
+.wi-kv .k {
+  font-family: var(--mono); font-size: 9px; line-height: 1.5;
+  letter-spacing: .1em; color: var(--t7);
+}
+.wi-kv .v {
+  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--t2);
+}
+.wi-kv .v .sp {
+  display: block; margin-top: 2px; font-size: 9px;
+  letter-spacing: .08em; color: var(--t8);
+}
+
+/* ---- the temperature sense. Green cools, red warms, dim for a dead band that
+   is rounding noise rather than a finding. Money is kept entirely apart. */
+.wi .cool  { color: var(--good); }
+.wi .warm  { color: var(--accent); }
+.wi .flat  { color: var(--t8); }
+.wi .none  { color: var(--t8); }
+.wi .money { color: var(--money); }
+.wi .cost, .wi .costc { color: var(--cost); }
+
+/* -------------------------------------------------------- the floor ladder */
+
+/* The per-floor consequence. Ten bands, roof at the top because that is where
+   the roof is, and four columns that answer four questions in one glance:
+   which floors, why they are hot, how bad, and what the selected measures do
+   to them. A row is 15px so ten of them are a shape rather than a table. */
+
+.wi-lad { margin-top: 2px; }
+.wi-lr {
+  display: grid; grid-template-columns: 34px 4px 1fr 26px 46px;
+  align-items: center; column-gap: 7px; height: 15px;
+  transition: opacity 240ms var(--ease);
+  opacity: .45;
+}
+.wi-lr.on { opacity: 1; }
+.wi-lr .fl {
+  font-family: var(--mono); font-size: 9px; line-height: normal;
+  letter-spacing: .04em; color: var(--t6); text-align: right;
+}
+.wi-lr .tm { height: 11px; border-radius: 1px; }
+.wi-lr .sv { height: 3px; background: rgba(237, 231, 220, .07); }
+.wi-lr .sv i { display: block; height: 100%; }
+.wi-lr .tt {
+  font-family: var(--mono); font-size: 9px; line-height: normal;
+  color: var(--t7); text-align: right;
+}
+.wi-lr .dl {
+  font-family: var(--mono); font-size: 10.5px; line-height: normal; text-align: right;
+}
+.wi-lr .dl b { font-weight: 400; color: var(--cost); padding-left: 2px; }
+
+.wi-note .sw {
+  display: inline-block; width: 7px; height: 7px; border-radius: 1px;
+  margin-right: 4px; vertical-align: baseline;
+}
+
+/* ------------------------------------------------------------- the tables */
+
+/* The five-column table from the pane this replaces, kept because at 296px
+   nothing beats it: a name column that can wrap and four numeric columns that
+   cannot. `td:first-child` carries a permanent left pad so that the selected
+   row's inset marker does not shift the text when it appears. */
+
+.wi-tab { width: 100%; border-collapse: collapse; font-size: 11px; }
+.wi-tab th {
+  text-align: right; font-weight: 400; padding: 0 3px 9px;
+  font-family: var(--mono); font-size: 9px; line-height: normal; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--t7);
+  border-bottom: 1px solid var(--line);
+}
+.wi-tab th:first-child { text-align: left; padding-left: 8px; }
+.wi-tab th:not(:first-child), .wi-tab td:not(:first-child) { width: 15%; white-space: nowrap; }
+.wi-tab td {
+  padding: 8px 3px; font-family: var(--mono); font-size: 11.5px; text-align: right;
+  border-bottom: 1px solid var(--line-faint); color: var(--t1);
+}
+.wi-tab td:first-child {
+  text-align: left; padding-left: 8px;
+  font-family: var(--sans); font-size: 12.5px; line-height: 1.35; color: var(--t4);
+}
+.wi-tab tbody tr { cursor: pointer; transition: background 200ms ease; }
+.wi-tab tbody tr:hover { background: rgba(237, 231, 220, .04); }
+.wi-tab tbody tr.on { background: rgba(237, 231, 220, .07); }
+.wi-tab tbody tr.on td:first-child {
+  color: var(--t0); box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* The price column. A bar rather than a fifth number, so that the two measures
+   with a winter price are distinguishable from the two without one before
+   anything is read. Drawn in --cost: it is a price, not a temperature. */
+.wi-tab .pr { width: 34px; padding-right: 0; }
+.wi-pb { display: block; height: 3px; background: rgba(237, 231, 220, .07); }
+.wi-pb i { display: block; height: 100%; background: var(--cost); }
+
+/* The year table carries ranges rather than single figures — "8.6k–14.2k" where
+   the hourly table carries "-3.1" — so its numeric columns are wider and squeeze
+   the name column until "Façade shading" wraps onto two lines. Half a point off
+   the figures buys the name column back about 24px, which is the difference
+   between a four-row table and an eight-line one. */
+.wi-yr td { font-size: 10.5px; }
+.wi-yr td:first-child { font-size: 12px; }
+
+/* --------------------------------------------------------- site selection */
+
+.wi-sites { padding: 6px 0 6px; }
+.wi-sites button {
+  all: unset; box-sizing: border-box; cursor: pointer; display: flex; width: 100%;
+  align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 12px 22px; border-left: 2px solid transparent;
+  font-family: var(--sans); font-size: 13.5px; line-height: normal; color: var(--t4);
+  transition: background 200ms ease, color 200ms ease;
+}
+.wi-sites button:hover { color: var(--t1); background: rgba(237, 231, 220, .035); }
+.wi-sites button[aria-pressed="true"] {
+  color: var(--t0); background: rgba(237, 231, 220, .06); border-left-color: var(--accent);
+}
+.wi-sites button .u {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .1em; color: var(--t7);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- the stacking bar */
+
+/* The strongest claim on the pane, so it gets the most deliberate drawing.
+ *
+ * Two tracks on one scale. The upper one is the sum of the parts and is drawn
+ * neutral, because it is arithmetic rather than a measurement. The lower one is
+ * the re-solved combination and carries the temperature sense. The run between
+ * them is the benefit that does not arrive, and it is drawn as a VOID — a
+ * dashed outline over the panel ground — rather than as a coloured segment,
+ * because it is an absence and a filled bar would read as a third quantity that
+ * exists.
+ *
+ * When the combination beats its parts, which happens on felt temperature in a
+ * deep canyon, the same segment appears past the end of the sum bar and is
+ * drawn in the good tone at low opacity. The sign of the gap is a finding, not
+ * an error, and the drawing has to be able to show both. */
+
+.wi-stack .wi-tk { margin-top: 14px; }
+.wi-stack .wi-tk .lab {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin-bottom: 6px;
+}
+.wi-stack .wi-tk .lab span:first-child {
+  font-family: var(--sans); font-size: 12px; color: var(--t3);
+}
+.wi-stack .wi-tk .lab .n { font-family: var(--mono); font-size: 12px; }
+.wi-stack .wi-tk .tr {
+  position: relative; height: 6px; background: rgba(237, 231, 220, .05);
+}
+.wi-stack .wi-tk .tr i {
+  position: absolute; left: 0; top: 0; bottom: 0; display: block;
+  transition: width 400ms var(--ease);
+}
+.wi-stack .wi-tk .tr i.neutral { background: var(--line-ctl); }
+.wi-stack .wi-tk .tr i.cool { background: var(--good); }
+.wi-stack .wi-tk .tr i.warm { background: var(--accent); }
+.wi-stack .wi-tk .tr i.flat { background: var(--t8); }
+.wi-stack .wi-tk .tr u {
+  position: absolute; top: 0; bottom: 0; display: block;
+  border: 1px dashed var(--line-ctl); border-left: none;
+  transition: width 400ms var(--ease), left 400ms var(--ease);
+}
+.wi-stack .wi-tk .tr u.over { border-color: var(--good); opacity: .55; }
+.wi-stack .wi-tk .tr u.pend { border-color: var(--line); border-left: 1px dashed var(--line); }
+
+.wi-gap {
+  margin: 14px 0 0; font-size: 12px; line-height: 1.65;
+  color: var(--t3); text-wrap: pretty;
+}
+
+/* The metric switch. Three mono words: the block is an argument and an argument
+   you cannot inspect on more than one number is a slogan. */
+.wi-mx { display: flex; gap: 2px; }
+.wi-mx button {
+  all: unset; box-sizing: border-box; cursor: pointer; padding: 3px 7px 4px;
+  border: 1px solid transparent; border-radius: var(--r);
+  font-family: var(--mono); font-size: 9px; line-height: normal; letter-spacing: .12em;
+  color: var(--t7); transition: color 200ms ease, border-color 200ms ease;
+}
+.wi-mx button:hover { color: var(--t2); }
+.wi-mx button[aria-pressed="true"] { color: var(--t0); border-color: var(--line-ctl); }
+
+/* ---------------------------------------------------- the answering figure */
+
+/* One large serif figure and the change against the baseline beside it. Every
+   answering block in this design ends this way, and this pane ends two of them
+   this way, so they are the same object. */
+.wi-ans {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 14px;
+}
+.wi-ans .v {
+  margin-top: 6px; font-family: var(--serif); font-size: 40px; line-height: 1;
+  color: var(--t0); white-space: nowrap;
+}
+.wi-ans .rt { text-align: right; }
+.wi-ans .rt .d {
+  font-family: var(--mono); font-size: 11px; line-height: normal; margin-bottom: 6px;
+}
+.wi-ans .rt .wi-lab { margin-bottom: 0; letter-spacing: .1em; }
+
+/* -------------------------------------------------------------- the run */
+
+.wi-run .wi-lab { margin-bottom: 9px; }
+.wi-rc { margin-top: 4px; }
+
+.wi-go {
+  all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%;
+  text-align: center; padding: 11px 12px;
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  font-family: var(--mono); font-size: 10px; line-height: normal; letter-spacing: .16em;
+  color: var(--t2); transition: all 240ms var(--ease);
+}
+.wi-go:hover { color: var(--t0); border-color: var(--line-hi); background: rgba(237, 231, 220, .05); }
+.wi-go .c { color: var(--t7); letter-spacing: .1em; }
+
+/* The progress state.
+ *
+ * Elapsed wall time in tabular mono so the digits do not jitter as they count,
+ * and which job of how many, because an n+1 stack is genuinely several solves
+ * and one undifferentiated bar would make a working engine look hung.
+ *
+ * The track is indeterminate: the engine reports no progress within a solve and
+ * a percentage invented at sixty frames a second is a lie. Under reduced motion
+ * the sweep stops and the elapsed figure carries the whole signal, which it
+ * can — it is the honest part anyway. */
+.wi-prog { margin-top: 4px; }
+.wi-prog .lab {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin-bottom: 9px;
+}
+.wi-prog .lab .wi-lab { margin-bottom: 0; }
+.wi-prog .el { font-family: var(--mono); font-size: 12px; color: var(--t1); }
+.wi-prog .tr { position: relative; height: 2px; background: rgba(237, 231, 220, .10); overflow: hidden; }
+
+/* LINEAR, and this is the one deliberate departure from `var(--ease)` in the
+   pane, so it is argued rather than assumed.
+ *
+ * `--ease` is cubic-bezier(0.16, 1, 0.3, 1): a fast departure and a long
+ * settle. That is exactly right for a transition, which is a thing arriving
+ * somewhere. On a LOOP it means the segment crosses the track in the first
+ * third of the cycle and then sits at the far end for the remaining two thirds,
+ * so most of the time there is nothing moving and the indicator reads as
+ * stopped — which is the precise failure the progress state exists to avoid. A
+ * loop is not a transition. Every actual transition in this sheet still uses
+ * `var(--ease)`; this one keyframe does not. */
+.wi-prog .tr i {
+  position: absolute; top: 0; bottom: 0; width: 38%; background: var(--accent);
+  animation: wi-sweep 1300ms linear infinite;
+}
+.wi-prog .link { display: inline-block; margin-top: 11px; }
+
+@keyframes wi-sweep {
+  0%   { left: -38%; }
+  100% { left: 100%; }
+}
+
+.wi-out .wi-lab { margin-top: 20px; }
+.wi-out .wi-stack { padding: 18px 0 0; border-top: 1px solid var(--line-faint); margin-top: 16px; }
+.wi-out .wi-tab { margin-top: 2px; }
+
+/* --------------------------------------------------- design your own */
+
+.wi-disc {
+  all: unset; box-sizing: border-box; cursor: pointer; display: flex; width: 100%;
+  align-items: center; justify-content: space-between; gap: 10px;
+  padding: 16px 22px; line-height: normal;
+  border-top: 1px solid var(--line);
+  transition: background 200ms ease;
+}
+.wi-disc:hover { background: rgba(237, 231, 220, .035); }
+.wi-disc .wi-lab { margin-bottom: 0; }
+.wi-disc[aria-expanded="true"] .wi-lab { color: var(--t2); }
+.wi-disc .ch {
+  width: 7px; height: 7px; border-right: 1px solid var(--t6); border-bottom: 1px solid var(--t6);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 300ms var(--ease);
+}
+.wi-disc[aria-expanded="true"] .ch { transform: rotate(225deg) translate(-2px, -2px); }
+
+.wi-levers { padding-top: 4px; }
+
+/* ---- the sliders.
+
+   A native range input, restyled. Native rather than a div stack because it is
+   keyboard-operable, announces its value, and cannot get its thumb stuck when a
+   pointerup lands outside the window — three things a hand-built slider has to
+   re-earn and usually does not.
+
+   A lever is OFF until its name is clicked, which is the engine's own semantics
+   exactly: a spec is the set of levers you pull and an omitted lever is
+   unchanged. An off lever shows its track at rest and reads "unchanged", which
+   is the true statement about it. */
+
+.wi-sl { margin-bottom: 22px; }
+.wi-sl .lab {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px;
+}
+.wi-sl .nm {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  font-family: var(--sans); font-size: 13px; line-height: normal; color: var(--t5);
+  border-bottom: 1px solid transparent;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.wi-sl .nm:hover { color: var(--t2); border-bottom-color: var(--line-ctl); }
+.wi-sl.on .nm { color: var(--t0); }
+.wi-sl .v {
+  font-family: var(--mono); font-size: 10.5px; line-height: normal; color: var(--t8);
+}
+.wi-sl.on .v { color: var(--accent); }
+
+.wi-sl input[type="range"] {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%;
+  height: 14px; margin: 0; background: transparent; outline: none; cursor: pointer;
+}
+.wi-sl input[type="range"]:disabled { cursor: default; }
+.wi-sl input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px; border-radius: 0;
+  background: linear-gradient(to right,
+    var(--accent) 0 var(--p, 0%), rgba(237, 231, 220, .16) var(--p, 0%) 100%);
+}
+.wi-sl input[type="range"]::-moz-range-track {
+  height: 2px; background: rgba(237, 231, 220, .16);
+}
+.wi-sl input[type="range"]::-moz-range-progress { height: 2px; background: var(--accent); }
+.wi-sl input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -5px;
+  border: none; border-radius: 50%; background: var(--t0);
+  transition: transform 200ms var(--ease);
+}
+.wi-sl input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border: none; border-radius: 50%; background: var(--t0);
+}
+.wi-sl input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.15); }
+.wi-sl input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(217, 84, 46, .35); }
+.wi-sl:not(.on) input[type="range"]::-webkit-slider-runnable-track {
+  background: rgba(237, 231, 220, .10);
+}
+.wi-sl:not(.on) input[type="range"]::-webkit-slider-thumb { background: var(--t8); }
+.wi-sl:not(.on) input[type="range"]::-moz-range-thumb { background: var(--t8); }
+.wi-sl:not(.on) input[type="range"]::-moz-range-progress { background: transparent; }
+
+/* The lever's stated trade-off.
+ *
+ * It stays visible on an unpulled lever rather than being revealed after the
+ * fact, because the trade-off is the reason to think before pulling and an
+ * interface that only mentions the pavement's radiant penalty once the pavement
+ * has been coated has told you nothing you could have used. But six notes at
+ * full strength are a wall of prose in a 300px column, so an unpulled lever's
+ * note sits at --t8, two steps below its own name, and rises to --t4 when the
+ * lever is on. The hierarchy is carried by value, which is how the rest of this
+ * interface carries it. */
+.wi-lnote {
+  margin: 9px 0 0; font-size: 11.5px; line-height: 1.55;
+  color: var(--t8); text-wrap: pretty;
+  transition: color 240ms var(--ease);
+}
+.wi-sl.on .wi-lnote { color: var(--t4); }
+
+/* ---- the period segment. Three choices, each with the number of solves it
+   costs, because the cost of the honest answer is part of the choice. */
+.wi-per { margin-top: 26px; }
+.wi-seg { display: flex; gap: 6px; }
+.wi-seg button {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: 1; text-align: center;
+  padding: 8px 4px; border: 1px solid var(--line); border-radius: var(--r);
+  font-family: var(--sans); font-size: 11.5px; line-height: normal; color: var(--t5);
+  transition: all 240ms var(--ease);
+}
+.wi-seg button:hover { color: var(--t1); border-color: var(--line-ctl); }
+.wi-seg button[aria-pressed="true"] { color: var(--t0); border-color: var(--line-hi); }
+.wi-seg button .u {
+  display: block; margin-top: 3px;
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: .1em; color: var(--t8);
+}
+
+.wi-crun { margin-top: 22px; }
+
+/* --------------------------------------------------------- reduced motion */
+
+/* Everything that moves here is a nicety except the progress sweep, and that
+   one is decorative too: the elapsed seconds are the actual signal and they
+   keep counting. Nothing is lost by stopping all of it. */
+@media (prefers-reduced-motion: reduce) {
+  .wi *, .wi *::before, .wi *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .wi-prog .tr i { position: static; width: 100%; opacity: .35; }
+}

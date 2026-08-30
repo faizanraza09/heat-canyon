@@ -166,33 +166,62 @@ def canyon_wind(wind_10m: float, aspect_ratio: float) -> float:
 
 
 def convective_coefficient(wind: float) -> float:
-    """Exterior *convective* heat transfer coefficient, W/(m^2 K).
+    """Exterior *convective* heat transfer coefficient for a wall, W/(m^2 K).
 
-        h_c = 2.0 + 3.8 * u
+        h_c = 5.8 + 3.8 * u
 
-    Note the intercept. The widely quoted McAdams form is h = 5.7 + 3.8u, and
-    that is what this function used to return -- which was a real bug, because
-    5.7 is a *combined* surface conductance: convection plus a linearised
-    radiative coefficient. Around a 290 K surface the radiative part alone is
-    4*eps*sigma*T^3 ~ 5 W/(m^2 K), which is most of the 5.7.
+    THE INTERCEPT HAS BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND BOTH TIMES
+    IT MATTERED. The history is written out because the number is load-bearing:
+    convection is the main way a hot facade sheds heat, so h_c sets the entire
+    surface-to-air temperature difference this engine exists to compute.
 
-    Since ``surface_temperature`` already carries an explicit longwave term
-    eps*sigma*(T_s^4 - T_env^4) -- the term the whole sky-view-factor
-    calculation exists to weight -- using the combined coefficient counted
-    radiation roughly twice. At 1 m/s that inflated the turbulent flux by about
-    50%, which damps the diurnal surface swing and pulls facade temperatures
-    towards air temperature: plausible-looking answers for the wrong reason.
+    *First error.* The function returned McAdams' h = 5.7 + 3.8u. That is a
+    **combined** surface conductance — convection plus a linearised radiative
+    coefficient. Around a 290 K surface the radiative part alone is
+    4*eps*sigma*T^3 ~ 5 W/(m^2 K), which is most of the 5.7. Since
+    ``surface_temperature`` already carries an explicit longwave term, using the
+    combined coefficient counted radiation roughly twice.
 
-    The intercept is therefore reduced to a genuinely convective free-convection
-    value of about 2 W/(m^2 K) for a vertical surface in still air, and the
-    longwave term stays explicit.
+    *Second error, correcting the first too far.* The intercept was then dropped
+    to 2.0, described as "a genuinely convective free-convection value for a
+    vertical surface in still air". Diagnosing McAdams as combined was right;
+    substituting a free-convection value for the intercept of a FORCED-convection
+    correlation was not. Palyvos (2008), reviewing convective-only correlations
+    for building envelopes, gives for vertical walls
 
-    Two documented simplifications: there is no orientation dependence (real
-    windward and leeward facades differ by up to a factor of two) and no
-    buoyancy term for a sunlit wall driving its own free convection. ``wind``
-    must be the *canyon* wind, not the above-roof value.
+        windward   h_c = 7.4 + 4.0 V
+        leeward    h_c = 4.2 + 3.5 V
+
+    with V the wind speed near the surface. Both intercepts are convective-only
+    and both are far above 2.0. This engine has no orientation dependence — a
+    documented simplification, since it solves a canyon rather than a single
+    building in a free stream — so it takes the mean of the two, 5.8 + 3.8u.
+
+    That the result is numerically close to McAdams is a coincidence of the
+    literature, not a retreat: the 5.8 here is a measured convective intercept,
+    the 5.7 there was convection plus radiation, and the explicit longwave term
+    stays.
+
+    WHY THIS SURFACED WHEN IT DID. The 2.0 intercept was introduced while the
+    wind fed to this function was 3.6x too large — Open-Meteo returns km/h and
+    the value was being read as m/s. A large wind hides a small intercept: at
+    12 m/s the intercept is 4% of h_c. Fixing the units (see
+    ``scripts/fetch_year.py``) put the canyon wind where it belongs, 0.3 to
+    3 m/s, where the intercept is a THIRD of h_c — and peak facade temperatures
+    went to 68 degC, about 15 K above anything a thermographic survey of masonry
+    reports. Two errors had been cancelling; correcting one exposed the other.
+
+    Two documented simplifications remain. There is no orientation dependence,
+    handled as above. And there is no explicit buoyancy term for a sunlit wall
+    driving its own free convection — but that omission is now bounded rather
+    than open: the simplified vertical-plate correlation h_n ~ 1.31*dT^(1/3)
+    gives under 4 W/(m^2 K) at a 30 K excess, and combined in cube-sum with a
+    forced term of 11 W/(m^2 K) it moves h_c by less than 5%, well inside the
+    spread between the windward and leeward correlations above.
+
+    ``wind`` must be the *canyon* wind, not the above-roof value.
     """
-    return 2.0 + 3.8 * max(0.0, wind)
+    return 5.8 + 3.8 * max(0.0, wind)
 
 
 # -------------------------------------------------- vertical air profile
@@ -421,7 +450,144 @@ def air_temperature_uncertainty(z: float, st: CanyonState) -> float:
 # ------------------------------------------------ surface energy balance
 
 
-def surface_temperature(
+@dataclass
+class SurfaceTerms:
+    """Why a surface is hot, decomposed into three additive drivers, in kelvin.
+
+    ``surface_temperature`` answers *how* hot. A prescription needs *why*, and
+    the energy balance already contains the answer -- it is only entangled in
+    the quartic emission term. Linearising that term about the AIR temperature,
+
+        eps*sigma*T_s^4  ~=  eps*sigma*T_air^4 + h_r*(T_s - T_air),
+        h_r = 4*eps*sigma*T_air^3
+
+    makes the balance separable, and what falls out is three temperature rises
+    above air that simply add:
+
+        dT = k * [ sw_abs
+                   + eps*(1-f_sky)*sigma*(T_sur^4 - T_air^4)
+                   + eps*f_sky*sigma*(T_sky^4 - T_air^4) ]
+
+        k = (1 - f_storage) / (h_c + (1 - f_storage)*h_r)
+
+    Expanding about the surface temperature instead would be the more accurate
+    choice numerically, but it makes h_r a function of the answer and destroys
+    the property the decomposition exists for: that each term belongs to one
+    thing a designer can move. ``dt_solar`` belongs to shading, albedo and
+    canopy; ``dt_trap`` to the building opposite and the canyon's geometry;
+    ``dt_sky`` -- the only negative term, the surface's one route to free
+    cooling -- to sky view factor alone. ``k`` carries the fabric, which is why
+    heavy masonry runs cooler at four in the afternoon and hotter at midnight.
+
+    The linearisation is the only approximation here, and ``residual`` carries
+    its exact size on every panel. It is reported, never absorbed: a term list
+    that quietly disagreed with the solve by two kelvin would be worse than no
+    term list at all.
+    """
+
+    t_surface: float         # deg C, identical to surface_temperature()
+    t_air: float             # deg C, the air the panel actually sits in
+    dt_solar: float          # K, absorbed shortwave
+    dt_trap: float           # K, longwave from the surfaces opposite
+    dt_sky: float            # K, longwave to the sky — negative
+    residual: float          # K, the linearisation error, signed
+    k: float                 # K per W/m^2
+    h_c: float               # W/(m^2 K), convective
+    h_r: float               # W/(m^2 K), linearised radiative about air
+    f_storage: float         # 0-0.4, the fraction the mass takes
+    sw_abs: float            # W/m^2 absorbed shortwave
+    f_sky: float             # this panel's sky view factor
+
+    @property
+    def dt_total(self) -> float:
+        """The rise the solve actually produced, K. The terms approximate this."""
+        return self.t_surface - self.t_air
+
+    @property
+    def shares(self) -> dict[str, float]:
+        """Normalised over the POSITIVE drivers only. Keys: solar, trap.
+
+        The sky term is excluded deliberately. It is relief rather than a cause,
+        and folding a negative number into a share denominator produces
+        percentages above 100 that read as an arithmetic error. Sums to 1.0 when
+        either positive driver exists, and to 0.0 when neither does -- a surface
+        below air temperature has no cause to apportion.
+        """
+        solar = max(self.dt_solar, 0.0)
+        trap = max(self.dt_trap, 0.0)
+        total = solar + trap
+        if total <= 0.0:
+            return {"solar": 0.0, "trap": 0.0}
+        return {"solar": solar / total, "trap": trap / total}
+
+    @property
+    def dominant(self) -> str:
+        """"solar" | "trap" | "ambient" — which measure family this panel wants.
+
+        Below 1.5 K above air the surface is simply at air temperature and
+        neither driver is worth naming; calling such a panel "solar-dominated"
+        because 0.4 K of its 0.9 K came from the sun would send a shading
+        recommendation to a wall that does not need one.
+        """
+        if self.dt_total < 1.5:
+            return "ambient"
+        return "solar" if self.dt_solar >= self.dt_trap else "trap"
+
+    @property
+    def night_recovery(self) -> str:
+        """"good" | "limited" | "none", from f_sky alone.
+
+        A surface sheds its stored heat overnight only through the sky it can
+        see. Below 0.15 there is effectively no route out, and purge ventilation
+        -- which assumes the night air and the surfaces have cooled -- must not
+        be offered at all: it would be a measure that cannot work, priced.
+        """
+        if self.f_sky >= 0.35:
+            return "good"
+        if self.f_sky >= 0.15:
+            return "limited"
+        return "none"
+
+    @property
+    def scaled(self) -> dict[str, float]:
+        """The three terms rescaled to sum EXACTLY to the observed rise, K.
+
+        Use this, not the raw fields, anywhere a term is quoted in kelvin to a
+        reader. Use the raw fields for anything that checks the algebra.
+
+        The raw terms are the tangent to a convex curve and therefore always
+        overstate the rise, by a second-order error that grows as the square of
+        it: about 0.5 K on a shaded facade, near 3 K on an ordinary sunlit July
+        wall in this scene, and up to 8 K on a dark low-mass surface at the
+        extreme. Quoting "12.4 K of this wall's excess is direct solar" from a
+        set of numbers that add up to three kelvin more than the wall's actual
+        excess is indefensible, and the alternative of publishing a residual
+        column beside every figure asks a reader to do the correction
+        themselves.
+
+        The correction is a single multiplicative factor, which is what makes
+        this legitimate rather than cosmetic. The linearisation error is one
+        factor on the whole rise, not a distortion of the balance between the
+        drivers, so dividing it back out restores the sum and leaves every ratio
+        -- and therefore ``shares`` and ``dominant`` -- bit-for-bit unchanged.
+        Nothing is being attributed to a cause it did not come from.
+
+        ``residual`` stays on the record either way. The interface labels a
+        scaled term as modelled, and the disagreement it corrects for is stated
+        in the methodology rather than absorbed silently.
+        """
+        raw = self.dt_solar + self.dt_trap + self.dt_sky
+        # A rise near zero has no ratios worth preserving and the factor is
+        # numerically meaningless there, so it is left alone.
+        if abs(raw) < 1e-6 or abs(self.dt_total) < 1e-6:
+            return {"solar": self.dt_solar, "trap": self.dt_trap,
+                    "sky": self.dt_sky, "factor": 1.0}
+        f = self.dt_total / raw
+        return {"solar": self.dt_solar * f, "trap": self.dt_trap * f,
+                "sky": self.dt_sky * f, "factor": f}
+
+
+def surface_terms(
     met: Met,
     st: CanyonState,
     shortwave_absorbed: float,
@@ -430,8 +596,9 @@ def surface_temperature(
     wind: float | None = None,
     t_surroundings: float | None = None,
     max_iter: int = 40,
-) -> float:
-    """Solve the surface energy balance for a facade or ground panel, deg C.
+) -> SurfaceTerms:
+    """Solve the surface energy balance for a facade or ground panel, and
+    decompose the answer into its drivers.
 
     Balance, per unit area:
 
@@ -451,6 +618,11 @@ def surface_temperature(
     Solved by damped fixed-point iteration on the quartic. Converges in well
     under 40 steps for every physically sensible input; the damping is there
     because the T^4 term makes an undamped iteration oscillate.
+
+    The decomposition that follows the solve is exact arithmetic on the same
+    inputs the loop used -- it does not re-derive h_c, f_storage or f_sky, so
+    the terms can never describe a different panel from the one solved. See
+    ``SurfaceTerms`` for the linearisation and what each term is attributable to.
     """
     props = MATERIALS.get(material, MATERIALS["concrete"])
     alpha, eps, adm = props["albedo"], props["emissivity"], props["admittance"]
@@ -481,7 +653,53 @@ def surface_temperature(
             t_s = t_new
             break
         t_s = t_s + 0.55 * (t_new - t_s)   # damping
-    return t_s
+
+    t_air_k = t_air + 273.15
+    h_r = 4.0 * eps * SIGMA * t_air_k**3
+    k = (1.0 - f_storage) / (h_c + (1.0 - f_storage) * h_r)
+    dt_solar = k * sw_abs
+    dt_trap = k * eps * (1.0 - f_sky) * SIGMA * (t_sur_k**4 - t_air_k**4)
+    dt_sky = k * eps * f_sky * SIGMA * (t_sky_k**4 - t_air_k**4)
+    return SurfaceTerms(
+        t_surface=t_s,
+        t_air=t_air,
+        dt_solar=dt_solar,
+        dt_trap=dt_trap,
+        dt_sky=dt_sky,
+        residual=(t_s - t_air) - (dt_solar + dt_trap + dt_sky),
+        k=k,
+        h_c=h_c,
+        h_r=h_r,
+        f_storage=f_storage,
+        sw_abs=sw_abs,
+        f_sky=f_sky,
+    )
+
+
+def surface_temperature(
+    met: Met,
+    st: CanyonState,
+    shortwave_absorbed: float,
+    svf_surface: float,
+    material: str = "concrete",
+    wind: float | None = None,
+    t_surroundings: float | None = None,
+    max_iter: int = 40,
+) -> float:
+    """Surface temperature of a facade or ground panel, deg C.
+
+    The whole balance lives in ``surface_terms``, which returns this number
+    alongside the reason for it. This wrapper stays because it is what the
+    pipeline, the scenario engine and the intervention engine call, and because
+    ``scripts/validate.py`` compares it element for element against the vector
+    engine -- a signature or return-type change here would be felt in five
+    places for no gain. Building the terms costs a handful of flops next to the
+    fixed point, so there is no fast path worth keeping separate.
+    """
+    return surface_terms(
+        met, st, shortwave_absorbed, svf_surface, material=material,
+        wind=wind, t_surroundings=t_surroundings, max_iter=max_iter,
+    ).t_surface
 
 
 def mean_radiant_temperature(
@@ -592,6 +810,10 @@ class SurfacePanel:
     area_weight: float       # relative area, for the longwave mean
     t_surface: float = 0.0   # deg C, filled by the solver
     t_air: float = 0.0       # deg C at this panel's height
+    # Why this panel is at that temperature. Filled by ``solve_canyon`` once the
+    # coupled solve has settled, so the terms describe the state that is
+    # actually returned rather than some intermediate guess at the surroundings.
+    terms: SurfaceTerms | None = None
 
 
 @dataclass
@@ -770,22 +992,41 @@ def solve_canyon(
                 p.irradiance *= (1.0 - facade_shade_factor)
 
     # ---- outer loop on the bulk surroundings temperature
-    t_sur = met.t_air_2m + 6.0
-    iterations = 0
-    for it in range(max_outer):
-        iterations = it + 1
-        for p in panels:
-            z_mid = 0.5 * (p.z_lo + p.z_hi)
-            u = canyon_wind(met.wind_10m, st.aspect_ratio)
-            if p.kind == "wall":
-                # Blend towards the free-stream wind approaching roof level.
-                frac = min(1.0, z_mid / max(st.h_mean, 1.0))
-                u = u + (met.wind_10m - u) * frac**1.5
-            local_met = Met(
+    def _panel_inputs(p: SurfacePanel) -> tuple[Met, float]:
+        """The local air state and wind speed this panel is solved against.
+
+        Factored out so the attribution pass below cannot construct them even
+        slightly differently from the pass that produced ``p.t_surface``. Two
+        copies of this arithmetic is exactly how a term list and a temperature
+        come to describe different panels.
+        """
+        z_mid = 0.5 * (p.z_lo + p.z_hi)
+        u = canyon_wind(met.wind_10m, st.aspect_ratio)
+        if p.kind == "wall":
+            # Blend towards the free-stream wind approaching roof level.
+            frac = min(1.0, z_mid / max(st.h_mean, 1.0))
+            u = u + (met.wind_10m - u) * frac**1.5
+        return (
+            Met(
                 t_air_2m=p.t_air, rh_percent=met.rh_percent, wind_10m=met.wind_10m,
                 wind_dir=met.wind_dir, cloud_fraction=met.cloud_fraction,
                 dni=met.dni, dhi=met.dhi, hour_edt=met.hour_edt,
-            )
+            ),
+            u,
+        )
+
+    t_sur = met.t_air_2m + 6.0
+    # The surroundings temperature the LAST panel pass actually used, which is
+    # not the same as the final ``t_sur``: the loop updates it after solving,
+    # and on the converging iteration it breaks having already overwritten it.
+    # The panels returned were solved against this one, so the terms must be too.
+    t_sur_solved = t_sur
+    iterations = 0
+    for it in range(max_outer):
+        iterations = it + 1
+        t_sur_solved = t_sur
+        for p in panels:
+            local_met, u = _panel_inputs(p)
             p.t_surface = surface_temperature(
                 local_met, st, p.irradiance, p.svf, material=p.material,
                 wind=u, t_surroundings=t_sur,
@@ -796,6 +1037,17 @@ def solve_canyon(
             t_sur = t_new
             break
         t_sur = t_sur + 0.7 * (t_new - t_sur)
+
+    # ---- attribution, once, on the converged state. A separate pass rather
+    # than a flag inside the loop: filling terms on every outer iteration would
+    # do the work up to twelve times over and, worse, would tempt a later reader
+    # into believing the intermediate ones meant something.
+    for p in panels:
+        local_met, u = _panel_inputs(p)
+        p.terms = surface_terms(
+            local_met, st, p.irradiance, p.svf, material=p.material,
+            wind=u, t_surroundings=t_sur_solved,
+        )
 
     # ---- pedestrian-level MRT, in sun and in shade
     walls = [p for p in panels if p.kind == "wall" and p.z_lo < 20.0]

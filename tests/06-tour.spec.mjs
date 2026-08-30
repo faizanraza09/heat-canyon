@@ -123,18 +123,28 @@ test('steps put the interface into the state they describe', async ({ page }) =>
 
   await stepTo('whatif');
   await expect(page.locator('#tab-whatif')).toBeVisible();
-  await expect(page.locator('#tab-whatif table.sctab')).toBeVisible();
+  // TWO tables now: the hour's deltas, and the same measures re-solved at every
+  // month's peak so the seasonal cost of a shading measure is a column.
+  await expect(page.locator('#tab-whatif table.sctab')).toHaveCount(2);
+  await expect(page.locator('#tab-whatif table.sctab').first()).toBeVisible();
+  await expect(page.locator('#tab-whatif')).toContainText('Across the year');
 
   await stepTo('ask');
-  await expect(page.locator('#tab-ask')).toBeVisible();
+  await expect(page.locator('#analyst-body')).toBeVisible();
 
   await stepTo('photoreal');
   await expect(page.locator('#tab-view')).toBeVisible();
 
   // The building step selected the top-ranked building, in the panel and in the
-  // model both.
+  // model both. The file opens in the left panel now, not over the ranking, so
+  // the ranking's own heading is a constant and the address is in the card —
+  // where the year also put the two population ranks, which disagree.
   expect(await page.evaluate(() => window.HC.ui.selected)).toBe(0);
-  await expect(page.locator('#side-title')).toContainText('#1');
+  const top = await page.evaluate(() => window.HC.data.ranked.items[0].addr);
+  await expect(page.locator('#selcard .addr')).toContainText(top);
+  await expect(page.locator('#side-body .rank').first()).toHaveClass(/on/);
+  await expect(page.locator('#selcard .ranks')).toContainText('WAVE #');
+  await expect(page.locator('#selcard .ranks')).toContainText('YEAR #');
 });
 
 test('the tour owns the keyboard while it is up, and hands it back', async ({ page }) => {
@@ -157,8 +167,9 @@ test('the tour owns the keyboard while it is up, and hands it back', async ({ pa
   await page.locator('#layers button').nth(1).click();
   expect(await page.evaluate(() => window.HC.ui.layer)).toBe('sun');
 
-  // And Escape now means what it means in the application.
-  await page.keyboard.press('Escape');
+  // And the application's own shortcuts mean what they mean again. H clears the
+  // view; Escape is bound to dropping the selection, not to folding.
+  await page.keyboard.press('h');
   await expect(page.locator('#left')).toHaveClass(/folded/);
 });
 

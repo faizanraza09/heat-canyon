@@ -1,0 +1,470 @@
+/* ============================================================ the window
+
+   The analyst opens over the map rather than inside a 366px column, because a
+   tool trace, a block of JSON and a chart are the evidence for an answer and
+   evidence you cannot read is decoration.
+
+   It is built from the panels' own furniture — .phead, .pname, .picons, .icon,
+   .plede, the same hairlines, the same 4px radius, the same easing — so it
+   reads as this instrument opening a larger drawer rather than as a chat
+   window dropped on top of it. It sits under the tour (250) and the film
+   (300), both of which have to be able to talk about it.                     */
+
+#analyst { position: fixed; inset: 0; z-index: 200; }
+#analyst[hidden] { display: none; }
+
+#analyst-scrim {
+  position: absolute; inset: 0;
+  background: rgba(10, 9, 8, 0.62);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 240ms ease;
+}
+#analyst.on #analyst-scrim { opacity: 1; }
+
+#analyst-win {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, calc(-50% + 14px));
+  width: min(1080px, 92vw); height: min(760px, 86vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel-solid);
+  border: 1px solid var(--line-panel); border-radius: var(--r2);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, .6), 0 2px 10px rgba(0, 0, 0, .5);
+  opacity: 0;
+  transition: opacity 240ms ease, transform 320ms var(--ease);
+}
+#analyst.on #analyst-win { opacity: 1; transform: translate(-50%, -50%); }
+
+/* The header is the panels' header, with the lede the left rail has no room
+   for: what the thing is, in one sentence, above the first question. */
+#analyst-win .phead { flex: none; }
+#analyst-win .plede { max-width: 78ch; }
+#analyst-win .icon { width: auto; padding: 0 7px; height: 22px; }
+
+#analyst-body { flex: 1; min-height: 0; display: flex; }
+
+@media (max-width: 760px), (max-height: 560px) {
+  #analyst-win { width: 96vw; height: 92vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #analyst-scrim, #analyst-win { transition: none; }
+}
+
+/* The analyst console.
+ *
+ * Three bands, and only the middle one scrolls: a one-line header, the
+ * transcript, and the composer pinned beneath it. It lives in the same column
+ * width as every other tab, so the gutters here are the design's 22px — the
+ * same ones .metrics, .lblock and .wblock use — and a tool trace that will not
+ * fit scrolls inside its own block rather than widening the panel.
+ *
+ * Everything here is set in the redesign's terms — its greys, its monospace, its
+ * 3px radius, its one accent — so the analyst reads as the same instrument as
+ * the panels either side of it rather than as a chat window bolted on.
+ */
+
+.agentconsole {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  display: flex; flex-direction: column; min-height: 0;
+}
+
+/* ---- header: one line of standing fact */
+
+.agenthead {
+  flex: none; display: flex; align-items: baseline; gap: 12px;
+  padding: 11px 26px; border-bottom: 1px solid var(--line);
+  background: var(--panel-tint);
+}
+.ahrow {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 12px; width: 100%;
+}
+.afacts {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em;
+  line-height: 1.7; text-transform: uppercase; color: var(--t7);
+}
+.afacts.warn { color: var(--accent); }
+.aspend { color: var(--t8); white-space: nowrap; }
+
+/* ---- the scroller: the one scrollbar in this tab */
+
+.ascroll {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  /* The bottom inset matches the top. At 4px the last suggestion — or the last
+     line of an answer — ran flush into the composer's rule, so a scroller with
+     more to show read as a box that had been cut off rather than one to
+     scroll. */
+  padding: 20px 26px 20px;
+}
+
+/* ---- the empty state, which is onboarding and leaves when the thread starts */
+
+.aempty { display: flex; flex-direction: column; gap: 14px; }
+.agentchips {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.agentchips button {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  font-size: 12.5px; line-height: 1.5; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: var(--r); color: var(--t5);
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+}
+.agentchips button:hover {
+  color: var(--t1); border-color: var(--line-ctl); background: rgba(237, 231, 220, .035);
+}
+
+/* ---- the composer, pinned */
+
+.agentform {
+  flex: none; display: flex; flex-direction: column; gap: 10px;
+  padding: 16px 26px 18px; border-top: 1px solid var(--line);
+  background: var(--panel-tint);
+}
+.agentform textarea {
+  width: 100%; box-sizing: border-box; resize: none;
+  background: rgba(237, 231, 220, .04); color: var(--t0);
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  padding: 10px 12px; font-family: var(--sans); font-size: 13px;
+  line-height: 1.55; outline: none;
+  transition: border-color 200ms ease;
+}
+.agentform textarea:focus { border-color: var(--line-hi); }
+.agentform textarea::placeholder { color: var(--t7); }
+
+/* One action with weight, and two that are only ever afterthoughts — so Ask is
+   a button and the other two are the design's underlined monospace link. */
+.agentbtns { display: flex; align-items: center; gap: 16px; }
+.agentbtns button.primary {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  padding: 9px 20px; border-radius: var(--r);
+  border: 1px solid var(--line-hi); background: rgba(237, 231, 220, .1);
+  font-family: var(--mono); font-size: 10px; letter-spacing: .16em; color: var(--t0);
+  transition: background 200ms ease, border-color 200ms ease;
+}
+.agentbtns button.primary:hover { background: rgba(237, 231, 220, .16); }
+.agentbtns button.primary:disabled { opacity: .4; cursor: default; }
+.agentbtns button.ghost {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .16em; color: var(--t5);
+  border-bottom: 1px solid transparent;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.agentbtns button.ghost:hover { color: var(--t0); border-bottom-color: rgba(237, 231, 220, .5); }
+.agentbtns button.ghost:last-child { margin-left: auto; }
+
+/* ---- the transcript */
+
+.transcript { display: flex; flex-direction: column; gap: 14px; }
+
+.bubble { font-size: 13.5px; line-height: 1.72; color: var(--t3); max-width: 76ch; }
+.bubble.you {
+  color: var(--t0); padding: 9px 12px; border-radius: var(--r);
+  background: rgba(237, 231, 220, .05);
+  border-left: 2px solid var(--accent);
+}
+.bubble p { margin: 0 0 .6em; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble b { color: var(--text); font-weight: 600; }
+.bubble ul { margin: .3em 0 .7em; padding-left: 1.1em; }
+.bubble li { margin: .18em 0; }
+.bubble code {
+  font-family: var(--mono); font-size: 11px;
+  background: rgba(255, 255, 255, .06); padding: 1px 4px; border-radius: 3px;
+}
+
+.runstatus {
+  font-family: var(--mono); font-size: 10px; color: var(--accent);
+  display: flex; align-items: center; gap: 6px;
+}
+.runstatus::before {
+  content: ''; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); animation: apulse 1.1s ease-in-out infinite;
+}
+.runstatus.done { color: var(--text-3); }
+.runstatus.done::before { animation: none; background: var(--text-3); }
+@keyframes apulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+.anote {
+  margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-3);
+}
+.anote.warn { color: var(--warn); }
+
+/* ---- reasoning, collapsed */
+
+.thinkblock { font-size: 11px; }
+.thinkblock > summary {
+  cursor: pointer; color: var(--text-3); font-family: var(--mono);
+  font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase;
+  list-style: none;
+}
+.thinkblock > summary::-webkit-details-marker { display: none; }
+.thinkblock > summary::before { content: '▸ '; }
+.thinkblock[open] > summary::before { content: '▾ '; }
+.thinkbody {
+  border-left: 1px solid var(--line); padding-left: var(--s3);
+  margin-top: 4px; color: var(--text-3); font-style: italic;
+}
+.thinkbody p { margin: .3em 0; line-height: 1.5; }
+
+/* ---- tool calls */
+
+.toolcall {
+  border: 1px solid var(--line); border-radius: var(--r1);
+  background: rgba(255, 255, 255, .018);
+}
+.toolcall > summary {
+  cursor: pointer; padding: 5px 8px; display: flex; gap: 7px;
+  align-items: baseline; list-style: none;
+  font-family: var(--mono); font-size: 10px;
+}
+.toolcall > summary::-webkit-details-marker { display: none; }
+.toolcall .tname { color: var(--accent); flex-shrink: 0; }
+.toolcall .targs {
+  color: var(--text-3); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolcall.failed { border-color: rgba(232, 103, 79, .35); }
+.toolcall.failed .tname { color: var(--warn); }
+.toolbody { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 5px; }
+.toolbody pre {
+  margin: 0; padding: 6px 8px; border-radius: 4px; overflow-x: auto;
+  background: rgba(0, 0, 0, .35); border: 1px solid var(--line);
+  font-family: var(--mono); font-size: 9.5px; line-height: 1.45;
+  color: var(--text-3); max-height: 220px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-word;
+}
+.toolbody pre.out { color: var(--text-2); }
+.toolbody pre.out.err { color: var(--warn); }
+
+/* ---- a map action, and a chart */
+
+.mapact {
+  font-family: var(--mono); font-size: 10px; color: var(--text-3);
+  padding: 4px 8px; border-radius: var(--r1);
+  border: 1px dashed rgba(217, 84, 46, .35);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.mapact b { color: var(--accent); font-weight: 500; }
+.mapact .mnote { color: var(--text-2); font-family: var(--sans); font-size: 11px; }
+
+.agentchart { margin: 0; }
+.agentchart img {
+  width: 100%; display: block; border-radius: var(--r1);
+  border: 1px solid var(--line);
+}
+.agentchart figcaption {
+  font-family: var(--mono); font-size: 9.5px; color: var(--text-3);
+  padding-top: 4px;
+}
+
+/* ==================================================== identity and character
+
+   The window used to lead with CLAUDE-SONNET-5 · 20 TOOLS · 3 SPECIALISTS.
+   It leads with a name now. The sigil is a lit wall and the shadow it throws:
+   the analyst is named for the umbra, the part of the street the sun never
+   reaches, which is the quantity the whole model turns on.                   */
+
+#analyst-name { display: flex; align-items: baseline; gap: 10px; letter-spacing: 0; }
+#analyst-name .sigil {
+  width: 19px; height: 19px; flex: none; color: var(--accent);
+  align-self: center; transform: translateY(-1px);
+}
+#analyst-name .wordmark {
+  font-family: var(--serif); font-size: 27px; font-weight: 400;
+  letter-spacing: .01em; color: var(--t0); line-height: 1;
+}
+#analyst-name .role {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--t7); white-space: nowrap;
+}
+
+/* ---- state: listening, working, or not here */
+
+.astate {
+  display: inline-flex; align-items: center; gap: 7px; flex: none;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; color: var(--t6);
+}
+.astate::before {
+  content: ''; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--t7); transition: background 300ms ease;
+}
+.astate.ready::before { background: var(--good); }
+.astate.working::before { background: var(--accent); animation: apulse 1.1s ease-in-out infinite; }
+.astate.down::before { background: var(--accent); }
+.aprov {
+  margin-left: auto; font-family: var(--mono); font-size: 9px;
+  letter-spacing: .14em; color: var(--t8); text-align: right;
+}
+
+/* ================================================== the record, as chips
+
+   A turn can be twenty calls. One to a line, that is twenty lines of apparatus
+   sitting on top of the answer they exist to support. So they run inline as
+   small chips and wrap like words in a paragraph: the shape of the working —
+   four calls or forty, and roughly what kind — reads at a glance, and any one of
+   them opens in place for the arguments and the result.
+
+   Opening a chip gives it the full width of the row, because a chip-sized box is
+   the wrong container for a block of JSON. Native <details> does the work; the
+   only trick is flex-basis.                                                    */
+
+.transcript { gap: 16px; }
+
+.workings { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 5px; }
+
+.toolcall, .thinkblock {
+  flex: 0 0 auto; max-width: 100%;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: rgba(237, 231, 220, .022);
+  transition: border-color 200ms ease, background 200ms ease;
+}
+.toolcall > summary, .thinkblock > summary {
+  cursor: pointer; list-style: none; padding: 3px 11px;
+  font-family: var(--sans); font-size: 11px; line-height: 1.5;
+  color: var(--t5); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.toolcall > summary::-webkit-details-marker,
+.thinkblock > summary::-webkit-details-marker { display: none; }
+.toolcall > summary::before, .thinkblock > summary::before { content: none; }
+.toolcall:hover, .thinkblock:hover {
+  border-color: var(--line-ctl); background: rgba(237, 231, 220, .05);
+}
+.toolcall:hover > summary, .thinkblock:hover > summary { color: var(--t1); }
+.toolcall .tname { color: inherit; font: inherit; letter-spacing: 0; }
+.toolcall.failed { border-color: rgba(217, 84, 46, .4); }
+.toolcall.failed > summary { color: var(--accent); }
+
+/* Reasoning is the quietest thing on the row: it is available, not offered. */
+.thinkblock > summary {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--t8);
+}
+
+/* Open: take the whole row and become a proper block. */
+.toolcall[open], .thinkblock[open] {
+  flex: 1 1 100%; border-radius: var(--r);
+  border-color: var(--line-ctl); background: rgba(237, 231, 220, .03);
+}
+.toolcall[open] > summary, .thinkblock[open] > summary {
+  color: var(--t0); white-space: normal;
+  border-bottom: 1px solid var(--line); padding: 6px 12px;
+}
+.toolbody { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.toolbody .tcall {
+  margin: 0; font-family: var(--mono); font-size: 9px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--t8);
+}
+.thinkblock[open] > summary { color: var(--t6); }
+.thinkbody {
+  border: none; padding: 8px 12px 10px; margin: 0;
+  color: var(--t5); font-style: italic; font-size: 11.5px;
+}
+.thinkbody p { margin: .3em 0; line-height: 1.6; }
+
+/* ==================================================== a formatted answer
+
+   The analyst structures its answers, so the panel has to render the structure:
+   headings that step down, a table that reads as a table, a caveat that reads as
+   a caveat.                                                                   */
+
+.bubble .ah1, .bubble .ah2, .bubble .ah3, .bubble .ah4 {
+  margin: 1.5em 0 .5em; font-weight: 400; color: var(--t0);
+  letter-spacing: -.005em; text-wrap: balance;
+}
+.bubble > .ah1:first-child, .bubble > .ah2:first-child { margin-top: 0; }
+.bubble .ah1 { font-family: var(--serif); font-size: 23px; line-height: 1.2; }
+.bubble .ah2 { font-family: var(--serif); font-size: 19px; line-height: 1.25; }
+.bubble .ah3 {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--t5);
+}
+.bubble .ah4 { font-size: 13px; font-weight: 600; color: var(--t1); }
+
+.bubble .arule { border: 0; border-top: 1px solid var(--line); margin: 1.6em 0; }
+
+/* A table is where the numbers go, so it gets the full width of the window and
+   figures are set in monospace and right-aligned to make a column comparable. */
+.atable {
+  max-width: none; margin: 1em 0; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: rgba(237, 231, 220, .02);
+}
+.atable table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.atable th {
+  font-family: var(--mono); font-size: 9px; font-weight: 400;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--t7);
+  padding: 9px 14px; border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.atable td {
+  padding: 9px 14px; color: var(--t2);
+  border-bottom: 1px solid var(--line-faint);
+}
+.atable tbody tr:last-child td { border-bottom: 0; }
+.atable tbody tr:hover td { background: rgba(237, 231, 220, .03); }
+.atable td[style*="right"] {
+  font-family: var(--mono); font-size: 12px; color: var(--t0);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A caveat, which this analyst is required to state, gets to look like one. */
+.bubble .acallout {
+  margin: 1.1em 0; padding: 11px 15px; max-width: none;
+  border-left: 2px solid var(--accent);
+  background: rgba(217, 84, 46, .06);
+  color: var(--t2); font-size: 12.5px; line-height: 1.65;
+}
+
+.bubble .acode {
+  margin: 1em 0; padding: 12px 15px; max-width: none; overflow-x: auto;
+  background: rgba(0, 0, 0, .35); border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--t3);
+}
+.bubble .acode code { background: none; padding: 0; font-size: inherit; }
+
+.bubble ol { margin: .4em 0 .9em; padding-left: 1.3em; }
+.bubble ol li, .bubble ul li { margin: .3em 0; }
+.bubble a { color: var(--t1); text-decoration: underline; text-underline-offset: 2px; }
+.bubble a:hover { color: var(--t0); }
+.bubble i { font-style: italic; color: var(--t2); }
+
+/* ------------------------------------------------------- outside sources
+
+   The analyst can read the open web, and is required to cite what it takes from
+   it. A citation therefore has to be visible AS a citation while you are reading
+   past it: an external link carries a small mark, so a reader scanning an answer
+   can see at a glance which claims came from outside this model and which came
+   out of the physics. */
+.bubble a[href^="http"]::after {
+  content: '\2197'; margin-left: 2px; font-size: .78em;
+  color: var(--t6); vertical-align: baseline;
+}
+.bubble a[href^="http"] {
+  color: var(--t1); text-decoration-color: var(--t7);
+  text-underline-offset: 2px;
+}
+.bubble a[href^="http"]:hover { color: var(--t0); text-decoration-color: var(--accent); }
+
+/* A closing "Sources" list reads as apparatus, not as more argument. */
+.bubble .ah2 + ul, .bubble .ah3 + ul { font-size: 12px; color: var(--t5); }
+.bubble .ah2 + ul a, .bubble .ah3 + ul a { color: var(--t3); }
+
+/* An address the analyst names is a control: clicking it selects that building
+   in the model, flies the camera to it and opens its file. It is set as text
+   with a dotted underline rather than as a button, because it sits mid-sentence
+   and a row of buttons inside a paragraph is unreadable. */
+.bubble .hcbuilding {
+  all: unset; cursor: pointer; color: var(--t0);
+  border-bottom: 1px dotted var(--t6);
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.bubble .hcbuilding:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.bubble .hcbuilding::after {
+  content: '\25C9'; margin-left: 3px; font-size: .62em;
+  vertical-align: .25em; color: var(--t7);
+}
+.bubble .hcbuilding:hover::after { color: var(--accent); }

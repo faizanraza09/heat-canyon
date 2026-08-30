@@ -1,4 +1,14 @@
-"""The AI analyst: a grounded, tool-using agent over the computed heat model.
+"""The FALLBACK analyst: a single-shot tool-use loop over the computed model.
+
+THIS IS NO LONGER THE MAIN ANALYST. ``heatcanyon/agent/`` is — a Claude Agent SDK
+turn with twenty in-process tools, three specialists, a shell and a workspace,
+which re-solves interventions, runs spatial statistics, writes its own scripts and
+drives the map. See docs/AGENT.md.
+
+This module is kept because it needs nothing but an API key: no ``claude`` CLI, no
+subprocess, no streaming. On a machine where the agent cannot start it is what
+answers, and the console says which one did. It can query the model; it cannot do
+work.
 
 Design stance. An LLM bolted onto a data project is usually decoration — it
 paraphrases numbers it was handed and invents the ones it wasn't. This one is
@@ -46,6 +56,10 @@ class Store:
         self.scenarios = json.loads((root / "scenarios.json").read_text())
         self.tiles_stats = json.loads((root / "tiles.json").read_text())["stats"]
         self.items = self.ranked["items"]
+        # The year's summary, from meta rather than the full 0.6 MB year.json: this
+        # analyst answers questions, it does not plot series, and the agent is what
+        # reaches the hourly record.
+        self.year = self.meta.get("year", {})
 
     # ------------------------------------------------------------- queries
     def area_summary(self) -> dict:
@@ -68,10 +82,23 @@ class Store:
             ],
             "measured_exceedance_hours_above_35c": self.tiles_stats["exceedance"],
             "measured_persistence_hours_above_35c": self.tiles_stats["persistence"],
+            "year": {
+                "window": self.year.get("window"),
+                "days": self.year.get("days"),
+                "annual": self.year.get("annual"),
+                "seasons": self.year.get("seasons"),
+                "months": self.year.get("months"),
+                "episodes": self.year.get("episodes"),
+                "ordering_agreement": self.year.get("ordering_agreement"),
+                "kind": "reanalysis (ERA5, bias-corrected against FortyGuard)",
+            },
             "note": (
-                "Air temperature, exceedance and persistence are FortyGuard products. "
-                "Facade surface temperature, mean radiant temperature and WBGT are "
-                "modelled by this project's physics engine."
+                "The event day's air temperature, exceedance and persistence are "
+                "FortyGuard products. The year's air temperature is ERA5 reanalysis "
+                "bias-corrected against FortyGuard on the one overlapping day. "
+                "Facade surface temperature, mean radiant temperature, WBGT and "
+                "every annual facade total are modelled by this project's physics "
+                "engine."
             ),
         }
 
@@ -113,6 +140,10 @@ class Store:
             "facade_temp": lambda b: -b["modelled"]["facade_peak_c"],
             "units": lambda b: -(b.get("units") or 0),
             "svf": lambda b: b["measured"]["svf"],
+            "annual_priority": lambda b: -((b.get("annual") or {}).get("priority") or 0),
+            "annual_exposure": lambda b: -((b.get("annual") or {}).get("exposure") or 0),
+            "annual_facade_kh35": lambda b: -((b.get("annual") or {}).get("facade_kh35") or 0),
+            "annual_sun_hours": lambda b: -((b.get("annual") or {}).get("sun_hours") or 0),
         }.get(sort_by, lambda b: -b["priority"])
         sel.sort(key=keyf)
 
@@ -124,6 +155,7 @@ class Store:
         }
 
     def _brief(self, b: dict) -> dict:
+        a = b.get("annual") or {}
         return {
             "bin": b["bin"], "address": b["addr"], "priority": b["priority"],
             "exposure": b["exposure"], "vulnerability": b["vulnerability"],
@@ -131,6 +163,13 @@ class Store:
             "residential_units": b.get("units"), "zip": b.get("zip"),
             "hvi": b.get("hvi"), "land_use": b.get("use_name"),
             "measured": b["measured"], "modelled": b["modelled"],
+            # The year, alongside the event day rather than instead of it. Omitting
+            # it here would let this analyst answer an annual question with
+            # event-day numbers and never notice.
+            "annual": {k: a.get(k) for k in
+                       ("facade_kh35", "sun_hours", "dose_kwh", "facade_max_c",
+                        "summer_mean_c", "winter_mean_c", "swing_k",
+                        "month_of_peak", "exposure", "priority")},
         }
 
     def get_building(self, bin_or_address: str) -> dict:
@@ -267,8 +306,11 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Headline facts about the study area: the heat event, counts of buildings and "
             "canyons, morphology statistics, the measured air-temperature median for each "
-            "of the eight hours, and the measured exceedance and persistence ranges. "
-            "Call this first for any question about the area as a whole."
+            "of the eight hours, the measured exceedance and persistence ranges, and the "
+            "whole study year — its annual totals, twelve monthly records, four seasons, "
+            "heat-wave episodes, and how far the event-day and annual orderings of the "
+            "buildings disagree. Call this first for any question about the area as a "
+            "whole or about the year."
         ),
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
@@ -295,8 +337,13 @@ TOOLS: list[dict[str, Any]] = [
                 "sort_by": {
                     "type": "string",
                     "enum": ["priority", "exposure", "vulnerability", "persistence",
-                             "exceedance", "facade_temp", "units", "svf"],
-                    "description": "Sort key. 'svf' sorts ascending (most enclosed first); the rest descending.",
+                             "exceedance", "facade_temp", "units", "svf",
+                             "annual_priority", "annual_exposure",
+                             "annual_facade_kh35", "annual_sun_hours"],
+                    "description": ("Sort key. 'priority' is the event-day heat wave; "
+                                    "'annual_priority' is the whole year, and the two "
+                                    "disagree. 'svf' sorts ascending (most enclosed "
+                                    "first); the rest descending."),
                 },
             },
             "additionalProperties": False,
@@ -365,13 +412,18 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-SYSTEM = """You are the analyst for HeatCanyon, a 3D street-canyon heat exposure model of Midtown Manhattan. You advise urban planners, building owners and public-health staff.
+SYSTEM = """You are the analyst for HeatCanyon, a 3D street-canyon heat exposure model of Midtown Manhattan resolved over a whole year. You advise urban planners, building owners and public-health staff.
+
+You are the FALLBACK analyst and you should say so if it matters. The full analyst can re-solve an intervention anywhere in the city over any window, run spatial statistics, write its own scripts and drive the map; you can query the model and nothing more. If a question needs any of those, answer what you can from the queries you have and say plainly that the rest needs the full analyst, which requires a Claude credential the server does not currently have.
 
 You have no data in your context. Every number you state must come from a tool result in this conversation. If a tool did not return it, say you do not have it and offer the query that would get it. Never estimate, interpolate, or recall a figure from general knowledge and present it as a result of this model.
 
 Always preserve the distinction the model itself maintains:
-- MEASURED: 2 m air temperature, hours above 35 C, unbroken-run persistence (all FortyGuard); building heights and street widths (NYC Open Data); residential units, year built, Heat Vulnerability Index (NYC Open Data).
-- MODELLED: facade surface temperature, air temperature above 2 m, mean radiant temperature, WBGT, solar irradiance, sky view factor.
+- MEASURED: the event day's 2 m air temperature, hours above 35 C, unbroken-run persistence (all FortyGuard); building heights, roof profiles and street widths (NYC Open Data, USGS LiDAR); residential units, year built, Heat Vulnerability Index (NYC Open Data).
+- REANALYSIS, BIAS-CORRECTED: everything about the year's weather — its hourly air temperature, its daily and monthly aggregates, its heat-wave episodes, its tropical nights (ERA5 via Open-Meteo, corrected against FortyGuard on the one overlapping day).
+- MODELLED: facade surface temperature, air temperature above 2 m, mean radiant temperature, WBGT, solar irradiance, sky view factor, and every annual facade total.
+
+Two orderings of the same buildings exist and they disagree: the event-day one and the annual one. Say which you are quoting. The annual figures in a building's dossier are under `annual` and rest on reanalysis plus this project's physics, not on a measurement.
 
 Say which one you are using. When you report a modelled figure whose uncertainty matters — anything about air temperature above 2 m especially — state the limitation in the same breath. The vertical air-temperature extrapolation is unvalidated and its uncertainty exceeds its own gradient above about 50 m; do not let a user walk away believing it is measured.
 
@@ -539,7 +591,7 @@ SUGGESTED = [
     "Which five buildings should the city act on first, and what exactly should it do?",
     "Where would street trees achieve the least, and why?",
     "Compare Madison Avenue and West 47th Street as heat canyons.",
-    "How much of this is measured and how much is modelled?",
+    "How much of this is measured, how much is reanalysis, and how much is modelled?",
     "Find pre-war residential buildings with over four hours of unbroken exceedance.",
-    "What is the single most counter-intuitive result in this model?",
+    "How far apart are the heat-wave ranking and the annual ranking, and why?",
 ]

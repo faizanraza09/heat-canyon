@@ -1,0 +1,373 @@
+/* The floor schedule — the document half of the instrument.
+ *
+ * Everything here is scoped under `.fsch`, which floors.js puts on the host
+ * element it is handed. Nothing in this file is a global: the pane lives inside
+ * a panel that four other surfaces are being built into at the same time, and a
+ * bare `.row` or `.bar` from any one of them would silently restyle the others.
+ * The one class that arguably *should* be global is `.asm`, the dotted
+ * underline for an assumed figure — app.css names it in a comment but does not
+ * define it — so it is defined here under `.fsch` only, and the day it moves
+ * into app.css this block can be deleted without touching anything else.
+ *
+ * No new colours, no new fonts, no new radii, no shadows. Every value below is
+ * one of app.css's custom properties or a neutral built from its text ramp.
+ *
+ * The layout problem this file solves is that a schedule with eight columns has
+ * to fit in a 296px panel. It is solved by putting the row on two lines rather
+ * than by shrinking type past legibility or by making the reader scroll
+ * sideways: the figures on the first, the attribution across the full width of
+ * the second. That is also the better design, because the attribution bar is
+ * the thing worth looking at and giving it 200px instead of 60px is what makes
+ * the trap-to-solar crossover visible as a walking edge rather than as twelve
+ * unrelated stripes.
+ *
+ * The severity stripes are flush to the left edge with no gap between rows, so
+ * they read as one continuous column — the elevation of the building's problem,
+ * legible before any digit is.
+ */
+
+.fsch {
+  --fs-c1: 20px;    /* floor number   */
+  --fs-c2: 30px;    /* surface °C     */
+  --fs-c3: 27px;    /* peak hour      */
+  --fs-c4: 26px;    /* dominant term  */
+  --fs-c5: 13px;    /* night recovery */
+  --fs-gap: 6px;
+  --fs-x: 22px;     /* the panel's own horizontal rhythm */
+  font-family: var(--sans);
+  color: var(--t2);
+  padding-bottom: 22px;
+}
+
+.fsch .fs-pad { padding-left: var(--fs-x); padding-right: var(--fs-x); }
+
+/* Block padding only. A `padding: 14px 0` shorthand here has the same
+   specificity as .fs-pad and sits later in the file, so it silently reset the
+   horizontal padding and threw the empty-state sentence against the panel
+   edge — with no error, and only on the one state nobody screenshots. */
+.fsch .fs-quiet {
+  font-size: 12.5px; line-height: 1.7; color: var(--t5);
+  text-wrap: pretty; padding-top: 14px; padding-bottom: 14px;
+}
+
+/* An assumed figure: softer than modelled, and the interface has to say so
+   without shouting. A dotted underline in --assumed is the whole treatment. */
+.fsch .asm {
+  border-bottom: 1px dotted var(--assumed);
+  cursor: help;
+}
+.fsch .asm:hover, .fsch .asm:focus-visible { border-bottom-color: var(--line-hi); }
+.fsch .asm:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* --------------------------------------------------------------- fixture */
+
+/* Standing and not dismissible. It is not an error state — nothing is broken —
+   so it gets a hairline and a severity-hued rule rather than the accent, which
+   in this interface means "the thing you are pointing at". */
+.fsch .fs-fixture {
+  margin: 0 var(--fs-x) 20px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--sev-3);
+  border-radius: var(--r2);
+  background: var(--panel-tint);
+}
+.fsch .fs-fixture .k {
+  display: block;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+  color: var(--sev-4); text-transform: uppercase;
+}
+.fsch .fs-fixture p {
+  margin: 7px 0 0; font-size: 11.5px; line-height: 1.65;
+  color: var(--t4); text-wrap: pretty;
+}
+
+/* -------------------------------------------------------------- headline */
+
+.fsch .fs-head { padding-top: 2px; }
+
+.fsch .fs-addr {
+  font-family: var(--serif); font-size: 25px; line-height: 1.1;
+  color: var(--t0); letter-spacing: -.01em;
+}
+.fsch .fs-sub {
+  margin-top: 8px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--t5); line-height: 1.8;
+}
+
+/* The one large figure, and it is a range. See the note in floors.js: a serif
+   midpoint here is the most over-trusted number the application could print. */
+.fsch .fs-big { margin-top: 18px; }
+.fsch .fs-big .v {
+  font-family: var(--serif); font-size: 40px; line-height: 1; color: var(--t0);
+}
+.fsch .fs-big .v .asm { border-bottom-width: 1px; padding-bottom: 3px; }
+.fsch .fs-big .u {
+  margin-top: 9px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; color: var(--t7);
+}
+
+.fsch .fs-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin-top: 20px;
+}
+.fsch .fs-grid .k {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em;
+  color: var(--t7); line-height: 1.4;
+}
+.fsch .fs-grid .v {
+  margin-top: 5px; font-family: var(--mono); font-size: 14px; color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+
+.fsch .fs-note {
+  margin: 18px 0 0; font-size: 11.5px; line-height: 1.7;
+  color: var(--t5); text-wrap: pretty;
+}
+.fsch .fs-note b { color: var(--t3); font-weight: 500; }
+
+/* -------------------------------------------------------------- schedule */
+
+.fsch .fs-sched { margin-top: 22px; }
+
+/* Sticky, because a 62-storey schedule is 2,000px long and a column of numbers
+   whose headings have scrolled away is a column of numbers. It sticks to the
+   panel's own scroller, so it needs an opaque ground: the panel behind it is
+   translucent and the model would otherwise read straight through the labels. */
+.fsch .fs-thead {
+  position: sticky; top: 0; z-index: 2;
+  padding: 9px 10px 8px 13px;
+  background: var(--panel-solid);
+  border-top: 1px solid var(--line-panel);
+  border-bottom: 1px solid var(--line-panel);
+  font-family: var(--mono); font-size: 9px; letter-spacing: .12em;
+  color: var(--t7); text-transform: uppercase;
+}
+
+.fsch .fs-thead .l1,
+.fsch .fs-row .l1 {
+  display: grid; align-items: baseline; gap: var(--fs-gap);
+  grid-template-columns: var(--fs-c1) var(--fs-c2) var(--fs-c3) 1fr 1fr;
+}
+.fsch .fs-thead .l2,
+.fsch .fs-row .l2 {
+  display: grid; align-items: center; gap: var(--fs-gap);
+  grid-template-columns: var(--fs-c4) 1fr var(--fs-c5);
+}
+.fsch .fs-thead .l2 { margin-top: 6px; }
+/* Grid items are block boxes, so a right-aligned heading still stretches the
+   full column — which put the dotted `assumed` underline under three inches of
+   empty panel. The headings are placed rather than aligned for that reason. */
+.fsch .fs-thead .l1 > span { justify-self: end; white-space: nowrap; }
+.fsch .fs-thead .l1 > .c-f { justify-self: start; }
+.fsch .fs-thead .l2 > .c-dom { justify-self: start; }
+.fsch .fs-thead .l2 > .c-rec { justify-self: end; }
+.fsch .fs-thead .c-bar { position: relative; height: 9px; }
+.fsch .fs-thead .u-sky {
+  position: absolute; top: 0; right: calc(100% - var(--zero) + 4px);
+  color: var(--term-sky); white-space: nowrap;
+}
+.fsch .fs-thead .u-pos {
+  position: absolute; top: 0; left: calc(var(--zero) + 4px);
+  color: var(--t7); white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- a row */
+
+.fsch .fs-body { outline: none; }
+
+.fsch .fs-row {
+  position: relative;
+  display: grid; grid-template-columns: 3px 1fr;
+  cursor: pointer;
+  transition: background 200ms var(--ease);
+}
+.fsch .fs-row:hover { background: rgba(237, 231, 220, .04); }
+.fsch .fs-row.now { background: rgba(237, 231, 220, .03); }
+.fsch .fs-row.open { background: rgba(237, 231, 220, .07); }
+.fsch .fs-row.in-range { background: rgba(237, 231, 220, .06); }
+.fsch .fs-row:focus-visible {
+  outline: 1px solid var(--accent); outline-offset: -1px;
+}
+
+/* The stripe. Flush left, no gap, no radius: it is a column, not a badge. */
+.fsch .fs-row .sev { display: block; width: 3px; height: 100%; }
+.fsch .fs-row.open .sev, .fsch .fs-row.in-range .sev { width: 3px; }
+
+/* The row's hairline is on the cells, not on the row: put it on the row and it
+   crosses the severity stripe every 32px, and the stripes stop reading as one
+   continuous column up the elevation — which is the only reason they are flush
+   to the edge in the first place. */
+.fsch .fs-cells {
+  padding: 5px 10px 6px 10px; min-width: 0;
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.fsch .fs-row .l1 {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: 10.5px; line-height: 1.25;
+}
+.fsch .fs-row .c-f { color: var(--t5); text-align: left; }
+.fsch .fs-row .c-t { color: var(--t0); text-align: right; }
+.fsch .fs-row .c-h { color: var(--t6); text-align: right; font-size: 9.5px; }
+/* Indoor and load are assumed, and sit one step down the text ramp from the
+   modelled surface temperature beside them. The hierarchy on this line is
+   provenance, not importance. */
+.fsch .fs-row .c-in { color: var(--t3); text-align: right; font-size: 10px; }
+.fsch .fs-row .c-kw { color: var(--t3); text-align: right; font-size: 10px; }
+/* The hour on the clock. The schedule is a peak-hour document, so the only
+   thing the time axis can say about it is "this floor is peaking right now". */
+.fsch .fs-row.now .c-h { color: var(--t0); }
+
+.fsch .fs-row .l2 { margin-top: 4px; }
+
+.fsch .fs-row .c-dom {
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: .1em; color: var(--t7);
+}
+.fsch .fs-row .c-dom.t-solar { color: var(--term-solar); }
+.fsch .fs-row .c-dom.t-trap  { color: var(--term-trap); }
+.fsch .fs-row .c-dom.t-sky   { color: var(--term-sky); }
+
+/* ------------------------------------------------------ attribution bar */
+
+.fsch .c-bar { position: relative; height: 9px; min-width: 0; }
+.fsch .c-bar > i { position: absolute; display: block; }
+.fsch .c-bar .axis {
+  top: 0; height: 9px; width: 1px; background: var(--line-ctl);
+}
+/* Positive stack: always solar first outward from the baseline, so the boundary
+   between the two hues walks across the bar as the eye goes up the building. */
+.fsch .c-bar .s-solar { top: 1px; height: 7px; background: var(--term-solar); }
+.fsch .c-bar .s-trap  { top: 1px; height: 7px; background: var(--term-trap); }
+/* Relief, not a cause: half height, on the far side of the baseline, so it
+   reads as a notch taken out of the row rather than as a fourth contribution. */
+.fsch .c-bar .s-sky   { top: 3px; height: 3px; background: var(--term-sky); opacity: .62; }
+
+/* Night recovery: three segments, filled from the left. */
+.fsch .c-rec { display: flex; gap: 2px; justify-content: flex-end; }
+.fsch .c-rec > i {
+  display: block; width: 3px; height: 6px; background: rgba(237, 231, 220, .12);
+}
+.fsch .c-rec.r0 > i:nth-child(1),
+.fsch .c-rec.r1 > i:nth-child(-n+2),
+.fsch .c-rec.r2 > i { background: var(--t5); }
+
+/* ------------------------------------------------------ the crossover */
+
+/* The moment the surface is designed around. A hairline between the last
+   solar-dominant storey and the first trap-dominant one below it, named,
+   because a reader who has not been told what to look at will look at the
+   numbers instead. */
+.fsch .fs-cross {
+  padding: 9px 10px 8px 13px;
+  border-top: 1px solid var(--line-ctl);
+  border-bottom: 1px solid var(--line-faint);
+  background: rgba(237, 231, 220, .02);
+}
+.fsch .fs-cross span {
+  display: block;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .12em;
+  color: var(--term-solar);
+}
+.fsch .fs-cross em {
+  display: block; margin-top: 3px;
+  font-family: var(--sans); font-style: normal; font-size: 11px; color: var(--t6);
+}
+
+/* ---------------------------------------------------------- face detail */
+
+.fsch .fs-faces {
+  padding: 12px 12px 14px 13px;
+  border-bottom: 1px solid var(--line-faint);
+  background: rgba(237, 231, 220, .045);
+}
+.fsch .fs-fhead {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .12em;
+  color: var(--t6); margin-bottom: 11px;
+}
+.fsch .fs-face { padding: 8px 0; border-top: 1px solid var(--line-faint); }
+.fsch .fs-face:first-of-type { border-top: none; padding-top: 0; }
+.fsch .fs-face .a {
+  display: grid; grid-template-columns: 26px 1fr auto 30px; gap: 6px;
+  align-items: baseline;
+  font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 10.5px;
+}
+.fsch .fs-face .a .c { color: var(--t1); letter-spacing: .06em; }
+.fsch .fs-face .a .az { color: var(--t7); font-size: 9px; }
+.fsch .fs-face .a .t { color: var(--t0); text-align: right; }
+.fsch .fs-face .a .h { color: var(--t6); text-align: right; font-size: 9.5px; }
+.fsch .fs-face .b {
+  display: flex; justify-content: space-between; gap: 8px; margin-top: 5px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: 9.5px; color: var(--t5);
+}
+.fsch .fs-face .c-wss { margin-top: 6px; }
+.fsch .fs-face .c-wss > i {
+  display: block; height: 2px; background: var(--term-solar); opacity: .55;
+}
+.fsch .fs-face .c-wss {
+  border-top: 1px solid rgba(237, 231, 220, .10);
+}
+.fsch .fs-face .c-wss > span {
+  display: block; margin-top: 4px;
+  font-family: var(--mono); font-size: 8.5px; letter-spacing: .1em; color: var(--t7);
+}
+
+/* ---------------------------------------------------------------- legend */
+
+.fsch .fs-legend { padding-top: 18px; }
+.fsch .fs-legend .klabel { display: block; margin-bottom: 11px; }
+.fsch .fs-keys, .fsch .fs-sev {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .12em; color: var(--t6);
+}
+.fsch .fs-keys span { display: inline-flex; align-items: center; gap: 5px; }
+.fsch .fs-keys i { display: block; width: 12px; height: 4px; }
+.fsch .fs-sev { gap: 0; margin-top: 10px; }
+.fsch .fs-sev i { display: block; width: 18px; height: 4px; }
+.fsch .fs-sev span { margin-left: 10px; }
+.fsch .fs-legend p {
+  margin: 14px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--t5);
+  text-wrap: pretty;
+}
+.fsch .fs-legend p b { color: var(--t3); font-weight: 500; }
+
+/* --------------------------------------------------------- prescriptions */
+
+.fsch .fs-rx { margin-top: 26px; }
+.fsch .fs-rx > .klabel { display: block; margin-bottom: 12px; }
+.fsch .fs-measure {
+  border-top: 1px solid var(--line);
+  padding: 12px 0 12px;
+  transition: background 200ms var(--ease);
+}
+.fsch .fs-measure:hover { background: rgba(237, 231, 220, .03); }
+.fsch .fs-measure .t { font-size: 12.5px; line-height: 1.45; color: var(--t1); }
+.fsch .fs-measure .m {
+  margin-top: 6px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .12em; color: var(--t7);
+}
+.fsch .fs-measure .nf {
+  margin-top: 7px; font-size: 11.5px; line-height: 1.6; color: var(--t5);
+  text-wrap: pretty;
+}
+
+.fsch .fs-brief {
+  all: unset; box-sizing: border-box;
+  display: block; width: 100%; margin-top: 16px; text-align: center;
+  padding: 10px 0; cursor: pointer;
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--t3);
+  transition: color 240ms var(--ease), border-color 240ms var(--ease),
+              background 240ms var(--ease);
+}
+.fsch .fs-brief:hover {
+  color: var(--t0); border-color: var(--line-hi); background: rgba(237, 231, 220, .06);
+}
+.fsch .fs-brief:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* ---------------------------------------------------------------- motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .fsch .fs-row, .fsch .fs-measure, .fsch .fs-brief { transition: none; }
+}

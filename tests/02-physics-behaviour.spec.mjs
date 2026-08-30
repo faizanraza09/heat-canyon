@@ -9,7 +9,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { openApp, setHour, setLayer } from './helpers.mjs';
+import { ensureAir, openApp, setHour, setLayer } from './helpers.mjs';
 
 /** Mean modelled surface temperature over panels facing a compass direction. */
 async function meanByOrientation(page, hourIndex, centreAz, tol = 35) {
@@ -116,6 +116,10 @@ test('shadows climb facades as the sun drops', async ({ page }) => {
 
 test('surface temperature varies far more than air temperature', async ({ page }) => {
   await openApp(page);
+  // The air profile is fetched on demand, so it has to be asked for before it can
+  // be read. Without this the spread comes back NaN and the assertion fails with a
+  // message about NaN rather than about air temperature.
+  await ensureAir(page);
   const s = await page.evaluate(() => {
     const d = window.HC.data;
     const hi = d.meta.peak_index, nb = d.facades.bands;
@@ -140,6 +144,7 @@ test('surface temperature varies far more than air temperature', async ({ page }
 
 test('stated uncertainty grows with height and exceeds the air gradient', async ({ page }) => {
   await openApp(page);
+  await ensureAir(page);
   const u = await page.evaluate(() => {
     const d = window.HC.data;
     const hi = d.meta.peak_index, nb = d.facades.bands;

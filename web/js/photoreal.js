@@ -42,7 +42,10 @@
 
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { TilesRenderer } from '3d-tiles-renderer';
+import {
+  TilesRenderer, PriorityQueue, DownloadPriorityQueue, unifiedPriorityCallback,
+  LRUCache, DEFAULT_LRU_CACHE,
+} from '3d-tiles-renderer';
 import { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
 import {
   GLTFExtensionsPlugin, TileCompressionPlugin, TilesFadePlugin, ReorientationPlugin,
@@ -66,17 +69,152 @@ const GEOID_NAVD88_M = -32.4;
  * difference between opposite buckets. */
 const N_BUCKETS = 8;
 
-/* Screen-space error target, in pixels, per camera mode.
+/* Screen-space error target, in pixels: how much geometric error, projected to
+ * the screen, is acceptable before a tile is refined.
  *
- * Google's recommended value is tuned for a map-like overhead view. It is far
- * too loose for a pedestrian: at street level the whole frame is near geometry,
- * and a loose target leaves root-level slabs standing where the road should be.
- * Asking for more detail costs bandwidth and nothing else — billing is per
- * session, so a detailed session is the same single billable event as a coarse
- * one. */
-const ERROR_TARGET = { orbit: 12, street: 5 };
+ * Google's recommended value is 20, and it is tuned for a flat map view rather
+ * than for an oblique one of a city. Measured against this scene it is far too
+ * loose to be called photoreal: at 20, the drawn tiles came back at 16 to 64 m
+ * of geometric error with a median of 32, while the finest level Google
+ * publishes here is 2.006 m. Not one drawn tile was at the floor. That is four
+ * to five levels of detail left unrequested, and it is the whole of the answer
+ * to "why is the mesh soft" from the air — at altitude the limit is this
+ * number, not the dataset.
+ *
+ * Tightening it costs bandwidth and nothing else. Billing is per session, so a
+ * detailed session is the same single billable event as a coarse one, and the
+ * ramp below protects a machine that cannot keep up: an ambitious floor is safe
+ * precisely because nothing is obliged to reach it.
+ *
+ * Measured at 20, then 6, then 3, on the fly-over's default framing:
+ *
+ *     target   tiles drawn   median gErr   finest gErr   under 8 m
+ *       20         163          32.1          16.1           0
+ *        6         300          16.1           8.0          27
+ *
+ * Each halving of the target buys about one LOD level across the frame. Three
+ * is chosen rather than the 2.006 m floor of the dataset because the target is
+ * screen-space: from a kilometre up, an 8 m tile already projects to about four
+ * pixels, so past a point the request buys sub-pixel geometry at four times the
+ * tile count. Three keeps the near half of the frame refining while the far
+ * half, which the falloff has already discounted, stops.
+ */
+const ERROR_TARGET = 3;
+
+/* Distance falloff on that target, as {amount in pixels, 1/metres}.
+ *
+ * The error target is a screen-space budget spread evenly over the frustum, so
+ * without a falloff a tile at the horizon is held to the same pixel accuracy as
+ * the block below the camera. `errorFalloff` subtracts from a tile's error as
+ * `amount * (1 - exp(-(d * density)^2))`, flat near the eye and saturating past
+ * `1/density`, so the budget is spent where it can be seen.
+ *
+ * Expressed as a fraction of the profile's target rather than as a fixed number
+ * of pixels, because a subtractive discount of five pixels means something
+ * quite different against a target of 14 than against one of 6. At 3.5 km the
+ * discount reaches most of that fraction, which softens the far edge of the
+ * study area without touching the middle distance the fly-over actually frames.
+ */
+const ERROR_FALLOFF = { fraction: 0.8, density: 1 / 3500 };
+
+/* Google Photorealistic Tiles are designed for a hardware WebGL renderer. A
+ * software renderer (SwiftShader, WARP, llvmpipe, etc.) can still show the
+ * layer, but asking it to decode, blend and rasterise the same dense tile set
+ * makes the browser spend its time on partial LODs. Those partial LODs are the
+ * faceted shards that look like broken geometry. Keep the real mesh, but use a
+ * bounded context-quality profile that a CPU can finish drawing.
+ *
+ * The job counts are the library's own defaults, restated here rather than
+ * inherited, because the previous version *lowered* both by mistake. It set
+ * `downloadQueue.maxJobs`, believing the default to be six; in this version
+ * that property is a deprecated alias for `maxJobsPerOrigin`, whose default is
+ * twenty-five, so "let more of it happen at once" cut concurrency by eight. The
+ * parse queue went the same way, from five to one. Measured at street level the
+ * result was 989 tiles queued, 357 waiting to parse and 123 loaded after forty
+ * seconds: a pipeline that could not converge, in a scene that therefore never
+ * looked like anything.
+ *
+ * The parse counts are above the library default rather than at it, because
+ * parsing is where the time actually goes: measured on this scene, a tile takes
+ * 170 ms to decode when the queue is quiet and around 600 ms once the renderer
+ * is busy, and the work is mostly in Draco workers rather than on the main
+ * thread. Raising the fly-over from three concurrent parses to eight took the
+ * view from "still 240 tiles short after a minute" to fully resolved in forty
+ * seconds. Downloads are left near the default: they finish long before parsing
+ * does, so more of them only deepens the queue behind the real constraint.
+ */
+const GIB = 1024 * 1024 * 1024;
+
+/* Tile cache size, in bytes.
+ *
+ * The library's default is 0.3–0.4 GiB, and that was sized for the error target
+ * it also ships with. Asking for finer geometry raises the resident set roughly
+ * in step: at a target of 20 the fly-over held about 160 tiles, at 3 it holds
+ * several times that, and a cache that cannot fit the visible set evicts tiles
+ * that are still on screen — which shows up as geometry flickering out and
+ * being re-fetched while the camera is not even moving. A machine with a
+ * graphics card can afford the headroom; one without keeps the default, because
+ * there the constraint is the rasteriser rather than memory.
+ */
+const SOFTWARE_PROFILE = {
+  errorTarget: 14,
+  errorFalloff: ERROR_FALLOFF,
+  downloadsPerOrigin: 20,
+  parseJobs: 6,
+  anisotropy: 1,
+  pixelRatio: 1,
+  lruBytes: { min: 0.3 * GIB, max: 0.4 * GIB },
+};
+const HARDWARE_PROFILE = {
+  errorTarget: ERROR_TARGET,
+  errorFalloff: ERROR_FALLOFF,
+  downloadsPerOrigin: 25,
+  parseJobs: 10,
+  anisotropy: 8,
+  pixelRatio: null,
+  lruBytes: { min: 0.65 * GIB, max: 0.85 * GIB },
+};
+
+/* The detail ramp: where the target opens, and what walks it toward the floor.
+ *
+ * `ceiling` is the loosest the layer ever asks for and is only ever an
+ * *opening* value. The ramp is one-way: it walks the target down and never back
+ * up. That is not a stylistic preference, it is the whole lesson of the bug
+ * this shape replaced.
+ *
+ * The previous version also loosened, on low `loadProgress`, to let a machine
+ * that could not keep up settle above the floor. Two things were wrong with it.
+ *
+ * First, raising the target is not a gentle degradation — it is a demolition.
+ * Measured on a settled tileset with the camera untouched and no network
+ * activity at all, moving the target from 9 to 24 took the drawn set from 548
+ * meshes and 1.25 M triangles to 117 and 0.32 M inside a single 250 ms frame,
+ * with every one of the 861 cached tiles still resident. Nothing was unloaded;
+ * the renderer simply stopped drawing three quarters of what it had.
+ *
+ * Second, and worse, `loadProgress` is not the quantity the old comment here
+ * claimed. The library computes
+ *
+ *     1 - (queued + downloading + parsing) / (inCacheSinceLoad + isLoading)
+ *
+ * and `inCacheSinceLoad` is reset to zero every time the queues drain. So it is
+ * a *batch completion ratio*, not "how much of the city has arrived": from a
+ * settled state, asking for N more tiles gives 1 - N/(N+1) ~ 0 however much is
+ * already on screen. Progress therefore jumps from 1.0 straight past both
+ * thresholds to about 0.01, which no width of dead band can damp — and since
+ * tightening is itself what requests those tiles, the loop self-triggered. The
+ * result was a limit cycle that coarsened and re-refined the whole view every
+ * few seconds with nobody touching the camera, and a hard collapse on every
+ * pan or rotate.
+ *
+ * One-way has none of that. Tightening pauses while a batch is in flight and
+ * resumes when it lands, so a machine that cannot reach the floor simply stops
+ * climbing down and holds the finest level it did reach. It never retires
+ * geometry it has already drawn, which is the only failure the viewer sees. */
+const RAMP = { ceiling: 24, tightenAbove: 0.9, perSecond: 0.45 };
 
 const DRACO_PATH = 'https://unpkg.com/three@0.170.0/examples/jsm/libs/draco/gltf/';
+
 
 /** Where the API key comes from, in precedence order.
  *
@@ -125,6 +263,16 @@ export function storeApiKey(key) {
   } catch (e) { /* private browsing; the key just will not persist */ }
 }
 
+function isSoftwareRenderer(renderer) {
+  const gl = renderer?.getContext?.();
+  if (!gl) return false;
+  const debug = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = debug
+    ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)
+    : gl.getParameter(gl.RENDERER);
+  return /swiftshader|software|llvmpipe|microsoft basic render|\bwarp\b/i.test(String(name));
+}
+
 export class Photoreal {
   /**
    * @param {object} o
@@ -140,9 +288,25 @@ export class Photoreal {
    */
   constructor(o) {
     this.o = o;
+    this.softwareRenderer = Boolean(o.forceCpu) || isSoftwareRenderer(o.renderer);
+    this.profile = this.softwareRenderer ? SOFTWARE_PROFILE : HARDWARE_PROFILE;
+    // Null while we are not holding it. See _borrowPixelRatio.
+    this._priorPixelRatio = null;
     this.tiles = null;
     this.enabled = false;
     this.nudgeM = 0;
+    /* The live error target the ramp is walking down toward the profile's
+     * floor. Kept on the instance rather than read off the tileset each frame
+     * so the ramp survives a rebuild mid-flight. */
+    /* Local terrain height under the eye, relative to the scene datum. The
+     * street field wash falls off with height above the *road*, and once the
+     * layer is on there is real terrain between the two. */
+    this.groundY = 0;
+    this._et = RAMP.ceiling;
+    this._rampAt = 0;
+    this._creditsAt = 0;
+    this._progress = -1;
+    this._done = false;
     /* Defaults that let the photograph survive.
      *
      * These started at 0.55 desaturation and 0.85 data wash, which was a
@@ -352,13 +516,44 @@ export class Photoreal {
     }
     this.enabled = true;
     this.root.visible = true;
-    this.o.onStatus?.('loading', 'requesting tiles');
+    this._borrowPixelRatio();
+    // Re-open the detail ramp: a layer switched back on is a fresh arrival, and
+    // the progress line has to be able to move off whatever it last said.
+    this._progress = -1;
+    this._done = false;
+    this._rampAt = 0;
+    this.setDetail();
+    this.o.onStatus?.(
+      'loading',
+      this.softwareRenderer
+        ? 'Streaming lighter tiles for this machine…'
+        : 'Requesting Google’s mesh…',
+    );
     return true;
+  }
+
+  /* Rendering at 1x is worth it while a software renderer is drawing Google's
+   * tiles, and costs the rest of the application its resolution the moment it is
+   * not. So the ratio is borrowed when the layer goes live and handed straight
+   * back when it does not: switched off, disposed, or rebuilt onto the other
+   * profile. Held once, released once, whichever of those happens first. */
+  _borrowPixelRatio() {
+    const r = this.o.renderer;
+    if (!this.softwareRenderer || !r?.setPixelRatio || this._priorPixelRatio != null) return;
+    this._priorPixelRatio = r.getPixelRatio?.() ?? null;
+    if (this._priorPixelRatio != null) r.setPixelRatio(this.profile.pixelRatio);
+  }
+
+  _returnPixelRatio() {
+    if (this._priorPixelRatio == null) return;
+    this.o.renderer?.setPixelRatio(this._priorPixelRatio);
+    this._priorPixelRatio = null;
   }
 
   disable() {
     this.enabled = false;
     this.root.visible = false;
+    this._returnPixelRatio();
     this.o.onAttribution?.([]);
   }
 
@@ -366,11 +561,21 @@ export class Photoreal {
    *  every in-flight request. A fresh enable() starts a new session, and
    *  therefore a new billable root request, so this is only for a key change. */
   dispose() {
+    this._returnPixelRatio();
     if (this.tiles) {
       this.root.remove(this.tiles.group);
       this.tiles.dispose();
       this.tiles = null;
     }
+    // The Draco decoder holds web workers. Dropping the TilesRenderer does not
+    // reach them, so a CPU/GPU profile switch would otherwise leave a set of
+    // idle workers behind for every rebuild.
+    this._draco?.dispose();
+    this._draco = null;
+    this._mats.clear();
+    this._creditKey = null;
+    this._progress = -1;
+    this._done = false;
     this.disable();
   }
 
@@ -380,8 +585,9 @@ export class Photoreal {
     const tiles = new TilesRenderer();
     tiles.registerPlugin(new GoogleCloudAuthPlugin({
       apiToken: apiKey,
-      // Google's own recommended renderer settings for this dataset; without
-      // them the error target is far too tight and the tile count explodes.
+      // All this actually does in this version is set errorTarget to 20 — the
+      // overhead-view figure — and it does it in `init`, so both of our own
+      // targets below have to be applied after registration to survive.
       useRecommendedSettings: true,
       autoRefreshToken: true,
     }));
@@ -389,21 +595,37 @@ export class Photoreal {
     // Google's tiles are Draco-compressed glTF. Without a decoder every tile
     // parses to nothing and the scene stays silently empty — which reads as
     // "the key is wrong" and sends you debugging the wrong thing.
+    //
+    // `preload` fetches the wasm decoder now rather than on the first tile. It
+    // is a couple of hundred kilobytes from a third-party CDN, and paying for
+    // it inside the first parse job stalls the whole parse queue at the exact
+    // moment the scene has nothing on screen to show for itself.
     const draco = new DRACOLoader();
     draco.setDecoderPath(DRACO_PATH);
+    // Decoding is the binding constraint, so give it the cores the machine
+    // actually has, less a couple for the main thread and the compositor. The
+    // loader's own default is a flat four, which idles most of a modern
+    // desktop and oversubscribes a small laptop.
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+    draco.setWorkerLimit(Math.max(2, Math.min(this.softwareRenderer ? 6 : 10, cores - 2)));
+    draco.preload();
+    this._draco = draco;
     tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
 
     // Re-index attributes to smaller types where possible, and cross-fade LOD
     // transitions rather than popping — a hard pop next to a static data layer
     // reads as the data itself flickering.
     //
-    // The fade was suspected of causing the pale shards that hang over the road
-    // at street level, on the theory that parent and child tiles are both drawn
+    // The fade was once suspected of causing the pale shards over the road at
+    // street level, on the theory that parent and child tiles are both drawn
     // translucently mid-transition. Removing it changed the picture not at all,
-    // so that was wrong: the shards are coarse-LOD photogrammetry of street
-    // clutter, and they resolve as the tileset refines.
+    // and the reason is now clear: the shards are coarse-LOD photogrammetry of
+    // street clutter, and nothing about them could improve while the settings
+    // below were preventing the tileset from refining at all.
     tiles.registerPlugin(new TileCompressionPlugin());
-    tiles.registerPlugin(new TilesFadePlugin());
+    // Cross-fading draws parent and child tile geometry together. It is pleasant
+    // on a GPU, but doubles raster work while a software renderer is refining.
+    if (!this.softwareRenderer) tiles.registerPlugin(new TilesFadePlugin());
 
     // Put the AOI centre at the scene origin, at the elevation the flat datum
     // stands for, so our geometry and Google's terrain share a ground plane.
@@ -413,34 +635,84 @@ export class Photoreal {
       height: this._ellipsoidHeight(),
     }));
 
-    /* Screen-space error target, in pixels. Google's recommended setting is
-     * tuned for a map-like overhead view; at street level it leaves root-level
-     * slabs filling the frame, which is far worse here than elsewhere because
-     * this scene's whole argument happens between two facades six metres apart.
+    /* Screen-space error target, in pixels, and its distance falloff. Google's
+     * recommended setting is tuned for a map-like overhead view; at street
+     * level it leaves root-level slabs filling the frame, which is far worse
+     * here than elsewhere because this scene's whole argument happens between
+     * two facades six metres apart.
      *
      * Lowering it asks for finer tiles sooner. That costs bandwidth and nothing
      * else — billing is per session, so a more detailed session is the same
-     * single billable event as a coarse one. Set after the plugin so it wins
-     * over useRecommendedSettings. */
-    tiles.errorTarget = ERROR_TARGET.orbit;
+     * single billable event as a coarse one. What it must *not* cost is the
+     * near geometry: see ERROR_FALLOFF for why the budget has to be spent by
+     * distance rather than spread evenly over the frustum.
+     *
+     * Both are applied at the foot of this method by `setDetail`, once
+     * `this.tiles` exists for it to reach — and after plugin registration, so
+     * that `useRecommendedSettings` cannot overwrite them. */
 
-    // Refinement is the binding constraint at street level, so let more of it
-    // happen at once. The defaults are tuned for an overhead view where the
-    // visible set changes slowly; standing in a canyon, almost every tile in
-    // frame is near and wants depth, and a shallow queue means the block you are
-    // standing in stays an unrefined blob with no streets carved out of it —
-    // which looks, from inside, like being sealed in a dark box.
-    if (tiles.downloadQueue) tiles.downloadQueue.maxJobs = 12;
-    if (tiles.parseQueue) tiles.parseQueue.maxJobs = 4;
+    /* Loading siblings pulls in tiles the frustum does not contain, so that
+     * turning the head finds them already there. That is the right trade at
+     * altitude, where the visible set changes slowly and a sibling is a
+     * neighbouring district. At eye level a sibling is another kilometre of
+     * city behind a wall, and fetching it competes with the pavement in front
+     * of you for the same queue. Ancestors are still loaded — they are what
+     * stands in for a tile while its children are in flight. */
+    tiles.loadSiblings = false;
+
+    /* Private queues rather than the library's module-level singletons.
+     *
+     * `DEFAULT_DOWNLOAD_QUEUE` and `DEFAULT_PARSE_QUEUE` are shared by every
+     * TilesRenderer in the page and outlive any one of them, so tuning them in
+     * place leaves the settings behind after `dispose()` and silently applies
+     * this layer's profile to anything else that ever streams tiles. Owning the
+     * queues also means the CPU/GPU profile switch genuinely starts clean. */
+    const downloads = new DownloadPriorityQueue();
+    downloads.maxJobsPerOrigin = this.profile.downloadsPerOrigin;
+    downloads.priorityCallback = unifiedPriorityCallback;
+    tiles.downloadQueue = downloads;
+
+    const parses = new PriorityQueue();
+    parses.maxJobs = this.profile.parseJobs;
+    parses.priorityCallback = unifiedPriorityCallback;
+    tiles.parseQueue = parses;
+
+    /* And this layer's own tile cache, for the same reason and sized to the
+     * detail being asked for. `DEFAULT_LRU_CACHE` is another module-level
+     * singleton, so raising its limits in place would apply them to anything
+     * else in the page that ever streams tiles and would outlive `dispose()`.
+     * The eviction order is borrowed from the default rather than reinvented:
+     * it is what decides that the tile behind you goes before the one in front,
+     * and getting it wrong is worse than not tuning the size at all. */
+    const cache = new LRUCache();
+    cache.unloadPriorityCallback = DEFAULT_LRU_CACHE.unloadPriorityCallback;
+    cache.minSize = DEFAULT_LRU_CACHE.minSize;
+    cache.maxSize = DEFAULT_LRU_CACHE.maxSize;
+    cache.minBytesSize = this.profile.lruBytes.min;
+    cache.maxBytesSize = this.profile.lruBytes.max;
+    tiles.lruCache = cache;
 
     tiles.setCamera(camera);
     tiles.setResolutionFromRenderer(camera, renderer);
 
     tiles.addEventListener('load-model', ({ scene }) => this._patchMaterials(scene));
-    tiles.addEventListener('load-tile-set', () => {
-      this.o.onStatus?.('ready', '');
-      this._pushCredits();
-    });
+    // Materials are patched per streamed model and held in a Set so the look
+    // sliders can reach them; without this they accumulate for the life of the
+    // session, one entry per tile ever loaded, long after the GPU memory
+    // behind them has been released.
+    tiles.addEventListener('dispose-model', ({ scene }) => this._forgetMaterials(scene));
+    /* The tileset arrived: push the first credits as soon as there is anything
+     * to credit.
+     *
+     * The old code listened for `load-tile-set`, which is not an event this
+     * library has ever dispatched — the names are `load-root-tileset` and
+     * `load-tileset` — so this handler simply never ran, the status line never
+     * left "requesting tiles", and a session streaming perfectly looked exactly
+     * like one whose key had been refused. Progress is reported from the frame
+     * loop now (see `_pushProgress`), which is a truer signal than any single
+     * event: what a viewer wants to know is how much of the city has arrived,
+     * not that a manifest parsed. */
+    tiles.addEventListener('load-root-tileset', () => this._pushCredits());
     tiles.addEventListener('load-error', (e) => {
       // A 401/403 here is nearly always the key: missing billing, or the Map
       // Tiles API not enabled on the project.
@@ -451,6 +723,7 @@ export class Photoreal {
 
     this.root.add(tiles.group);
     this.tiles = tiles;
+    this.setDetail();
   }
 
   _ellipsoidHeight() {
@@ -488,6 +761,17 @@ export class Photoreal {
       const mat = child.material;
       if (!mat || mat.userData.prPatched) return;
       mat.userData.prPatched = true;
+      /* Anisotropic filtering on the photograph.
+       *
+       * Every surface that matters at eye level is seen at a grazing angle:
+       * the roadway, the pavement, the crossing markings, the kerb. Isotropic
+       * mipmapping picks a level from the *worst* axis, so those surfaces
+       * collapse into a smeared band a few metres ahead of the walker, which
+       * reads as the tiles having failed to refine when in fact they refined
+       * perfectly and are being sampled badly. Eight taps is the knee of the
+       * cost curve; a software renderer gets one, because there it is the
+       * rasteriser and not the sampler that has no headroom. */
+      this._setAnisotropy(mat);
       const uniforms = {
         uDesat: { value: this.desaturate },
         uWash: { value: fieldTex ? this.fieldWash : 0 },
@@ -505,6 +789,7 @@ export class Photoreal {
         uLut: { value: this.lut },
         uLutSize: { value: new THREE.Vector2(this.lutW, this.lutH) },
         uNBands: { value: this.nBands },
+        uGroundY: { value: this.groundY },
       };
       mat.userData.uniforms = uniforms;
       this._mats.add(mat);
@@ -534,7 +819,8 @@ export class Photoreal {
              uniform sampler2D uParams;
              uniform sampler2D uLut;
              uniform vec2 uLutSize;
-             uniform float uNBands;`)
+             uniform float uNBands;
+             uniform float uGroundY;`)
           .replace('#include <dithering_fragment>',
             `#include <dithering_fragment>
              {
@@ -619,7 +905,16 @@ export class Photoreal {
                      // the wall goes flat; keeping it means a window reveal, a
                      // cornice shadow and a sunlit spandrel all still read
                      // through the tint.
-                     float shade = clamp( l * 1.6 + 0.35, 0.45, 1.35 );
+                     //
+                     // The floor was 0.45 against a gain of 1.6, which put every
+                     // luminance below about 0.06 on the same value — and a
+                     // masonry facade in canyon shade spends most of its area
+                     // down there. So the exact detail a photographic mesh is
+                     // brought in to provide was being flattened out again by
+                     // the tint that sits on top of it. A lower floor and a
+                     // wider gain spend more of the range on the dark end,
+                     // where the structure actually is.
+                     float shade = clamp( l * 1.9 + 0.24, 0.30, 1.45 );
                      tinted = heat.rgb * shade;
                    }
                  }
@@ -638,6 +933,24 @@ export class Photoreal {
                // receive keeps the trees green, the vehicles coloured, and the
                // walls neutral enough for the ramp to dominate.
                float desatW = uDesat * mix( 0.25, 1.0, clamp( dataAmt * 2.0, 0.0, 1.0 ) );
+
+               /* A wall the model has nothing to say about is desaturated as
+                * hard as one it does, rather than as softly as a street tree.
+                *
+                * The weighting above exists to protect foliage and vehicles,
+                * and it does that by leaving anything untinted at full colour.
+                * That is right for a plane tree and wrong for a tower: a
+                * hundred metres of saturated photographic facade standing among
+                * tinted neighbours reads as the layer having failed on that
+                * building, when what has actually happened is that the model
+                * does not cover it. Midtown has real cases — a footprint whose
+                * height the city records as a fifth of the building's, so the
+                * bands stop a third of the way up and the rest is raw
+                * photograph. Neutral says "outside the study"; saturated says
+                * "broken", and only one of those is true. */
+               float wallNoData = wall * ( 1.0 - clamp( dataAmt * 3.0, 0.0, 1.0 ) );
+               desatW = max( desatW, uDesat * wallNoData );
+
                c = mix( c, vec3( l ), desatW );
                c = mix( c, tinted, dataAmt );
 
@@ -649,7 +962,18 @@ export class Photoreal {
                  // clutter that belongs to no building still reads as part of
                  // the street.
                  float up = mix( 0.32, 1.0, smoothstep( 0.55, 0.85, horiz ) );
-                 float low = 1.0 - smoothstep( 6.0, 22.0, vWorldPR.y );
+                 // Height above the *road*, not above the scene datum.
+                 //
+                 // This read vWorldPR.y directly, which is height above y = 0 —
+                 // and y = 0 is the flat datum, not the ground. The photoreal
+                 // layer is the one place that distinction bites, because it is
+                 // the only place the scene stands on real terrain: Midtown
+                 // spans 0-26 m, so the same roadway that took the full wash
+                 // downtown took almost none of it on the high ground, and the
+                 // measured field simply faded out of the streets as you walked
+                 // north. uGroundY carries the local terrain height so the
+                 // falloff measures what it always meant to.
+                 float low = 1.0 - smoothstep( 6.0, 22.0, vWorldPR.y - uGroundY );
                  vec2 uv = vec2(
                    ( vWorldPR.x - uFieldRect.x ) / uFieldRect.z,
                    ( ( -vWorldPR.z ) - uFieldRect.y ) / uFieldRect.w );
@@ -665,6 +989,43 @@ export class Photoreal {
       };
       mat.needsUpdate = true;
     });
+  }
+
+  /** Give one streamed material's textures the profile's anisotropy. */
+  _setAnisotropy(mat) {
+    const max = this.o.renderer?.capabilities?.getMaxAnisotropy?.() ?? 1;
+    const want = Math.max(1, Math.min(this.profile.anisotropy, max));
+    for (const slot of ['map', 'emissiveMap']) {
+      const tex = mat[slot];
+      if (tex && tex.anisotropy !== want) {
+        tex.anisotropy = want;
+        tex.needsUpdate = true;
+      }
+    }
+  }
+
+  /** Drop a streamed model's materials from the look-control set. */
+  _forgetMaterials(root) {
+    if (!root) return;
+    root.traverse((child) => {
+      if (child.material) this._mats.delete(child.material);
+    });
+  }
+
+  /** Tell the shader where the road is, so the street wash falls off from it.
+   *
+   * One uniform for the whole frame rather than a per-fragment lookup: the term
+   * it feeds only matters within twenty metres of the eye, and over that span
+   * Midtown's terrain is flat to well under a metre. A ground-elevation texture
+   * would be exact and would cost a fetch per fragment to fix nothing visible.
+   */
+  setGroundY(y) {
+    if (!Number.isFinite(y) || Math.abs(y - this.groundY) < 0.05) return;
+    this.groundY = y;
+    for (const mat of this._mats) {
+      const u = mat.userData.uniforms;
+      if (u && u.uGroundY) u.uGroundY.value = y;
+    }
   }
 
   /** Live-adjust the two look controls without rebuilding the tileset. */
@@ -684,15 +1045,81 @@ export class Photoreal {
     }
   }
 
-  /** Ask for more or less detail, according to how close the eye is.
+  /** Apply the detail settings and re-open the ramp at its ceiling.
    *
-   * Kept as two named values rather than a continuous function of altitude
-   * because the two cases are genuinely different: an overhead view wants
-   * breadth and a pedestrian wants depth, and interpolating between them just
-   * means never being right for either. */
-  setDetail(mode) {
+   * This took a mode argument — `orbit` or `street` — because a pedestrian and
+   * a map want genuinely different budgets. There is one camera now, so what
+   * remains is the reset: put the target back at the known-good ceiling and let
+   * the ramp walk it down to the floor as tiles land.
+   */
+  setDetail() {
     if (!this.tiles) return;
-    this.tiles.errorTarget = ERROR_TARGET[mode] ?? ERROR_TARGET.orbit;
+    const { fraction, density } = this.profile.errorFalloff;
+    this.tiles.errorFalloff = this.profile.errorTarget * fraction;
+    this.tiles.errorFalloffDensity = density;
+    this._et = RAMP.ceiling;
+    this.tiles.errorTarget = this._et;
+  }
+
+  /** Walk the live error target down toward the profile's floor, one way only.
+   *
+   * Time-based rather than frame-based, so a machine drawing four frames a
+   * second refines at the same rate as one drawing sixty — the tile pipeline is
+   * bound by network and decoding, not by how often we ask.
+   *
+   * `loadProgress` is used only as a "is a batch still in flight" gate, which
+   * is the one thing it reliably reports. See RAMP for why it cannot be read as
+   * a fraction of the city and what happened when it was.
+   */
+  _rampDetail(nowMs) {
+    const t = this.tiles;
+    if (!t) return;
+    const dt = this._rampAt ? Math.min(0.5, (nowMs - this._rampAt) / 1000) : 0;
+    this._rampAt = nowMs;
+    if (dt <= 0) return;
+
+    /* Queue depth was the first signal tried here and is also wrong: it dips to
+     * nothing every time a wave of downloads finishes and before the next is
+     * requested, which reads as "keeping up" when nothing of the sort is true.
+     * `loadProgress` at least goes to 1 only when the queues are genuinely
+     * empty, which is all this gate needs of it. */
+    const progress = Math.max(0, Math.min(1, t.loadProgress));
+    const floor = this.profile.errorTarget;
+
+    if (progress > RAMP.tightenAbove && this._et > floor) {
+      this._et = Math.max(floor, this._et * (1 - RAMP.perSecond * dt));
+      t.errorTarget = this._et;
+    }
+  }
+
+  /** Report how much of what the eye has asked for has actually arrived.
+   *
+   * `loadProgress` is the library's own measure and it is the only honest
+   * answer to "is this working". The layer used to say nothing at all after
+   * "requesting tiles", because it was waiting on an event name that does not
+   * exist, so a session that was streaming perfectly and one whose key had been
+   * refused looked identical from the panel.
+   */
+  _pushProgress() {
+    const t = this.tiles;
+    if (!t) return;
+    const p = Math.round(Math.max(0, Math.min(1, t.loadProgress)) * 100);
+    /* Settle on "ready" only once the queues are genuinely empty, not merely
+     * once the percentage rounds to a hundred — and watch that emptiness as
+     * well as the number, because the last few tiles land while the figure is
+     * already reading 100. Keying the change detection on the percentage alone
+     * left the panel saying "Streaming — 100%" for the rest of the session. */
+    const done = p >= 100 && !t.downloadQueue.running && !t.parseQueue.running;
+    if (p === this._progress && done === this._done) return;
+    this._progress = p;
+    this._done = done;
+    if (done) {
+      this.o.onStatus?.('ready', '');
+    } else {
+      this.o.onStatus?.('loading', this.softwareRenderer
+        ? `Streaming lighter tiles for this machine — ${p}%`
+        : `Streaming Google’s mesh — ${p}%`);
+    }
   }
 
   /** Vertical nudge, metres. Dials out the residual geoid/datum mismatch. */
@@ -710,36 +1137,6 @@ export class Photoreal {
     }
   }
 
-  /** World Y of Google's own ground surface beneath a point, or null.
-   *
-   * Every other way of placing the walker is an estimate stacked on an
-   * estimate: the footprint table's ground elevation, plus a single global
-   * geoid constant, against terrain that varies continuously. Errors of a
-   * couple of metres are enough to bury the eye in a roadbed or float it above
-   * one, and no amount of care in the constants fixes the general case.
-   *
-   * Asking the geometry is exact by construction. This is ordinary runtime
-   * collision — the same thing every 3D-tiles walker does to stand on a
-   * surface — not an extraction of geometry into anything that outlives the
-   * frame.
-   */
-  groundAt(x, z, fromY = 400) {
-    if (!this.tiles || !this.enabled) return null;
-    if (!this._ray) {
-      this._ray = new THREE.Raycaster();
-      this._ray.far = 1200;
-      this._down = new THREE.Vector3(0, -1, 0);
-      this._origin = new THREE.Vector3();
-    }
-    this._origin.set(x, fromY, z);
-    this._ray.set(this._origin, this._down);
-    const hits = this._ray.intersectObject(this.tiles.group, true);
-    if (!hits.length) return null;
-    // Highest surface below the probe start: the roadbed rather than a basement
-    // face or the underside of an overpass.
-    return hits[0].point.y;
-  }
-
   /* ----------------------------------------------------------------- frame */
 
   update() {
@@ -753,7 +1150,20 @@ export class Photoreal {
     this.o.camera.updateMatrixWorld();
     this.tiles.setResolutionFromRenderer(this.o.camera, this.o.renderer);
     this.tiles.update();
-    this._pushCredits();
+
+    /* Everything below is bookkeeping, and none of it needs to run at frame
+     * rate: the detail ramp is deliberately time-based, the progress line is
+     * unreadable if it changes sixty times a second, and rebuilding the credit
+     * string every frame allocates an array and a join per frame for a value
+     * that changes a handful of times a session. */
+    const now = performance.now();
+    if (now - this._creditsAt > 400) {
+      this._creditsAt = now;
+      this.setGroundY(this.o.groundYAt?.(this.o.camera.position.x, this.o.camera.position.z) ?? 0);
+      this._rampDetail(now);
+      this._pushCredits();
+      this._pushProgress();
+    }
   }
 
   _pushCredits() {

@@ -226,6 +226,8 @@ def wall_irradiance(
     svf: float,
     sunlit: bool = True,
     ground_albedo: float = 0.15,
+    dni: float | None = None,
+    dhi: float | None = None,
 ) -> dict[str, float]:
     """Shortwave load on a vertical facade panel, W/m^2, split by component.
 
@@ -240,8 +242,16 @@ def wall_irradiance(
 
     The reflected term is small over asphalt but becomes significant over light
     pavement, which is exactly the lever the cool-pavement scenario pulls.
+
+    ``dni``/``dhi`` override the cloud-parameterised reconstruction with observed
+    values. The year tier passes ERA5's own beam and diffuse straight in: for
+    8,760 hours the reanalysis's radiation is better information than a
+    reconstruction from cloud fraction, and ``sky_irradiance`` remains what
+    ``scripts/validate.py`` checks the reconstruction against. Passing neither
+    keeps the original behaviour exactly.
     """
-    dni, dhi = sky_irradiance(sun, cloud_fraction)
+    if dni is None or dhi is None:
+        dni, dhi = sky_irradiance(sun, cloud_fraction)
     cos_i = cos_incidence_vertical(sun, wall_azimuth)
     beam = dni * max(0.0, cos_i) if (sunlit and cos_i > 0.0) else 0.0
 
@@ -260,10 +270,15 @@ def wall_irradiance(
 
 
 def ground_irradiance(
-    sun: SunPosition, cloud_fraction: float, svf: float, sunlit: bool = True
+    sun: SunPosition, cloud_fraction: float, svf: float, sunlit: bool = True,
+    dni: float | None = None, dhi: float | None = None,
 ) -> dict[str, float]:
-    """Shortwave load on the canyon floor, W/m^2."""
-    dni, dhi = sky_irradiance(sun, cloud_fraction)
+    """Shortwave load on the canyon floor, W/m^2.
+
+    ``dni``/``dhi`` override the reconstruction; see ``wall_irradiance``.
+    """
+    if dni is None or dhi is None:
+        dni, dhi = sky_irradiance(sun, cloud_fraction)
     cos_zen = math.cos(math.radians(sun.zenith)) if sun.up else 0.0
     beam = dni * cos_zen if sunlit else 0.0
     diffuse = dhi * max(0.0, min(svf, 1.0))

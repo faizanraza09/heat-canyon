@@ -1,54 +1,131 @@
-/* HeatCanyon — dark scientific-instrument UI.
-   Design intent: this should read as an instrument, not a marketing page. Every
-   number on screen is either measured or modelled and the interface says which,
-   so the visual language is deliberately restrained — one accent colour, one
-   heat ramp, generous negative space, and monospace for anything numeric so
-   columns of figures line up and can be compared at a glance. */
+/* Urban Canyon — the instrument.
+ *
+ * Design language, and the reasoning behind it:
+ *
+ * The shell is a warm near-black (#0A0908) rather than the cool blue-black this
+ * interface used to sit on. The reason is the data: every value on screen is a
+ * temperature, and the ramp that carries it runs from indigo through magenta
+ * into cream. A cool grey chrome put a second blue in the frame that competed
+ * with the cold end of that ramp; a warm black is a colour the ramp never
+ * reaches, so the shell recedes and the measurement is the only saturated thing
+ * on screen.
+ *
+ * One accent, a terracotta #D9542E, and it is never used for data — only for
+ * the thing the cursor is on and for the line under the active tab. Numbers are
+ * always monospace, so columns of figures line up and can be compared at a
+ * glance. Prose is Instrument Sans. Anything that is a *name* rather than a
+ * label — an address, a headline, a single big figure — is Instrument Serif,
+ * which is what stops the panels reading as a settings dialogue.
+ *
+ * Radii are small (3px on controls, 4px on panels) and shadows are absent.
+ * Panels are separated from the city by a hairline and 18px of backdrop blur
+ * instead, which keeps the model visible through them and stops the interface
+ * looking like a stack of cards floating over a photograph.
+ *
+ * Every animation uses the same curve, cubic-bezier(0.16, 1, 0.3, 1): a fast
+ * departure and a long settle. Used everywhere, it makes the whole interface
+ * feel like one mechanism.
+ */
 
 :root {
-  /* Neutrals: a cool near-black that lets the heat ramp be the only saturated
-     thing on screen. */
-  --bg:            #07090d;
-  --bg-1:          #0b0e14;
-  --panel:         rgba(14, 18, 26, 0.82);
-  --panel-solid:   #0e121a;
-  --panel-hi:      rgba(24, 30, 42, 0.92);
-  --line:          rgba(255, 255, 255, 0.07);
-  --line-strong:   rgba(255, 255, 255, 0.14);
+  /* Shell. */
+  --bg:            #0A0908;
+  --panel:         rgba(13, 12, 11, 0.82);
+  --panel-solid:   #131110;
+  --panel-raised:  rgba(24, 22, 20, 0.94);
+  --panel-tint:    rgba(237, 231, 220, 0.03);
 
-  --text:          #e8ecf4;
-  --text-2:        #9aa5b8;
-  --text-3:        #5f6b80;
+  /* Hairlines, in the four weights the design actually uses. */
+  --line:          rgba(237, 231, 220, 0.09);
+  --line-panel:    rgba(237, 231, 220, 0.11);
+  --line-ctl:      rgba(237, 231, 220, 0.16);
+  --line-hi:       rgba(237, 231, 220, 0.42);
+  --line-faint:    rgba(237, 231, 220, 0.06);
 
-  /* One accent, used only for interaction affordances — never for data. */
-  --accent:        #4ea8de;
-  --accent-dim:    rgba(78, 168, 222, 0.16);
+  /* Text, brightest to dimmest. Nine steps sounds excessive and is not: the
+     panels are dense, and the hierarchy is carried by value rather than by
+     size, because the type sizes are already as small as they can usefully go. */
+  --t0:            #F2EDE4;
+  --t1:            #EDE7DC;
+  --t2:            #C9C0B4;
+  --t3:            #A49B8F;
+  --t4:            #9A9186;
+  --t5:            #8A7F71;
+  --t6:            #7A7168;
+  --t7:            #6B6259;
+  --t8:            #5F584F;
 
-  /* Epistemic status colours. Measured and modelled are visually distinct
-     everywhere they appear, because the distinction is the point. */
-  --measured:      #5ad1a5;
-  --modelled:      #d9a44c;
-  --warn:          #e8674f;
+  --accent:        #D9542E;
+  --good:          #7FA66A;
+  --warn:          #D9542E;
 
-  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --sans:  'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono:  'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  /* 4px base spacing scale. */
-  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
-  --s5: 24px; --s6: 32px; --s7: 48px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --r:  3px;
+  --r2: 4px;
+  --blur: blur(18px);
 
-  --r1: 6px;  --r2: 10px; --r3: 14px;
+  /* Panel geometry. Named because the bottom rail has to know how much room
+     the side panels are taking, and hand-copied numbers drift. */
+  --inset: 24px;
+  --wl: clamp(296px, 27vw, 366px);
+  --wr: clamp(296px, 27vw, 372px);
 
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
-  --blur: saturate(150%) blur(20px);
+  /* ---- the decision layer.
+   *
+   * Four surfaces were added at once — the floor schedule, the what-if pane,
+   * the portfolio and the building brief — and four surfaces built against
+   * four private palettes is how an instrument starts looking like four
+   * instruments. Everything they need that the shell did not already have is
+   * declared here, once.
+   *
+   * SEVERITY is deliberately NOT the temperature ramp. The ramp means degrees
+   * and is the only saturated thing on screen; a severity stripe reading in the
+   * same colours would be read as a temperature and would compete with the
+   * model behind the panel. So it is a single hue ramped by value — the shell's
+   * own warm neutral rising to the accent — which reads as "more" without
+   * reading as "hotter". */
+  --sev-0: rgba(237, 231, 220, 0.10);
+  --sev-1: rgba(214, 176, 130, 0.32);
+  --sev-2: rgba(212, 143,  86, 0.52);
+  --sev-3: rgba(213, 106,  60, 0.74);
+  --sev-4: #D9542E;
+
+  /* The three attribution terms. They are a CAUSAL category, not a magnitude,
+     so they get three distinguishable hues rather than one ramp — and none of
+     them is the accent, which stays reserved for the cursor. */
+  --term-solar: #E0A24B;   /* absorbed shortwave  — the sun's own colour */
+  --term-trap:  #A8577C;   /* longwave from the wall opposite */
+  --term-sky:   #5B8CA8;   /* longwave to a cold sky: relief, so it reads cool */
+
+  /* Money and outcome, kept apart from both of the above: a saving is not a
+     temperature and must never borrow the ramp. */
+  --money:      #7FA66A;
+  --cost:       #B2603F;
+
+  /* An assumed figure is softer than a modelled one and the interface has to
+     say so without shouting. A dotted underline in the mid-text tone, applied
+     by `.asm`, is the whole treatment. */
+  --assumed:    rgba(237, 231, 220, 0.30);
 }
 
 * { box-sizing: border-box; }
 
+/* Note on `all: unset`, which this sheet uses to strip a browser's button
+   styling: it resets *every* property, `box-sizing` included, and because it
+   lives in a class rule it outranks the `*` above. A reset button with
+   `width: 100%` and horizontal padding therefore came out 44px wider than its
+   container and pushed its right-hand value out of the panel — which is how the
+   metric units and the ranking scores went missing. Every `all: unset` here is
+   followed immediately by `box-sizing: border-box` for that reason. */
+
 html, body {
   margin: 0; padding: 0; height: 100%;
   background: var(--bg);
-  color: var(--text);
+  color: var(--t1);
   font-family: var(--sans);
   font-size: 14px;
   line-height: 1.5;
@@ -56,413 +133,920 @@ html, body {
   overflow: hidden;
 }
 
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--t1); }
+::selection { background: var(--accent); color: var(--bg); }
+
 #app { position: fixed; inset: 0; }
+/* One cursor vocabulary across both camera modes. The street used to show a
+   crosshair, which promises a targeting gesture it does not have; dragging is
+   a grab down there exactly as it is in the fly-over, and what you can click
+   on is said by the ring on the pavement rather than by the pointer. */
 #gl  { position: absolute; inset: 0; display: block; cursor: grab; }
 #gl.is-panning { cursor: grabbing; }
-#gl.street-nav { cursor: crosshair; }
+/* On the street, over a patch of road you could actually walk to. The ring on
+   the pavement says the same thing in the scene; the pointer says it before
+   you have looked down. */
 
-/* ---------------------------------------------------------------- loading */
+/* ------------------------------------------------------- frame overlays
+
+   Vignette and grain, over the model and under the interface. They are doing
+   the same job the fog does inside the 3D scene: giving a flat, unlit colour
+   field somewhere to fall away to at the edges, so the city sits in air rather
+   than being pasted onto a rectangle. Both are pointer-transparent.           */
+
+#vignette {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 45%,
+    rgba(10, 9, 8, 0) 38%, rgba(10, 9, 8, 0.55) 78%, rgba(10, 9, 8, 0.9) 100%);
+}
+#grain {
+  position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  opacity: 0.05; mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* -------------------------------------------------- navigation furniture
+
+   Compass and zoom, on the canvas rather than in a panel, because that is
+   where every map puts them and because they have to survive both panels being
+   folded away. The right offset is derived from the side panel's own width
+   through the same custom property the bottom rail uses, so the two can never
+   disagree about how much room the panel takes.
+
+   The compass is not decoration here. Every reading this model produces is
+   attached to an orientation — a south-west wall, the facade opposite, the
+   profile angle on a west face — and a viewer who has orbited twice has no
+   idea which way they are looking. Clicking it swings the camera back to
+   north-up, which is the one gesture that reliably re-anchors a 3D view.      */
+
+#navpad {
+  position: absolute; z-index: 21; top: var(--inset);
+  right: calc(var(--inset) * 2 + var(--wr));
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  transition: right 560ms var(--ease);
+}
+#navpad.wide-right { right: var(--inset); }
+
+#nav-compass {
+  all: unset; box-sizing: border-box; cursor: pointer; position: relative;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--panel-raised); border: 1px solid var(--line-ctl);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  display: grid; place-items: center;
+}
+#nav-compass:hover { border-color: var(--line-hi); }
+#nav-compass:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+#nav-compass svg { width: 44px; height: 44px; display: block; }
+#nav-compass .ring { fill: none; stroke: var(--line); stroke-width: 1; }
+/* The needle's north half takes the accent; the south half stays neutral, so
+   which end is which is legible at 44 px without a label. */
+#nav-compass .nn { fill: var(--accent); }
+#nav-compass .ss { fill: var(--t7); }
+#nav-rose { transform-origin: 22px 22px; }
+#nav-compass .nlab {
+  position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 8px; letter-spacing: .1em; color: var(--t7);
+  background: var(--panel-raised); padding: 0 3px; border-radius: 2px;
+}
+
+.navzoom {
+  display: flex; flex-direction: column;
+  background: var(--panel-raised); border: 1px solid var(--line-ctl);
+  border-radius: var(--r); overflow: hidden;
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.navzoom button {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  width: 32px; height: 30px; text-align: center;
+  font-family: var(--mono); font-size: 15px; color: var(--t4); line-height: 30px;
+}
+.navzoom button:hover { color: var(--t0); background: var(--panel-tint); }
+.navzoom button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.navzoom button + button { border-top: 1px solid var(--line); }
+
+/* The street has no bearing to reset and no distance to step, so the cluster
+   goes away rather than sitting there inert. */
+
+/* ------------------------------------------------------------- keyframes
+
+   Note the fill mode these are used with. Every entrance below is applied
+   `backwards`, never `both` — a filled-forwards animation keeps applying its
+   final keyframe for the life of the element, and animated declarations outrank
+   ordinary ones. The bottom rail's entrance held `transform: none` that way, and
+   silently defeated `#time.folded .rail`'s slide-out: the rail simply refused to
+   fold. `backwards` holds the *opening* frame before the delay elapses and then
+   gets out of the way, which is all an entrance needs, because every one of
+   these ends on the value the base rule already declares.                     */
+
+@keyframes hcRise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes hcMask {
+  from { opacity: 0; clip-path: inset(0 0 108% 0); transform: translateY(22px); }
+  to   { opacity: 1; clip-path: inset(-14% -6% -14% -6%); transform: none; }
+}
+@keyframes hcRule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes hcCap {
+  from { opacity: 0; transform: translateY(12px); filter: blur(3px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes hcLeft  { from { opacity: 0; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
+@keyframes hcRight { from { opacity: 0; transform: translateX(22px); }  to { opacity: 1; transform: none; } }
+@keyframes hcUp    { from { opacity: 0; transform: translateY(24px); }  to { opacity: 1; transform: none; } }
+@keyframes hcFade  { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------------------------------------------------------------- loading
+
+   Only ever seen when the opening film is turned off: with the film running its
+   title card owns the progress bar, because two progress bars for one load is
+   one too many and a title card is a better thing to look at.                 */
 
 #boot {
   position: absolute; inset: 0; z-index: 200;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: var(--bg); gap: var(--s4);
-  transition: opacity .5s ease;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 0 6vw; max-width: 980px;
+  background: var(--bg); transition: opacity .6s ease;
 }
 #boot.done { opacity: 0; pointer-events: none; }
-#boot h1 {
-  font-size: 15px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
-  margin: 0; color: var(--text);
+#boot .kicker {
+  margin: 0; font-family: var(--mono); font-size: 11px;
+  letter-spacing: .34em; color: var(--t5);
+  animation: hcRise 620ms var(--ease) both;
 }
-#boot .sub { color: var(--text-3); font-size: 12px; font-family: var(--mono); }
-#boot .bar { width: 260px; height: 2px; background: var(--line-strong); overflow: hidden; }
-#boot .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s ease; }
+#boot h1 {
+  margin: 22px 0 0; font-family: var(--serif); font-weight: 400;
+  font-size: clamp(48px, 7vw, 96px); line-height: .9; letter-spacing: -.02em;
+  color: var(--t0); animation: hcMask 1000ms var(--ease) 110ms both;
+}
+#boot .rule {
+  width: 96px; height: 1px; background: var(--accent); transform-origin: left;
+  margin: 34px 0 26px; animation: hcRule 620ms var(--ease) 420ms both;
+}
+#boot .bar {
+  max-width: 420px; height: 1px; background: rgba(237, 231, 220, .14);
+  position: relative; overflow: hidden;
+}
+#boot .bar i {
+  position: absolute; inset: 0; display: block; background: var(--t5);
+  transform: scaleX(0); transform-origin: left; transition: transform .3s ease;
+}
+#boot .brow {
+  display: flex; justify-content: space-between; max-width: 420px; margin-top: 10px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .22em; color: var(--t7);
+}
 
-/* ------------------------------------------------------------------ layout
+/* ------------------------------------------------------------------ panels
 
-   Three fixed regions with explicit gaps, rather than absolutely positioned
-   panels offset by hand-tuned pixel values. The previous version placed the
-   left rail at a fixed `top: 168px` on the assumption the masthead above it was
-   exactly that tall; once the strap text wrapped to a fourth line the two
-   overlapped, and the camera controls landed on top of the time scrubber. Every
-   region here is anchored to a viewport edge and sized independently, so no
-   amount of text reflow can make them collide.                              */
+   Three regions, each anchored to a viewport edge and sized independently, so
+   no amount of text reflow can make them collide. The bottom rail's margins are
+   derived from the side panel widths through custom properties rather than
+   hand-copied pixel values, which is what used to go wrong when a width
+   changed in one place and not the other.                                     */
 
-.panel {
-  position: absolute;
+.panel { position: absolute; z-index: 20; }
+
+.pnl {
+  height: 100%; display: flex; flex-direction: column; overflow: hidden;
   background: var(--panel);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  border: 1px solid var(--line);
-  border-radius: var(--r3);
-  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--line-panel); border-radius: var(--r2);
 }
 
 #left {
-  top: var(--s4); left: var(--s4); bottom: var(--s4);
-  width: 322px; z-index: 20;
-  display: flex; flex-direction: column; overflow: hidden;
+  top: var(--inset); left: var(--inset); bottom: var(--inset); width: var(--wl);
+  transition: transform 560ms var(--ease), opacity 300ms ease;
 }
+#left .pnl { animation: hcLeft 520ms var(--ease) backwards; }
 
 #side {
-  top: var(--s4); right: var(--s4); bottom: var(--s4);
-  width: 364px; z-index: 20;
-  display: flex; flex-direction: column; overflow: hidden;
+  top: var(--inset); right: var(--inset); bottom: var(--inset); width: var(--wr);
+  transition: transform 560ms var(--ease), opacity 300ms ease;
 }
+#side .pnl { animation: hcRight 520ms var(--ease) 70ms backwards; }
 
 #time {
-  bottom: var(--s4);
-  left: calc(322px + var(--s4) * 2);
-  right: calc(364px + var(--s4) * 2);
-  z-index: 20; padding: var(--s3) var(--s4) var(--s3);
-  display: flex; flex-direction: column; gap: var(--s2);
+  position: absolute; z-index: 20; bottom: var(--inset);
+  left: calc(var(--inset) * 2 + var(--wl)); right: calc(var(--inset) * 2 + var(--wr));
+  display: flex; justify-content: center; pointer-events: none;
+  transition: left 560ms var(--ease), right 560ms var(--ease);
+}
+#time.wide-left  { left: var(--inset); }
+#time.wide-right { right: var(--inset); }
+
+/* --------------------------------------------------------- panel furniture */
+
+.phead { padding: 20px 22px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.ptop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pname {
+  font-size: 14px; font-weight: 600; letter-spacing: .14em;
+  color: var(--t0); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+#side .pname { letter-spacing: .16em; }
+.picons { display: flex; align-items: center; gap: 8px; flex: none; }
+
+.icon {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none; width: 22px; height: 22px;
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  display: grid; place-items: center; color: var(--t5);
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.icon:hover { color: var(--t0); border-color: var(--line-hi); }
+.icon svg { display: block; }
+/* For the one icon button whose glyph is a character rather than a path. */
+.icon .g { font-family: var(--mono); font-size: 10px; line-height: 1; }
+
+.pmeta {
+  margin-top: 10px; font-family: var(--mono); font-size: 10.5px;
+  line-height: 1.8; letter-spacing: .06em; color: var(--t7);
+}
+.plede {
+  margin: 9px 0 0; font-size: 12.5px; line-height: 1.65; color: var(--t4);
+  text-wrap: pretty;
 }
 
-/* ------------------------------------------------------------------- brand */
+.pbody { flex: 1; overflow-y: auto; overflow-x: hidden; }
 
-.brand { padding: var(--s4) var(--s4) var(--s3); border-bottom: 1px solid var(--line); }
-.brand h1 {
-  margin: 0; font-size: 12px; font-weight: 600;
-  letter-spacing: .18em; text-transform: uppercase;
+.pfoot {
+  flex: none; padding: 12px 22px 14px; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 9px; line-height: 1.8;
+  letter-spacing: .12em; color: var(--t7);
 }
-.brand p {
-  margin: 4px 0 0; font-family: var(--mono); font-size: 10.5px;
-  color: var(--text-3); line-height: 1.5;
-}
+
+/* ----------------------------------------------------------- line heights
+
+   The body sets 1.5, which is right for prose and wrong for everything that is
+   a label, a figure or a single-line row: inheriting it pushed every stacked
+   label/value pair 5px apart and every metric row 3px taller, which compounds
+   down a dense panel into a rhythm visibly looser than the one that was
+   designed.
+
+   The value is `normal`, not a ratio. The design leaves these at the font's own
+   metrics, and picking a number instead — 1.2 here, 1.3 there — is guessing at
+   what Instrument Sans already knows. `normal` reproduces the designed rhythm by
+   construction and survives a change of typeface; a ratio has to be re-derived
+   every time one of the two changes.                                          */
+
+.pname, .klabel, .ticks,
+.sgrid .k, .sgrid .v, .rank .n, .rank .a, .rank .m, .rank .sc,
+.slider .lab { line-height: normal; }
+
+/* And a second trap in `all: unset`, beyond the box-sizing one noted above:
+   `unset` means *inherit* for an inherited property, so on a reset control it
+   does not restore the browser's `normal` — it pulls the body's 1.5 straight
+   back in, and outranks any earlier rule that tried to set it. The reset rules
+   below therefore each declare their own line-height inline. */
 
 /* -------------------------------------------------------------------- tabs */
 
 .tabs {
-  display: flex; gap: 2px; padding: var(--s2) var(--s3) 0;
-  border-bottom: 1px solid var(--line);
+  display: flex; gap: 26px; padding: 0 22px;
+  border-bottom: 1px solid var(--line); flex: none;
 }
 .tabs button {
-  all: unset; cursor: pointer; flex: 1; text-align: center;
-  padding: var(--s2) 0 var(--s3); font-size: 12px; color: var(--text-3);
-  border-bottom: 2px solid transparent; transition: color .15s, border-color .15s;
+  all: unset; box-sizing: border-box; cursor: pointer; padding: 14px 0 12px;
+  font-family: var(--sans); font-size: 13px; line-height: normal; color: var(--t6);
+  border-bottom: 2px solid transparent; transition: color 200ms ease;
 }
-.tabs button:hover { color: var(--text-2); }
-.tabs button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs button:hover { color: var(--t2); }
+.tabs button[aria-pressed="true"] { color: var(--t0); border-bottom-color: var(--accent); }
 
-.tabbody { flex: 1; overflow-y: auto; }
-.tabpane { padding: var(--s4); }
+/* The panes are unpadded: the metric rows are full-bleed, with a coloured edge
+   flush to the panel wall, and every block inside them carries its own inset. */
+.tabpane { padding: 0; }
 
-/* ------------------------------------------------------------------ layers */
+/* ----------------------------------------------------------- metric rows */
 
-.seg { display: flex; flex-direction: column; gap: 2px; }
-.seg button {
-  all: unset; cursor: pointer; display: flex; align-items: baseline;
-  justify-content: space-between; gap: var(--s2);
-  padding: var(--s2) var(--s3); border-radius: var(--r1);
-  font-size: 12.5px; color: var(--text-2);
-  border: 1px solid transparent; transition: background .15s, color .15s;
+.metrics { padding: 8px 0 6px; }
+.metrics button {
+  all: unset; box-sizing: border-box; cursor: pointer; display: flex; width: 100%;
+  align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 13px 22px; border-left: 2px solid transparent;
+  font-family: var(--sans); font-size: 14px; line-height: normal; color: var(--t4);
+  transition: background 200ms ease, color 200ms ease;
 }
-.seg button:hover { background: rgba(255,255,255,.05); color: var(--text); }
-.seg button[aria-pressed="true"] {
-  background: var(--accent-dim); color: var(--text);
-  border-color: rgba(78,168,222,.35);
+.metrics button:hover { color: var(--t1); background: rgba(237, 231, 220, .035); }
+.metrics button[aria-pressed="true"] {
+  color: var(--t0); background: rgba(237, 231, 220, .06); border-left-color: var(--accent);
 }
-.seg button .u { font-family: var(--mono); font-size: 10px; color: var(--text-3); }
-.seg button[aria-pressed="true"] .u { color: var(--accent); }
+.metrics button .u {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--t7);
+}
 
 /* ------------------------------------------------------------------ legend */
 
-#legend { margin-top: var(--s4); }
-#legend .ramp { height: 8px; border-radius: 2px; }
-#legend .ticks {
-  display: flex; justify-content: space-between; margin-top: 3px;
-  font-family: var(--mono); font-size: 10px; color: var(--text-3);
-}
-#legend .cap {
-  margin: var(--s2) 0 0; font-size: 11.5px; color: var(--text-2); line-height: 1.5;
+.lblock { padding: 4px 22px 20px; }
+.mdesc { margin: 0 0 20px; font-size: 12.5px; line-height: 1.7; color: var(--t4); text-wrap: pretty; }
+.ramp { height: 8px; border-radius: 1px; }
+.ticks {
+  display: flex; justify-content: space-between; margin-top: 7px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .06em; color: var(--t7);
 }
 
 /* ------------------------------------------------------------------ camera */
 
-.camrow { display: flex; gap: var(--s1); margin-top: var(--s5); flex-wrap: wrap; }
-.camrow button {
-  all: unset; cursor: pointer; padding: var(--s2) var(--s3); border-radius: var(--r1);
-  font-size: 11.5px; color: var(--text-2); border: 1px solid var(--line);
-  transition: all .15s;
+.cblock { padding: 0 22px 22px; }
+.chead {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 11px;
 }
-.camrow button:hover { color: var(--text); border-color: var(--line-strong); }
-.camrow button[aria-pressed="true"] {
-  background: var(--accent-dim); color: var(--text); border-color: rgba(78,168,222,.4);
+.klabel { font-family: var(--mono); font-size: 10px; letter-spacing: .2em; color: var(--t7); }
+
+/* An underlined monospace word, the design's one and only text button. */
+.link {
+  all: unset; box-sizing: border-box; cursor: pointer; font-family: var(--mono); font-size: 10px;
+  line-height: normal; letter-spacing: .16em; color: var(--t5);
+  border-bottom: 1px solid transparent;
+  transition: color 200ms ease, border-color 200ms ease;
 }
-.hint {
-  margin: var(--s2) 0 0; font-family: var(--mono);
-  font-size: 10px; color: var(--text-3); line-height: 1.55;
+.link:hover { color: var(--t0); border-bottom-color: rgba(237, 231, 220, .5); }
+
+
+.keys {
+  margin: 12px 0 0; font-family: var(--mono); font-size: 9.5px;
+  line-height: 1.9; letter-spacing: .1em; color: var(--t6);
 }
 
-/* --------------------------------------------------------------------- time */
+/* --------------------------------------------------------- selection card
 
-#time .row { display: flex; align-items: center; gap: var(--s3); }
-#time .hours { display: flex; gap: var(--s1); flex: 1; }
-#time .hours button {
-  all: unset; cursor: pointer; flex: 1; text-align: center;
-  padding: var(--s2) 0; border-radius: var(--r1);
-  font-family: var(--mono); font-size: 11px; color: var(--text-3);
-  border: 1px solid var(--line); transition: all .15s;
-}
-#time .hours button:hover { color: var(--text); border-color: var(--line-strong); }
-#time .hours button[aria-pressed="true"] {
-  background: var(--accent-dim); color: var(--text); border-color: rgba(78,168,222,.4);
-}
-#time .play {
-  all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: 50%;
-  border: 1px solid var(--line-strong); display: grid; place-items: center;
-  color: var(--text-2); font-size: 10px; flex-shrink: 0; transition: all .15s;
-}
-#time .play:hover { color: var(--text); border-color: var(--accent); }
-#time .meta {
-  display: flex; gap: var(--s4); flex-wrap: wrap;
-  font-family: var(--mono); font-size: 10px; color: var(--text-3);
-  border-top: 1px solid var(--line); padding-top: var(--s2);
-}
-#time .meta b { color: var(--text-2); font-weight: 500; }
+   The building the cursor picked, at the top of the left panel's scroll body
+   rather than in place of the ranking on the right. Two reasons: the ranking is
+   the thing you are working down, so losing it on every click was hostile; and
+   the numbers about one address belong beside the controls that change what is
+   being measured, not across the screen from them.                            */
 
-/* --------------------------------------------------------------- right side */
+#selcard {
+  border-bottom: 1px solid var(--line); background: var(--panel-tint);
+  padding: 20px 22px 24px; animation: hcRise 420ms var(--ease) backwards;
+}
+#selcard[hidden] { display: none; }
+#selcard .shead {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+#selcard .addr {
+  font-family: var(--serif); font-size: 26px; line-height: 1.15; color: var(--t0);
+}
+#selcard .close {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none; font-family: var(--mono);
+  font-size: 10px; line-height: normal; letter-spacing: .16em; color: var(--t7);
+  transition: color 200ms ease;
+}
+#selcard .close:hover { color: var(--t0); }
 
-#side .hd {
-  padding: var(--s4) var(--s4) var(--s3);
-  border-bottom: 1px solid var(--line); flex-shrink: 0;
-}
-#side .hd h2 {
-  margin: 0 0 3px; font-size: 11px; font-weight: 600;
-  letter-spacing: .14em; text-transform: uppercase;
-}
-#side .hd p { margin: 0; font-size: 11px; color: var(--text-3); line-height: 1.5; }
-#side .body { flex: 1; overflow-y: auto; padding: var(--s2) 0; }
+.sgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin-top: 20px; }
+.sgrid .k { font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; color: var(--t7); }
+.sgrid .v { margin-top: 5px; font-family: var(--mono); font-size: 15px; color: var(--t1); }
 
-.rank {
-  display: grid; grid-template-columns: 20px 1fr auto; gap: var(--s3);
-  padding: var(--s3) var(--s4); cursor: pointer;
-  border-left: 2px solid transparent; transition: background .12s;
-}
-.rank:hover { background: rgba(255,255,255,.04); }
-.rank.on { background: var(--accent-dim); border-left-color: var(--accent); }
-.rank .n { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); padding-top: 2px; }
-.rank .who .a { font-size: 12.5px; color: var(--text); font-weight: 500; }
-.rank .who .b {
-  font-family: var(--mono); font-size: 10px; color: var(--text-3);
-  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.rank .sc { text-align: right; }
-.rank .sc .v { font-family: var(--mono); font-size: 15px; color: var(--text); line-height: 1.1; }
-.rank .sc .l {
-  font-size: 8.5px; color: var(--text-3);
-  letter-spacing: .08em; text-transform: uppercase;
+/* The disclosure, and the sub-sections behind it: the vertical profile, the
+   score breakdown, the reasons, the actions. Headed in the same monospace label
+   as CAMERA, so the card reads as a continuation of the panel rather than a
+   document dropped into it. */
+#selcard .more { display: block; margin-top: 20px; }
+#selcard .selmore[hidden] { display: none; }
+#selcard .sec { margin-top: 26px; }
+#selcard .sec > .klabel { display: block; margin-bottom: 11px; }
+
+.chart { width: 100%; display: block; }
+.chart text { font-family: var(--mono); font-size: 9px; fill: var(--t7); }
+.clegend {
+  margin: 8px 0 0; font-family: var(--mono); font-size: 9.5px;
+  line-height: 1.8; letter-spacing: .06em; color: var(--t7);
 }
 
-/* ------------------------------------------------------------------ detail */
-
-#detail { padding: var(--s4); }
-#detail .back {
-  all: unset; cursor: pointer; font-size: 11px; color: var(--accent);
-  font-family: var(--mono); margin-bottom: var(--s4); display: inline-block;
-}
-#detail h3 {
-  margin: var(--s4) 0 var(--s2); font-size: 10px; font-weight: 600;
-  letter-spacing: .14em; text-transform: uppercase; color: var(--text-3);
-}
-#detail h3:first-of-type { margin-top: 0; }
-#detail .sub {
-  font-family: var(--mono); font-size: 10.5px; color: var(--text-3);
-  line-height: 1.6; margin-bottom: var(--s4);
-}
-
-.kv { display: grid; grid-template-columns: 1fr auto; gap: 5px var(--s3); margin-bottom: var(--s4); }
-.kv dt { font-size: 12px; color: var(--text-2); }
-.kv dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--text); text-align: right; }
-
-.bars { margin-bottom: var(--s4); }
-.bars .b { margin-bottom: 7px; }
+.bars .b { margin-bottom: 9px; }
 .bars .b .lab {
-  display: flex; justify-content: space-between; font-size: 11px;
-  color: var(--text-2); margin-bottom: 3px;
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 11.5px; color: var(--t4); margin-bottom: 4px;
 }
-.bars .b .lab span:last-child { font-family: var(--mono); color: var(--text-3); }
-.bars .b .tr { height: 4px; background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden; }
-.bars .b .tr i { display: block; height: 100%; border-radius: 2px; }
-
-.why { margin: 0 0 var(--s4); padding: 0; }
-.why li {
-  font-size: 11.5px; color: var(--text-2); line-height: 1.55; margin-bottom: 7px;
-  list-style: none; padding-left: var(--s3); position: relative;
+.bars .b .lab span:last-child { font-family: var(--mono); font-size: 10px; color: var(--t7); }
+.bars .b .tr { height: 2px; background: rgba(237, 231, 220, .12); }
+.bars .b .tr i { display: block; height: 100%; }
+.bars .grp {
+  margin: 0 0 10px; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .16em; color: var(--t7);
 }
-.why li:before {
-  content: ''; position: absolute; left: 0; top: 7px;
-  width: 4px; height: 4px; border-radius: 50%; background: var(--text-3);
+.bars .grp + .b { margin-top: 0; }
+
+ul.why { margin: 0; padding: 0; list-style: none; }
+ul.why li {
+  position: relative; padding-left: 14px; margin-bottom: 9px;
+  font-size: 12px; line-height: 1.65; color: var(--t4); text-wrap: pretty;
+}
+ul.why li:before {
+  content: ''; position: absolute; left: 0; top: 8px;
+  width: 4px; height: 1px; background: var(--accent);
 }
 
-.act { border: 1px solid var(--line); border-radius: var(--r2); padding: var(--s3); margin-bottom: var(--s2); }
-.act .t { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
-.act .r { font-size: 11px; color: var(--text-2); line-height: 1.5; }
-.act .p { font-family: var(--mono); font-size: 9.5px; color: var(--text-3); line-height: 1.45; margin-top: var(--s2); }
+.act { border-top: 1px solid var(--line); padding: 13px 0 0; margin-top: 13px; }
+.act:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+.act .t { font-size: 13px; color: var(--t1); margin-bottom: 5px; }
+.act .r { font-size: 12px; line-height: 1.65; color: var(--t4); text-wrap: pretty; }
+.act .p {
+  margin-top: 8px; font-family: var(--mono); font-size: 9.5px;
+  line-height: 1.7; letter-spacing: .08em; color: var(--t7);
+}
 
-.chart { width: 100%; }
-.chart text { font-family: var(--mono); font-size: 9px; fill: var(--text-3); }
+/* ------------------------------------------------------------- what if */
 
-/* --------------------------------------------------------------- scenarios */
+.wblock { padding: 20px 22px 22px; }
+.wlede { margin: 0 0 24px; font-size: 12.5px; line-height: 1.7; color: var(--t4); text-wrap: pretty; }
 
-.sctab { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: var(--s3); }
+.sctab { width: 100%; border-collapse: collapse; font-size: 11px; }
 .sctab th {
-  text-align: right; font-weight: 500; color: var(--text-3); font-size: 9px;
-  letter-spacing: .06em; text-transform: uppercase; padding: 0 3px var(--s2);
+  text-align: right; font-weight: 400; padding: 0 3px 9px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--t7);
   border-bottom: 1px solid var(--line);
 }
 .sctab th:first-child { text-align: left; }
+.sctab th:not(:first-child), .sctab td:not(:first-child) { width: 15%; white-space: nowrap; }
 .sctab td {
-  padding: 6px 3px; font-family: var(--mono); text-align: right;
-  border-bottom: 1px solid rgba(255,255,255,.035); color: var(--text);
+  padding: 8px 3px; font-family: var(--mono); font-size: 11.5px; text-align: right;
+  border-bottom: 1px solid var(--line-faint); color: var(--t1);
 }
-.sctab td:first-child { text-align: left; font-family: var(--sans); color: var(--text-2); }
-.sctab .neg { color: var(--measured); }
-.sctab .pos { color: var(--warn); }
-.sctab .zero { color: var(--text-3); }
+.sctab td:first-child {
+  text-align: left; font-family: var(--sans); font-size: 12.5px; color: var(--t4);
+}
+.sctab tbody tr { transition: background 200ms ease; }
+.sctab tbody tr:hover { background: rgba(237, 231, 220, .04); }
+.sctab tbody tr.on { background: rgba(237, 231, 220, .07); }
+.sctab tbody tr.on td:first-child { color: var(--t0); }
+.sctab .neg { color: var(--good); }
+.sctab .pos { color: var(--accent); }
+.sctab .zero { color: var(--t8); }
+
+/* The peak readout under the table: one big serif figure and the delta beside
+   it, the design's standard way of ending a block that answers a question. */
+.peak {
+  border-top: 1px solid var(--line); margin-top: 20px; padding-top: 18px;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 14px;
+}
+.peak .v { margin-top: 8px; font-family: var(--serif); font-size: 42px; line-height: 1; color: var(--t0); }
+.peak .rt { text-align: right; }
+.peak .d { font-family: var(--mono); font-size: 11px; }
+
+/* ----------------------------------------------------------------- ask */
+
+.ablock { padding: 20px 22px 22px; }
+.ablock textarea {
+  width: 100%; background: rgba(0, 0, 0, .25); color: var(--t1);
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  padding: 10px 12px; font-family: var(--sans); font-size: 12.5px;
+  line-height: 1.6; resize: vertical; outline: none;
+  transition: border-color 200ms ease;
+}
+.ablock textarea:focus { border-color: var(--line-hi); }
+.ablock textarea::placeholder { color: var(--t7); }
+.askbtn {
+  all: unset; box-sizing: border-box; cursor: pointer; margin-top: 10px; padding: 9px 20px;
+  border: 1px solid var(--line-hi); border-radius: var(--r);
+  background: rgba(237, 231, 220, .1); color: var(--t0);
+  font-family: var(--sans); font-size: 13px;
+  transition: all 240ms var(--ease);
+}
+.askbtn:hover { background: rgba(237, 231, 220, .16); }
+.answer { margin-top: 18px; font-size: 12.5px; line-height: 1.7; color: var(--t4); }
+.answer b { color: var(--t1); font-weight: 500; }
+.chips { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
+.chips button {
+  all: unset; box-sizing: border-box; cursor: pointer; padding: 9px 11px; border-radius: var(--r);
+  border: 1px solid var(--line); color: var(--t6);
+  font-size: 11.5px; line-height: 1.5; text-wrap: pretty;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.chips button:hover { color: var(--t1); border-color: var(--line-ctl); }
+
+.note {
+  margin: 12px 0 0; font-family: var(--mono); font-size: 10px;
+  line-height: 1.8; letter-spacing: .06em; color: var(--t7);
+}
+.note.bad { color: var(--accent); }
+
+/* --------------------------------------------------------------- ranking */
+
+.rank {
+  all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: left;
+  padding: 15px 20px; border-bottom: 1px solid var(--line-faint);
+  border-left: 2px solid transparent; transition: background 200ms ease;
+}
+.rank:hover { background: rgba(237, 231, 220, .05); }
+.rank.on { background: rgba(237, 231, 220, .07); border-left-color: var(--accent); }
+.rank .r1 { display: flex; align-items: baseline; gap: 14px; }
+.rank .n { flex: none; width: 18px; font-family: var(--mono); font-size: 11px; color: var(--t7); }
+.rank .a { flex: 1; font-size: 14.5px; color: var(--t1); letter-spacing: -.005em; }
+.rank .sc { flex: none; font-family: var(--mono); font-size: 17px; }
+.rank .r2 {
+  display: flex; align-items: center; gap: 14px; margin-top: 8px; padding-left: 32px;
+}
+/* The meta line wraps rather than eliding. This model's addresses run to
+   "35 floors · 130 m · 1955 · 1,026 homes", which is a few characters past what
+   the row has room for, and an ellipsis there drops a figure — the number of
+   homes behind the wall, which is half the reason the row is ranked where it is.
+   Rows are then not all the same height, and that is the correct trade. */
+.rank .m {
+  flex: 1; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; color: var(--t7);
+}
+.rank .bar { flex: none; width: 66px; height: 2px; background: rgba(237, 231, 220, .12); }
+.rank .bar i { display: block; height: 100%; }
+
+/* ------------------------------------------------------------ bottom rail */
+
+#time .rail {
+  pointer-events: auto; max-width: 100%; flex: 1 1 auto;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 6px 8px;
+  padding: 10px 14px; border-radius: var(--r2);
+  background: var(--panel); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--line-panel);
+  animation: hcUp 520ms var(--ease) 140ms backwards;
+  transition: transform 560ms var(--ease), opacity 300ms ease;
+}
+#time .play {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none; width: 30px; height: 30px;
+  border-radius: 50%; border: 1px solid rgba(237, 231, 220, .3);
+  display: grid; place-items: center; color: var(--t0);
+  transition: border-color 200ms ease, background 200ms ease;
+}
+#time .play:hover { border-color: var(--t0); background: rgba(237, 231, 220, .08); }
+#time .hours { display: flex; flex-wrap: wrap; gap: 8px; }
+#time .hours button {
+  all: unset; box-sizing: border-box; cursor: pointer; padding: 8px 13px;
+  border: 1px solid rgba(237, 231, 220, .12); border-radius: var(--r);
+  font-family: var(--mono); font-size: 11px; line-height: normal;
+  letter-spacing: .1em; color: var(--t5);
+  transition: all 200ms ease;
+}
+#time .hours button:hover { color: var(--t1); border-color: rgba(237, 231, 220, .28); }
+#time .hours button[aria-pressed="true"] {
+  background: rgba(237, 231, 220, .12); border-color: rgba(237, 231, 220, .4); color: var(--t0);
+}
+.vsep { width: 1px; height: 20px; background: rgba(237, 231, 220, .12); margin: 0 2px; }
+.sunline {
+  flex-basis: 100%; margin-top: 2px; padding-top: 8px;
+  border-top: 1px solid var(--line); text-align: center;
+  font-family: var(--mono); font-size: 10px; line-height: 1.55;
+  letter-spacing: .06em; color: var(--t6); text-wrap: pretty;
+}
+.sunline b { color: var(--t2); font-weight: 400; }
+
+/* --------------------------------------------------------- panel collapse
+
+   Folding slides a panel off its own edge rather than hiding it, and the reopen
+   handle is a tab on the wall where the panel used to be — a vertical strip on
+   the sides, a lip at the bottom. The handle lives outside the panel, because a
+   control inside a folded panel is a control you cannot reach.                 */
+
+#left.folded { transform: translateX(calc(-100% - 30px)); opacity: 0; pointer-events: none; }
+#side.folded { transform: translateX(calc(100% + 30px)); opacity: 0; pointer-events: none; }
+#time.folded .rail { transform: translateY(calc(100% + 44px)); opacity: 0; pointer-events: none; }
+
+.rehandle {
+  all: unset; box-sizing: border-box; cursor: pointer; position: absolute; z-index: 21;
+  line-height: normal;
+  background: rgba(13, 12, 11, .86);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid rgba(237, 231, 220, .14);
+  color: var(--t2); font-family: var(--mono); font-size: 10px; letter-spacing: .24em;
+  animation: hcFade 320ms ease backwards;
+  transition: color 200ms ease, background 200ms ease;
+}
+.rehandle:hover { color: var(--t0); background: var(--panel-raised); }
+.rehandle[hidden] { display: none; }
+.rehandle.left {
+  top: 50%; left: 0; transform: translateY(-50%);
+  border-left: none; border-radius: 0 var(--r2) var(--r2) 0;
+  padding: 22px 9px; writing-mode: vertical-rl;
+}
+.rehandle.right {
+  top: 50%; right: 0; transform: translateY(-50%);
+  border-right: none; border-radius: var(--r2) 0 0 var(--r2);
+  padding: 22px 9px; writing-mode: vertical-rl;
+}
+#unfold-bottom-wrap {
+  position: absolute; z-index: 21; bottom: 0; left: 0; right: 0;
+  display: flex; justify-content: center; pointer-events: none;
+}
+#unfold-bottom-wrap[hidden] { display: none; }
+.rehandle.bottom {
+  position: static; pointer-events: auto;
+  border-bottom: none; border-radius: var(--r2) var(--r2) 0 0; padding: 9px 20px;
+}
 
 /* ------------------------------------------------------------------- hover */
 
 #hover {
   position: absolute; z-index: 30; pointer-events: none; display: none;
-  padding: var(--s2) var(--s3); font-family: var(--mono); font-size: 11px;
-  background: var(--panel-hi); border: 1px solid var(--line-strong);
-  border-radius: var(--r1); box-shadow: var(--shadow); max-width: 250px;
+  padding: 10px 13px; max-width: 260px;
+  background: var(--panel-raised); border: 1px solid var(--line-ctl);
+  border-radius: var(--r2);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
 }
-#hover .a { color: var(--text); }
-#hover .b { color: var(--text-3); font-size: 10px; }
+#hover .a { font-size: 13px; color: var(--t0); line-height: 1.35; }
+#hover .b {
+  margin-top: 5px; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .08em; color: var(--t7); line-height: 1.6;
+}
+#hover .t { margin-top: 6px; font-family: var(--mono); font-size: 14px; color: var(--t1); }
+
+/* ------------------------------------------------- photoreal context layer */
+
+#photoreal { padding: 20px 22px 22px; border-top: 1px solid var(--line); }
+#pr-toggle {
+  all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center;
+  padding: 10px 0; border: 1px solid var(--line-ctl); border-radius: var(--r);
+  font-family: var(--sans); font-size: 13px; line-height: normal; color: var(--t4);
+  transition: all 240ms var(--ease);
+}
+#pr-toggle:hover { color: var(--t1); border-color: rgba(237, 231, 220, .3); }
+#pr-toggle[aria-pressed="true"] {
+  background: rgba(237, 231, 220, .1); border-color: var(--line-hi); color: var(--t0);
+}
+#pr-key { margin-top: 14px; }
+#pr-key > label {
+  display: block; margin-bottom: 6px; font-family: var(--mono);
+  font-size: 10px; letter-spacing: .16em; color: var(--t7);
+}
+#pr-key-input {
+  all: unset; box-sizing: border-box; box-sizing: border-box; width: 100%; padding: 9px 11px;
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  font-family: var(--mono); font-size: 11px; color: var(--t1);
+  background: rgba(0, 0, 0, .25); transition: border-color 200ms ease;
+}
+#pr-key-input:focus { border-color: var(--line-hi); }
+.prbtns { display: flex; gap: 8px; margin-top: 10px; }
+.prbtns button {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: 1; text-align: center; padding: 9px 0;
+  border: 1px solid var(--line-ctl); border-radius: var(--r);
+  font-family: var(--sans); font-size: 12.5px; line-height: normal; color: var(--t4);
+  transition: all 240ms var(--ease);
+}
+.prbtns button:hover { color: var(--t1); border-color: rgba(237, 231, 220, .3); }
+
+#pr-look { margin-top: 16px; display: flex; flex-direction: column; gap: 14px; }
+#pr-look > label {
+  display: flex; flex-direction: column; gap: 7px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--t7);
+}
+#pr-look .lrow { display: flex; justify-content: space-between; gap: 10px; }
+#pr-look output { color: var(--t2); }
+
+/* A range input styled to the same 2px track and 12px knob the What-if sliders
+   use, so the two kinds of slider in this interface look like one control. */
+#pr-look input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 12px;
+  background: transparent; outline: none; margin: 0;
+}
+#pr-look input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px; background: rgba(237, 231, 220, .16);
+}
+#pr-look input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; margin-top: -5px;
+  border-radius: 50%; background: var(--t0); border: none; cursor: pointer;
+}
+#pr-look input[type="range"]::-moz-range-track { height: 2px; background: rgba(237, 231, 220, .16); }
+#pr-look input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--t0);
+  border: none; cursor: pointer;
+}
+#pr-look label.prcheck {
+  flex-direction: row; align-items: center; gap: 9px; cursor: pointer;
+  line-height: 1.5; letter-spacing: .06em; text-transform: none; font-size: 10.5px;
+}
+#pr-look label.prcheck input { accent-color: var(--accent); width: auto; flex: none; height: auto; }
+
+/* ------------------------------------------------------------- what-if sliders */
+
+.slider { margin-bottom: 26px; }
+.slider .lab {
+  display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;
+}
+.slider .lab .n { font-size: 13.5px; color: var(--t1); }
+.slider .lab .v { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.slider .grab { cursor: pointer; padding: 8px 0; }
+.slider .tr { position: relative; height: 2px; background: rgba(237, 231, 220, .16); }
+.slider .tr i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
+.slider .tr b {
+  position: absolute; top: -5px; width: 12px; height: 12px; margin-left: -6px;
+  border-radius: 50%; background: var(--t0);
+}
+.slider .eff {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .08em; color: var(--t7);
+}
+
+/* ----------------------------------------------------------------- credits
+
+   Google's terms require the aggregated per-tile credits to be visible and kept
+   clearly distinct from anyone else's attribution, so the strip names both
+   sides rather than running them together.                                    */
+
+/* The strip is centred at the very bottom of the frame, which is directly under
+   the clock — fine at the default 24px inset and not at the 16px one the narrow
+   breakpoint uses, where the two overlapped. So the rail lifts out of its way
+   whenever the strip is actually on screen, which is only when someone has
+   turned the photoreal layer on. */
+body.has-credits #time { bottom: calc(var(--inset) + 26px); }
+
+#credits {
+  position: absolute; z-index: 22; left: 50%; transform: translateX(-50%); bottom: 4px;
+  display: flex; gap: 7px; align-items: baseline; flex-wrap: wrap; justify-content: center;
+  max-width: min(900px, 92vw); padding: 5px 11px;
+  background: rgba(10, 9, 8, .72); border: 1px solid var(--line);
+  border-radius: var(--r); backdrop-filter: blur(6px);
+  font-family: var(--mono); font-size: 9px; letter-spacing: .1em; color: var(--t6);
+  pointer-events: none;
+}
+#credits .clabel { color: var(--t8); }
+#credits .csep { color: var(--t8); }
 
 /* ----------------------------------------------------------------- utility */
 
 /* `all: unset` on the control buttons also resets `display`, which silently
-   defeats the hidden attribute — the "next street" button stayed visible in
-   fly-over mode because of it. This has to outrank that reset. */
+   defeats the hidden attribute. This has to outrank that reset. */
 [hidden] { display: none !important; }
 
-/* --------------------------------------------------------- panel collapse
-
-   The panels cover a great deal of a 3D view whose whole point is being looked
-   at, so either can be folded away. Collapsing slides the panel off its own
-   edge rather than hiding it, which keeps the reopen handle exactly where the
-   panel was and avoids the layout jump that display:none would cause.        */
-
-#left, #side { transition: transform .22s ease, opacity .22s ease; }
-#left.folded  { transform: translateX(calc(-100% - var(--s4) - 4px)); opacity: 0; }
-#side.folded  { transform: translateX(calc(100% + var(--s4) + 4px)); opacity: 0; }
-#left.folded, #side.folded { pointer-events: none; }
-
-.fold {
-  all: unset; cursor: pointer; position: absolute; top: var(--s3);
-  width: 22px; height: 22px; border-radius: 6px;
-  display: grid; place-items: center; z-index: 2;
-  color: var(--text-3); font-family: var(--mono); font-size: 13px; line-height: 1;
-  border: 1px solid var(--line); background: rgba(255,255,255,.03);
-  transition: color .15s, border-color .15s;
-}
-.fold:hover { color: var(--text); border-color: var(--line-strong); }
-#left .fold { right: var(--s3); }
-#side .fold { left: var(--s3); }
-
-/* The reopen handles live outside the panels so they survive the fold. */
-.unfold {
-  all: unset; cursor: pointer; position: absolute; top: var(--s4); z-index: 21;
-  padding: var(--s2) 7px; border-radius: var(--r1);
-  font-family: var(--mono); font-size: 12px; color: var(--text-2);
-  border: 1px solid var(--line); background: var(--panel);
-  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-  box-shadow: var(--shadow); transition: color .15s, border-color .15s;
-}
-.unfold:hover { color: var(--text); border-color: var(--accent); }
-#unfold-left  { left: var(--s4); }
-#unfold-right { right: var(--s4); }
-
-/* With a panel folded the time bar reclaims the space it was leaving for it. */
-#time.wide-left  { left: calc(var(--s4) + 46px); }
-#time.wide-right { right: calc(var(--s4) + 46px); }
-
 .mono { font-family: var(--mono); }
-.dim  { color: var(--text-3); }
+.dim  { color: var(--t7); }
 .small { font-size: 11px; }
-.hide { display: none !important; }
 
-::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,.09); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.16); }
+::-webkit-scrollbar-thumb { background: rgba(237, 231, 220, .16); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(237, 231, 220, .3); }
 
+/* Narrower than this the rail runs out of room between the two panels and its
+   own wrap turns one row of controls into three — the play button alone, then
+   the hours, then the fold chevron alone. Everything in it loses a few pixels
+   of padding instead, which keeps it a single row down to about 1000px. */
 @media (max-width: 1240px) {
-  #left { width: 280px; }
-  #side { width: 310px; }
-  #time { left: calc(280px + var(--s4) * 2); right: calc(310px + var(--s4) * 2); }
+  :root { --wl: 290px; --wr: 300px; --inset: 16px; }
+  #time .rail { gap: 6px; padding: 10px 12px; }
+  #time .hours { gap: 6px; }
+  #time .hours button { padding: 8px 9px; }
+  .vsep { margin: 0; }
 }
 
-/* ------------------------------------------------- photoreal context layer */
+@media (prefers-reduced-motion: reduce) {
+  #left .pnl, #side .pnl, #time .rail, #selcard, .rehandle { animation: none; }
+  #left, #side, #time, #time .rail { transition: none; }
+}
 
-#photoreal {
-  margin-top: var(--s5);
-  padding-top: var(--s4);
+
+/* ==========================================================================
+   THE YEAR AND THE ANALYST, in the design's terms
+   ==========================================================================
+
+   Everything below arrived with the year pivot, which was built against the
+   previous palette while the redesign was being drawn in parallel. Rather than
+   rewrite year.css and agent.css line by line, the old token names are defined
+   here in terms of the new ones: those two files then inherit the redesign
+   automatically, and there is exactly one place to look when a colour is wrong.
+   The names are kept because they are semantic — `--measured` versus
+   `--modelled` is a claim about provenance, not a colour, and the distinction
+   still has to survive.                                                      */
+
+:root {
+  --text:          var(--t0);
+  --text-2:        var(--t3);
+  --text-3:        var(--t7);
+  --line-strong:   var(--line-ctl);
+  --panel-hi:      var(--panel-raised);
+  --accent-dim:    rgba(217, 84, 46, 0.16);
+
+  /* Provenance. Measured keeps the design's green; modelled is the warm ochre
+     that sits between it and the accent without competing with the heat ramp. */
+  --measured:      var(--good);
+  --modelled:      #C9A063;
+
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px;
+  --r1: var(--r2); --r3: 6px;
+
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------------------------------------------------------------- analyst */
+
+/* The transcript is the scrolling thing, not the pane. A pane that scrolls puts
+   the composer off screen the moment the answer is longer than the panel, which
+   is every answer. */
+#tab-ask {
+  height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; min-height: 0;
+}
+#left-scroll:has(#tab-ask:not([hidden])) { overflow: hidden; }
+
+/* --------------------------------------------------- the two orderings */
+
+/* The wave ordering and the year ordering disagree, and that disagreement is
+   the year's main finding — so the switch sits at the top of the list rather
+   than inside a menu. The shape is the design's existing answer to "two or
+   three mutually exclusive choices". */
+.ordsw { display: flex; gap: 8px; padding: 0 22px 14px; }
+.ordsw button {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: 1; text-align: center;
+  padding: 9px 0; border: 1px solid rgba(237, 231, 220, .14); border-radius: var(--r);
+  font-family: var(--sans); font-size: 12.5px; line-height: normal; color: var(--t4);
+  transition: all 240ms var(--ease);
+}
+.ordsw button:hover { color: var(--t1); border-color: rgba(237, 231, 220, .3); }
+.ordsw button[aria-pressed="true"] {
+  background: rgba(237, 231, 220, .1); border-color: var(--line-hi); color: var(--t0);
+}
+
+/* Where the other ordering puts this building — the third line of a rank row. */
+.rank .r2 .other {
+  flex: none; font-family: var(--mono); font-size: 9.5px;
+  letter-spacing: .1em; color: var(--t8);
+}
+
+/* The right panel's subtitle now carries two ranks and a scored-population
+   note, so it needs room to wrap. */
+#side-sub { line-height: 1.6; }
+
+/* ------------------------------------------- moment layers vs year layers */
+
+/* One rule across the layer list. Without it the list reads as twelve
+   equivalent choices, and the two halves answer questions that are not
+   comparable: one is an hour, the other is 8,760 of them. */
+.layerrule {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 22px 6px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--t8);
+}
+.layerrule::before, .layerrule::after {
+  content: ''; flex: 1; height: 1px; background: var(--line);
+}
+
+/* ------------------------------------------------------- the frozen clock */
+
+/* An annual layer has no hour and no day. Saying so, and dimming the controls
+   it ignores, is the alternative to letting somebody scrub the year while
+   looking at a field that cannot change. */
+#time.frozen .hours, #time.frozen .yearrow { opacity: .38; pointer-events: none; }
+#time .frozen-note {
+  margin: 10px 0 0; font-family: var(--mono); font-size: 10px;
+  line-height: 1.7; letter-spacing: .06em; color: var(--t7);
+}
+
+/* ------------------------------------------------------- the year axis row */
+
+/* The rail already wraps — .sunline breaks to its own line with flex-basis —
+   so the year strip uses the same mechanism rather than a second layout. */
+#time .yearrow {
+  flex-basis: 100%; display: flex; align-items: center; gap: 8px;
+  padding-bottom: 10px; margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+#time .yearrow #year-host { flex: 1; min-width: 0; }
+#time .frozen-note { flex-basis: 100%; text-align: center; }
+
+/* The two population ranks, under the address on the selection card. They are
+   the year's disagreement stated on the one building you are looking at. */
+#selcard .addr .ranks {
+  margin-top: 6px; font-family: var(--mono); font-size: 9.5px;
+  letter-spacing: .12em; color: var(--t7); font-weight: 400;
+}
+
+/* The transport row: play, the hours, the fold. One line, always. */
+#time .hourrow {
+  flex-basis: 100%; display: flex; flex-wrap: nowrap;
+  align-items: center; justify-content: center; gap: 8px; min-width: 0;
+}
+#time .hourrow .hours { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; }
+.sunline .sp { white-space: nowrap; }
+
+/* ------------------------------------------------------- the analyst launcher
+
+   It sits in the tab row, because that is where someone looks for the analyst,
+   but it is an action rather than a pane: it never takes the pressed state, and
+   it carries the arrow that means "this opens over the map". */
+.tabs button.tablaunch { display: flex; align-items: baseline; gap: 5px; }
+.tabs button.tablaunch .ext {
+  font-family: var(--mono); font-size: 9px; color: var(--t7);
+  transition: color 200ms ease, transform 200ms var(--ease);
+}
+.tabs button.tablaunch:hover .ext { color: var(--accent); transform: translate(1px, -1px); }
+.tabs button.tablaunch[aria-expanded="true"] { color: var(--t0); }
+.tabs button.tablaunch[aria-expanded="true"] .ext { color: var(--accent); }
+
+
+/* The selection card, while a surface below it is already a document about the
+   same building. Hidden rather than restyled: the two carry the same address
+   and the same six figures, and a shorter version of a thing directly above the
+   longer version of it reads as a rendering fault, not as a summary. */
+#selcard.under-doc { display: none; }
+
+
+/* The two halves of Decide, stacked in one column.
+ *
+ * They are separate modules with separate stylesheets and each carries its own
+ * heading, so the join needs almost nothing — but with no rule at all the
+ * what-if's first control reads as the last row of the floor schedule above it.
+ * A hairline and some air, the same treatment the layer rule in the metric list
+ * gets, and for the same reason: it says "different question" without saying
+ * "different place". */
+#tab-diagnose:not([hidden]) + #tab-whatif:not([hidden]) {
+  margin-top: 22px;
+  padding-top: 22px;
   border-top: 1px solid var(--line);
 }
-#photoreal .prhead { display: flex; }
-#pr-toggle {
-  all: unset; cursor: pointer; padding: var(--s2) var(--s3); border-radius: var(--r1);
-  font-size: 11.5px; color: var(--text-2); border: 1px solid var(--line);
-  transition: all .15s; width: 100%; text-align: center;
-}
-#pr-toggle:hover { color: var(--text); border-color: var(--line-strong); }
-#pr-toggle[aria-pressed="true"] {
-  background: var(--accent-dim); color: var(--text); border-color: rgba(78,168,222,.4);
-}
-#pr-key { margin-top: var(--s3); }
-#pr-key label {
-  display: block; font-family: var(--mono); font-size: 10px;
-  color: var(--text-3); margin-bottom: var(--s1); text-transform: uppercase;
-  letter-spacing: .04em;
-}
-#pr-key-input {
-  all: unset; box-sizing: border-box; width: 100%;
-  padding: var(--s2); border: 1px solid var(--line); border-radius: var(--r1);
-  font-family: var(--mono); font-size: 11px; color: var(--text);
-  background: rgba(0,0,0,.25);
-}
-#pr-key-input:focus { border-color: rgba(78,168,222,.5); }
-.prbtns { display: flex; gap: var(--s1); margin-top: var(--s2); }
-.prbtns button {
-  all: unset; cursor: pointer; flex: 1; text-align: center;
-  padding: var(--s2) 0; border-radius: var(--r1); font-size: 11px;
-  color: var(--text-2); border: 1px solid var(--line); transition: all .15s;
-}
-.prbtns button:hover { color: var(--text); border-color: var(--line-strong); }
-#pr-look { margin-top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
-#pr-look label {
-  font-family: var(--mono); font-size: 10px; color: var(--text-3);
-  display: flex; flex-direction: column; gap: var(--s1);
-}
-#pr-look output { float: right; color: var(--text-2); }
-#pr-look input[type="range"] { width: 100%; accent-color: var(--accent); }
-.prstatus {
-  margin: var(--s2) 0 0; font-family: var(--mono); font-size: 10px;
-  color: var(--text-3); min-height: 12px;
-}
-.prstatus.bad { color: var(--warn); }
-
-/* Google's terms require the aggregated per-tile credits to be visible and
- * kept clearly distinct from anyone else's attribution, so the strip names
- * both sides rather than running them together. */
-#credits {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: 8px;
-  z-index: 40; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;
-  justify-content: center; max-width: min(900px, 92vw);
-  padding: 5px 10px; border-radius: var(--r1);
-  background: rgba(4,6,10,.72); border: 1px solid var(--line);
-  backdrop-filter: blur(6px);
-  font-family: var(--mono); font-size: 9.5px; color: var(--text-2);
-  pointer-events: none;
-}
-#credits .clabel { color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; }
-#credits .csep { color: var(--text-3); }
-#pr-look label.prcheck {
-  flex-direction: row; align-items: center; gap: var(--s2);
-  cursor: pointer; line-height: 1.35;
-}
-#pr-look label.prcheck input { accent-color: var(--accent); width: auto; flex: none; }

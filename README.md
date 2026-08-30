@@ -16,43 +16,131 @@ The `fortyguard/` package wraps every endpoint the API exposes and handles the s
 
 ---
 
-## HeatCanyon — 3D street-canyon heat exposure (Manhattan)
+## HeatCanyon — a year of 3D street-canyon heat exposure (Manhattan)
 
 Beyond the endpoint walkthroughs below, this repo contains a full project built
 on the API: **[HeatCanyon](docs/HEATCANYON.md)**, which extends FortyGuard's 2 m
-air temperature into a three-dimensional exposure model of Midtown Manhattan.
+air temperature into a three-dimensional exposure model of Midtown Manhattan
+across a whole year, and puts an agent on top of it that re-solves the physics to
+answer questions.
 
 It reconstructs street-canyon geometry from NYC Open Data footprints, street
 widths and 2017 airborne LiDAR, solves a coupled surface energy balance for
-29,415 facade panels across eight hours of the July 2026 heat wave, ranks
-buildings by exposure against the city's Heat Vulnerability Index, and tests
-interventions by re-solving the physics rather than applying published
-coefficients. Google's Photorealistic 3D Tiles can be switched on underneath the
-data as recognisable context — off by default, and free at demo scale.
+29,415 facade panels in ten height bands, ranks buildings by exposure against the
+city's Heat Vulnerability Index, and tests interventions by re-solving the physics
+rather than applying published coefficients. Google's Photorealistic 3D Tiles can
+be switched on underneath the data as recognisable context — off by default, and
+free at demo scale.
 
-The web app opens with a short film: a globe carrying the real NASA GISTEMP
-warming record, the world's largest cities lighting up, and a dive that lands on
-Midtown and cross-fades into the live model. Every figure it narrates is read out
-of `meta.json`, `ranked.json` and the GISTEMP series at run time, so the
-voice-over updates itself when the pipeline does. Add `?intro=0` to skip it, or
-click *Skip to the map*; it is suppressed automatically under
+**It covers 8,760 hours, not one afternoon.** The temporal axis is ERA5
+reanalysis from Open-Meteo — free, no key — bias-corrected against FortyGuard on
+the one day both cover, and resolved at three tiers: the FortyGuard-measured event
+day and twelve monthly representative days at full facade resolution with
+ray-traced shadows, plus an 8,760-hour accumulation for the annual totals. The
+first thing the year said was that **the fifty buildings most at risk during a
+heat wave and the fifty most loaded across the year overlap by about a quarter**,
+which means a programme designed against either misses the other. See
+**[docs/YEAR.md](docs/YEAR.md)**.
+
+**It answers the question everyone asks next.** A wall at 57 °C is a finding;
+*so what do I do about it* is the decision, and for a long time the platform
+stopped one step short of it. The energy balance already contained the answer and
+was throwing it away: linearising the emission term splits each surface's excess
+over the air into three additive drivers — absorbed sun, longwave off the wall
+opposite, and radiation to a cold sky — and that decomposition is what selects a
+measure. Four buildings peaking at the same temperature can need four different
+ones. A floor heated by the building across the street will not notice any amount
+of shading; **its intervention is a coating on somebody else's facade**, which is
+a sentence a per-building recommendation list structurally cannot produce.
+
+On top of that sits a per-floor schedule with a cooling load in kW, a measure
+specified as a projection in metres on a named face over a named floor range —
+the geometry derived from the profile angle at the hour that band actually peaks,
+which is also why a horizontal overhang is the wrong device on a west wall — and
+a programme ordered by cost per person-hour of exposure avoided. Every figure
+with a currency symbol on it is labelled **assumed**, a softer tier than measured
+or modelled, and ships as a range rather than a midpoint. Facade shading does not
+pay back on energy alone, and the module says so. See
+**[docs/DECISIONS.md](docs/DECISIONS.md)**.
+
+**The analyst is Claude Code as a library.** `heatcanyon/agent/` builds a
+`ClaudeAgentOptions`, registers twenty in-process MCP tools over the solved
+model, and drives a turn in the background with a streaming transcript. It
+re-solves an intervention anywhere in the city over any window, runs Moran's I and
+Getis-Ord Gi\* with a false-discovery correction, writes its own scripts against
+the documented arrays, allocates a budget under four objectives, and **drives the
+map** — every tool call visible. It can search the open web for what the model
+does not hold, and cites everything it takes from it. See
+**[docs/AGENT.md](docs/AGENT.md)**.
+
+The web app — *The Urban Canyon* — opens with a short film: a globe carrying the
+real NASA GISTEMP warming record, the world's largest cities lighting up, and one
+unbroken fall from thirty-four thousand kilometres to three, onto Midtown, through
+a satellite pyramid that keeps resolving the whole way down. There is no cut at
+the bottom: the film drives the application's own camera through the last seconds
+of the descent, so the two renderers are showing the same viewpoint and the
+handover is a photograph turning into the model with the buildings standing up out
+of it. On a transport bar you can scrub, pause and step through.
+Every figure it narrates is read out of `meta.json`, `ranked.json` and the GISTEMP
+series at run time — and spelled as words, so the caption reads as prose and the
+speech synthesiser does not have to pronounce "°C". Add `?intro=0` to skip it,
+or click *Go straight to the atlas*; it is suppressed automatically under
 `prefers-reduced-motion`.
 
-When the film hands over, a guided tour walks through the controls — one
-spotlight and one card per panel, each step first putting the interface into the
-state it is describing. It runs once per browser and is replayed from the *Tour*
-chip in the masthead; `?intro=0` suppresses it too, and `?tour=1` forces it.
+What it hands over to is one screen: the instrument on the left — what is being
+measured, over what range, from what camera — the ranking on the right, and the
+clock along the bottom. Clicking any building opens its file at the top of the
+left panel without costing you the ranking. Each of the three regions folds away
+on its own (`[`, `]`, `\`, or `H` for all three), leaving a labelled tab on the
+wall it slid off. The whole interface is one warm near-black shell, one heat
+ramp, one accent, and monospace for every figure; the design language and the
+reasoning behind it are documented at the top of `web/css/app.css`.
+
+**The sky carries the hour.** It used to be a fixed near-black gradient, which
+was not merely flat but wrong about the one thing a sky in this application is
+for: walk into a canyon and look up and you got a black slot, at noon and at
+midnight alike. It now reads the same solar altitude and azimuth the pipeline
+ray-traced its shadows with, and draws the sun at its true position and true
+angular size, a haze glow banked on its bearing, and a gradient that lifts with
+the sun and goes out with it — restrained, because a photographic blue would be
+a second saturated field competing with the heat ramp. Standing in a canyon
+watching the disc cross the slot is the model's central claim made visible, and
+a test checks that the sun the sky draws is the sun the physics used: at every
+daylight hour, walls turned toward it are 77–96 % lit in the shadow field and
+walls turned away are 0 %.
+
+**Getting about is the conventions, not an invention.** Fly-over and walk are
+flown between rather than cut, so you can see where the street you land on sits
+in the city you were just looking at. In the fly-over, drag pans, right-drag
+turns, double-click closes in on what is under the pointer, and a compass on the
+canvas says which way north is and puts you back on it — which a model whose
+whole vocabulary is *south-west wall* and *the facade opposite* had been missing.
+On the street, dragging grabs the scene the way a panorama viewer does, you can
+look at the zenith, clicking the road ahead walks you to it, and all of it works
+under a finger as well as a mouse. `web/js/scene.js` documents what each of those
+replaced and why.
+
+A guided tour walks the controls when the film hands over — one spotlight and one
+card per control, each step first putting the interface into the state it is
+describing. It runs once per browser and is replayed from the **?** button beside
+the panel title; `?intro=0` suppresses it too, and `?tour=1` forces it.
 
 ```bash
-python -m heatcanyon.cli build      # solve the model (offline, cached)
-python -m heatcanyon.cli validate   # 12 validation checks
+python scripts/fetch_year.py        # the year's meteorology (free, no key)
+python -m heatcanyon.cli build      # solve the model (offline, cached, ~15 min)
+python -m heatcanyon.cli validate   # 20 validation checks
 python -m heatcanyon.cli serve      # http://127.0.0.1:8000
 python scripts/make_globe_assets.py # rebuild the opening film's globe assets
 ```
 
-**It runs with no API key.** The FortyGuard responses it used are committed under
-`data/manhattan/`, so the whole project reproduces offline for zero credits. The
+**It runs with no FortyGuard key.** The responses it used are committed under
+`data/manhattan/`, so the whole project reproduces offline for zero credits — and
+the year added none, because ERA5 via Open-Meteo needs no credential either. The
 entire build cost 74,900 of 2,000,000 hackathon credits.
+
+The analyst needs a Claude credential: a logged-in `claude` CLI (the default) or
+`ANTHROPIC_API_KEY` with `HEATCANYON_AGENT_AUTH=api_key`. Everything else works
+without one.
 
 Three API findings from that build are worth knowing if you are writing against
 these endpoints yourself:
@@ -65,6 +153,14 @@ these endpoints yourself:
   finest 60 m granularity costs the same as 100 m.
 - **`/v1/env_params` never returns `solar_irradiance`** despite listing it; the
   `analysis` argument is accepted but ignored server-side.
+
+And one finding about a *free* source that cost more to discover than any of
+them: **Open-Meteo returns wind speed in km/h by default**, and a cached response
+carrying km/h into a field expecting m/s is a 3.6x error in the convective
+coefficient. It had been silently cancelling a second error in that coefficient's
+intercept, so both were invisible until the year forced them apart. The whole
+episode is written up in
+[docs/YEAR.md](docs/YEAR.md#two-physics-corrections-the-year-forced).
 
 See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for the physics, the validation
 numbers, and an explicit account of what the model does *not* validate.

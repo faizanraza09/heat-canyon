@@ -1,0 +1,17 @@
+{
+  "run_id": "r17880442193644fa",
+  "question": "747 Second Avenue (BIN 1037175) has a north-east face that never gets direct sun, and it still runs hotter than the air on the street. Work out where that heat is actually coming from, using the attribution rather than assuming. Then test it properly: re-solve the physics for a treatment on whatever the source turns out to be, and compare that against the best thing I could do to 747 itself. Do not estimate or scale a coefficient. Tell me which wins, by how many kelvin, and what it would cost. Drive the map to what you find.",
+  "title": "747 Second Avenue (BIN 1037175) has a north-east face that never gets direct sun",
+  "state": "finished",
+  "queued_at": 1788044219.2989216,
+  "resume": null,
+  "model": "claude-sonnet-5",
+  "cost_usd": 1.894369,
+  "session_budget_usd": 40.0,
+  "session_spent_usd": 5.962495,
+  "started_at": 1788044219.299959,
+  "seconds": 836.2,
+  "session_id": "21391817-4b07-4117-a492-7dc53b5ad6e6",
+  "terminal_reason": "completed",
+  "frames": 155
+}

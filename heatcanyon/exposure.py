@@ -124,6 +124,31 @@ class BuildingExposure:
     priority_score: float = 0.0
     reasons: list[str] = field(default_factory=list)
 
+    # ---- the year, filled by `attach_annual` and scored by `score_annual`
+    #
+    # Kept separate from the fields above rather than folded into them, because
+    # they answer a different question and rest on a different source. Everything
+    # above is one day: the day FortyGuard was billed for, the day the validation
+    # applies to. Everything here is the whole year, anchored on bias-corrected
+    # reanalysis. Merging the two would produce a single number nobody could say
+    # the provenance of.
+    annual_facade_kh35: float = 0.0     # K.h of facade surface above 35 degC, per year
+    annual_facade_kh40: float = 0.0
+    annual_sun_hours: float = 0.0       # mean hours of direct beam per facade band
+    annual_dose_kwh: float = 0.0        # incident shortwave on the facade, kWh/m2/yr
+    annual_absorbed_kwh: float = 0.0
+    annual_facade_max_c: float = 0.0
+    annual_summer_mean_c: float = 0.0
+    annual_winter_mean_c: float = 0.0
+    annual_swing_k: float = 0.0
+    annual_month_of_peak: int = 0
+    annual_monthly_mean_c: list[float] = field(default_factory=list)
+    annual_hours_above_35: float = 0.0  # facade-hours above 35 degC per band, per year
+    annual_components: dict[str, float] = field(default_factory=dict)
+    annual_exposure_score: float = 0.0
+    annual_priority_score: float = 0.0
+    annual_reasons: list[str] = field(default_factory=list)
+
     @property
     def residential(self) -> bool:
         return (self.land_use in nyc.RESIDENTIAL_USES) or self.units_res > 0
@@ -236,6 +261,119 @@ def score_all(
 
     buildings.sort(key=lambda x: -x.priority_score)
     return buildings
+
+
+#: Annual exposure weights. Deliberately a DIFFERENT shape from the event-day
+#: weights above, because a year asks a different question of the same building.
+#:
+#: The event-day score is dominated by duration within one heat wave, which is
+#: what the epidemiology of an acute event turns on. Over a year the thing that
+#: matters is accumulated load and how relentless it is: a facade that spends
+#: 900 K.h above 35 degC across four months is a different problem from one that
+#: spends the same total in nine days, and the annual score is the one that can
+#: tell them apart. Sunlit hours carry real weight here because over a year they
+#: are the lever an intervention actually pulls.
+ANNUAL_EXPOSURE_WEIGHTS = {
+    "facade_dose": 0.30,     # K.h above 35 degC on the facade, modelled, per year
+    "sun_hours": 0.22,       # hours of direct beam per facade band, per year
+    "solar_dose": 0.18,      # incident shortwave, kWh/m2/yr, modelled
+    "peak": 0.14,            # annual maximum facade surface temperature, modelled
+    "relentlessness": 0.10,  # months in which the facade mean exceeds 30 degC
+    "enclosure": 0.06,       # 1 - SVF, measured geometry
+}
+
+
+def attach_annual(b: BuildingExposure, rec: dict) -> None:
+    """Copy one building's annual roll-up onto it. Pure plumbing, no scoring."""
+    b.annual_facade_kh35 = float(rec.get("kh35", 0.0))
+    b.annual_facade_kh40 = float(rec.get("kh40", 0.0))
+    b.annual_sun_hours = float(rec.get("sun_hours", 0.0))
+    b.annual_dose_kwh = float(rec.get("dose_kwh", 0.0))
+    b.annual_absorbed_kwh = float(rec.get("absorbed_kwh", 0.0))
+    b.annual_facade_max_c = float(rec.get("t_max", 0.0))
+    b.annual_summer_mean_c = float(rec.get("summer_mean", 0.0))
+    b.annual_winter_mean_c = float(rec.get("winter_mean", 0.0))
+    b.annual_swing_k = float(rec.get("swing", 0.0))
+    b.annual_month_of_peak = int(rec.get("month_of_peak", 0))
+    b.annual_monthly_mean_c = [float(v) for v in rec.get("monthly_mean_c", [])]
+    b.annual_hours_above_35 = float(rec.get("hours_above_35", 0.0))
+
+
+def score_annual(buildings: list[BuildingExposure]) -> list[BuildingExposure]:
+    """Score the year, alongside — never instead of — the event-day score.
+
+    Two orderings are published and they disagree, which is the point. The
+    event-day ranking answers "who is in trouble during a heat wave". The annual
+    ranking answers "whose fabric is loaded all year", and it promotes buildings
+    whose exposure is chronic rather than acute — a west-facing pre-war walk-up on
+    a wide, open street ranks higher here than in the wave ordering, because its
+    problem is 1,600 hours of afternoon sun rather than four days of trapped air.
+    Where the two orderings agree, the case is strong on both grounds and the
+    interface says so.
+    """
+    if not buildings:
+        return buildings
+
+    bounds = {
+        "facade_dose": percentile_bounds([b.annual_facade_kh35 for b in buildings]),
+        "sun_hours": percentile_bounds([b.annual_sun_hours for b in buildings]),
+        "solar_dose": percentile_bounds([b.annual_dose_kwh for b in buildings]),
+        "peak": percentile_bounds([b.annual_facade_max_c for b in buildings]),
+    }
+
+    for b in buildings:
+        c: dict[str, float] = {
+            "facade_dose": _norm(b.annual_facade_kh35, *bounds["facade_dose"]),
+            "sun_hours": _norm(b.annual_sun_hours, *bounds["sun_hours"]),
+            "solar_dose": _norm(b.annual_dose_kwh, *bounds["solar_dose"]),
+            "peak": _norm(b.annual_facade_max_c, *bounds["peak"]),
+            "relentlessness": min(1.0, sum(
+                1 for v in b.annual_monthly_mean_c if v > 30.0) / 6.0),
+            "enclosure": 1.0 - min(1.0, max(0.0, b.svf_mean)),
+        }
+        b.annual_components = c
+        b.annual_exposure_score = 100.0 * sum(
+            ANNUAL_EXPOSURE_WEIGHTS[k] * c[k] for k in ANNUAL_EXPOSURE_WEIGHTS)
+        # Same geometric mean against the same vulnerability score: the people in
+        # a building do not change because the time window did.
+        b.annual_priority_score = math.sqrt(
+            max(b.annual_exposure_score, 0.0) * max(b.vulnerability_score, 0.0))
+        b.annual_reasons = explain_annual(b)
+    return buildings
+
+
+def explain_annual(b: BuildingExposure) -> list[str]:
+    """Plain-language reasons the year ranks this building where it does."""
+    out: list[str] = []
+    if b.annual_facade_kh35 > 0:
+        out.append(
+            f"Its facades accumulate {b.annual_facade_kh35:,.0f} kelvin-hours above "
+            f"35 °C over the year — modelled surface temperature, not air.")
+    if b.annual_sun_hours > 0:
+        out.append(
+            f"An average facade band takes {b.annual_sun_hours:,.0f} hours of direct "
+            f"sun a year and {b.annual_dose_kwh:,.0f} kWh/m² of shortwave.")
+    if b.annual_month_of_peak:
+        from .year import MONTH_NAMES
+        out.append(
+            f"It peaks in {MONTH_NAMES[b.annual_month_of_peak - 1]} at "
+            f"{b.annual_facade_max_c:.0f} °C, and swings "
+            f"{b.annual_swing_k:.0f} K between summer and winter means.")
+    hot_months = sum(1 for v in b.annual_monthly_mean_c if v > 30.0)
+    if hot_months >= 4:
+        out.append(
+            f"{hot_months} months of the year have a mean facade temperature above "
+            f"30 °C, so this is chronic load rather than a heat-wave problem.")
+    elif hot_months <= 2 and b.exposure_score > 55:
+        out.append(
+            "It scores high on the heat wave and low on the year: its problem is "
+            "acute, so relief measures matter more than fabric measures.")
+    if b.annual_winter_mean_c and b.annual_summer_mean_c:
+        out.append(
+            f"Winter facade mean is {b.annual_winter_mean_c:.0f} °C, so any shading "
+            f"fitted for July also removes solar gain in January — the annual "
+            f"trade-off is real and is quantified in the what-if panel.")
+    return out
 
 
 def explain(b: BuildingExposure) -> list[str]:

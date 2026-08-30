@@ -1,15 +1,21 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>HeatCanyon — Midtown Manhattan</title>
-<meta name="description" content="A 3D street-canyon heat exposure model of Midtown Manhattan, built on the FortyGuard Temperature API." />
+<title>The Urban Canyon — a year of Midtown Manhattan</title>
+<meta name="description" content="A 3D street-canyon heat exposure model of Midtown Manhattan across a whole year, with an analyst that re-solves the physics to test interventions. Built on the FortyGuard Temperature API." />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%2307090d%27/%3E%3Crect x=%274%27 y=%2710%27 width=%277%27 height=%2718%27 fill=%27%23f6d746%27/%3E%3Crect x=%2713%27 y=%2716%27 width=%276%27 height=%2712%27 fill=%27%23bc3754%27/%3E%3Crect x=%2721%27 y=%275%27 width=%277%27 height=%2723%27 fill=%27%23f98e25%27/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%230a0908%27/%3E%3Crect x=%274%27 y=%2710%27 width=%277%27 height=%2718%27 fill=%27%23f7e7be%27/%3E%3Crect x=%2713%27 y=%2716%27 width=%276%27 height=%2712%27 fill=%27%23882e3c%27/%3E%3Crect x=%2721%27 y=%275%27 width=%277%27 height=%2723%27 fill=%27%23c7602a%27/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="./css/app.css" />
 <link rel="stylesheet" href="./css/film.css" />
 <link rel="stylesheet" href="./css/tour.css" />
+<link rel="stylesheet" href="./css/year.css" />
+<link rel="stylesheet" href="./css/agent.css" />
+<link rel="stylesheet" href="./css/floors.css" />
+<link rel="stylesheet" href="./css/whatif.css" />
+<link rel="stylesheet" href="./css/portfolio.css" />
+<link rel="stylesheet" href="./css/brief.css" />
 
 <script type="importmap">
 {
@@ -25,118 +31,287 @@
 </script>
 
 <div id="app">
-  <canvas id="gl"></canvas>
+  <!-- tabindex and a role so the model is reachable without a pointer: the
+       camera keys, the fold keys and the hour keys are all on window, but a
+       keyboard user needs somewhere to land that is not the first button in a
+       panel, and a screen reader needs to be told this is an application
+       surface rather than an unlabelled image. -->
+  <canvas id="gl" tabindex="0" role="application"
+          aria-label="Three-dimensional model of Midtown Manhattan. Drag to move the camera, scroll to zoom, N faces north."></canvas>
 
-  <div id="credits" hidden>
-    <span class="clabel">Basemap</span>
-    <span id="credits-google"></span>
-    <span class="csep">·</span>
-    <span class="clabel">Heat data</span>
-    <span>HeatCanyon / FortyGuard / NYC Open Data / USGS 3DEP</span>
+  <!-- Over the model, under the interface. See the note in app.css. -->
+  <div id="vignette"></div>
+  <div id="grain"></div>
+
+  <!-- Navigation furniture, over the model. A compass and a zoom pair is what
+       every 3D map puts on the canvas itself, and the compass earns its place
+       here twice over: this model's whole vocabulary is which way a wall faces
+       — "south-west wall", "the facade opposite" — and until now nothing on
+       screen said which way north was. -->
+  <div id="navpad">
+    <button id="nav-compass" title="Bearing — click to face north (N)"
+            aria-label="Camera bearing. Click to face north.">
+      <svg viewBox="0 0 44 44" aria-hidden="true">
+        <circle class="ring" cx="22" cy="22" r="17" />
+        <g id="nav-rose">
+          <path class="nn" d="M22 6 L27 22 L22 18 L17 22 Z" />
+          <path class="ss" d="M22 38 L17 22 L22 26 L27 22 Z" />
+        </g>
+      </svg>
+      <span id="nav-north" class="nlab">N</span>
+    </button>
+    <div class="navzoom">
+      <button id="nav-in" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="nav-out" title="Zoom out" aria-label="Zoom out">−</button>
+    </div>
   </div>
 
+  <div id="credits" hidden>
+    <span class="clabel">BASEMAP</span>
+    <span id="credits-google"></span>
+    <span class="csep">·</span>
+    <span class="clabel">HEAT DATA</span>
+    <span>FORTYGUARD TOS · NYC OPEN DATA · USGS 3DEP</span>
+  </div>
+
+  <!-- The plain loading screen, seen only when the opening film is off. It
+       carries the same title layout as the film's card so the two entrances
+       look like the same piece of work. -->
   <div id="boot">
-    <h1>HeatCanyon</h1>
+    <p class="kicker">FORTYGUARD&nbsp;&nbsp;·&nbsp;&nbsp;URBAN CANYON</p>
+    <h1>The Urban Canyon</h1>
+    <div class="rule"></div>
     <div class="bar"><i id="boot-bar"></i></div>
-    <div class="sub" id="boot-msg">loading</div>
+    <div class="brow"><span id="boot-msg">LOADING MODEL</span><span id="boot-count"></span></div>
   </div>
 
   <!-- LEFT ---------------------------------------------------------------- -->
   <aside id="left" class="panel">
-    <header class="brand">
-      <h1>HeatCanyon</h1>
-      <p id="brand-sub"></p>
-      <div class="brandbtns">
-        <button id="tour-replay" title="Walk through the controls again" hidden>Tour</button>
-        <button id="film-replay" title="Play the opening film again" hidden>Film</button>
-      </div>
-    </header>
-
-    <nav class="tabs" id="tabs">
-      <button data-tab="view" aria-pressed="true">View</button>
-      <button data-tab="whatif" aria-pressed="false">What if</button>
-      <button data-tab="ask" aria-pressed="false">Ask</button>
-    </nav>
-
-    <div class="tabbody">
-      <section id="tab-view" class="tabpane">
-        <div class="seg" id="layers"></div>
-        <div id="legend">
-          <div class="ramp" id="legend-ramp"></div>
-          <div class="ticks" id="legend-ticks"></div>
-          <p class="cap" id="legend-cap"></p>
-        </div>
-        <div class="camrow">
-          <button id="cam-orbit" aria-pressed="true">Fly over</button>
-          <button id="cam-street" aria-pressed="false">Walk the street</button>
-          <button id="cam-next" hidden>Next street</button>
-        </div>
-        <p class="hint" id="cam-hint"></p>
-
-        <!-- Photoreal context. Off by default, and deliberately so: with the
-             toggle untouched no root tile request is ever issued, so the
-             session is free. -->
-        <section id="photoreal">
-          <div class="prhead">
-            <button id="pr-toggle" aria-pressed="false">Photoreal context</button>
+    <div class="pnl">
+      <header class="phead">
+        <div class="ptop">
+          <div class="pname">URBAN CANYON</div>
+          <div class="picons">
+            <button id="tour-replay" class="icon" title="Walk through the controls again" hidden>
+              <span class="g">?</span>
+            </button>
+            <button id="film-replay" class="icon" title="Watch the film again" hidden>
+              <svg width="8" height="9" viewBox="0 0 8 9" aria-hidden="true"><path d="M0.5 0.5 L7 4.5 L0.5 8.5 Z" fill="currentColor"></path></svg>
+            </button>
+            <button id="fold-left" class="icon fold" title="Hide panel  [" aria-label="Hide this panel">
+              <svg width="6" height="9" viewBox="0 0 6 9" aria-hidden="true"><path d="M5 1 L1 4.5 L5 8" fill="none" stroke="currentColor" stroke-width="1.4"></path></svg>
+            </button>
           </div>
-          <p class="hint" id="pr-hint">Google's 3D city mesh under the data — real
-            roads, kerbs and vehicles. Needs your own Maps API key.</p>
-          <div id="pr-key" hidden>
-            <label for="pr-key-input">Google Maps API key</label>
-            <input id="pr-key-input" type="password" autocomplete="off"
-                   spellcheck="false" placeholder="AIza…" />
-            <div class="prbtns">
-              <button id="pr-key-save">Use key</button>
-              <button id="pr-key-clear">Forget</button>
+        </div>
+        <div class="pmeta" id="brand-sub"></div>
+      </header>
+
+      <nav class="tabs" id="tabs">
+        <!-- TWO tabs, not three, and the second one is a merge rather than a
+             rename. Diagnose and What-if were briefly separate, and separating
+             them was wrong twice over: they answer one question in two halves —
+             why this building is hot, and what a measure does about it — and
+             reading the second requires the first, so a reader had to tab back
+             and forth to hold "floor 3 is trap-dominant" against "shading
+             reaches floors 6 to 26". A four-item row also made choosing a tab a
+             decision in itself, which is a cost paid on every visit to answer a
+             question nobody has.
+             So: what is happening, and what to do about it. -->
+        <button data-tab="view" aria-pressed="true">Measure</button>
+        <button data-tab="decide" aria-pressed="false">Decide</button>
+        <button id="analyst-open" class="tablaunch"
+                title="Open the analyst  ·  A">Analyst<span class="ext">↗</span></button>
+      </nav>
+
+      <div class="pbody" id="left-scroll">
+        <!-- The picked building. Built by ui.js, at the top of the scroll body
+             so the ranking on the right survives a click. -->
+        <section id="selcard" hidden></section>
+
+        <section id="tab-view" class="tabpane">
+          <div class="metrics" id="layers"></div>
+
+          <div class="lblock">
+            <p class="mdesc" id="legend-cap"></p>
+            <div class="ramp" id="legend-ramp"></div>
+            <div class="ticks" id="legend-ticks"></div>
+            <p class="note" id="legend-note" hidden></p>
+          </div>
+
+          <div class="cblock">
+            <div class="chead">
+              <span class="klabel">CAMERA</span>
+              <button id="cam-reset" class="link">RESET VIEW</button>
             </div>
-            <p class="hint">Stored in this browser only, never sent anywhere but
-              Google. Enable the Map Tiles API and set a quota cap on root tile
-              requests.</p>
+            <p class="keys" id="cam-hint"></p>
           </div>
-          <div id="pr-look" hidden>
-            <label>Photo colour <output id="pr-desat-out"></output>
-              <input id="pr-desat" type="range" min="0" max="100" value="35" />
-            </label>
-            <label>Heat on buildings <output id="pr-data-out"></output>
-              <input id="pr-data" type="range" min="0" max="100" value="55" />
-            </label>
-            <label>Field on streets <output id="pr-wash-out"></output>
-              <input id="pr-wash" type="range" min="0" max="100" value="40" />
-            </label>
-            <label class="prcheck">
-              <input id="pr-solids" type="checkbox" />
-              Also draw our own blocks (for comparing alignment)
-            </label>
-            <label>Vertical align <output id="pr-nudge-out"></output>
-              <input id="pr-nudge" type="range" min="-20" max="20" step="0.5" value="0" />
-            </label>
-          </div>
-          <p class="prstatus" id="pr-status"></p>
-        </section>
-      </section>
 
-      <section id="tab-whatif" class="tabpane" hidden></section>
-      <section id="tab-ask" class="tabpane" hidden></section>
+          <!-- Photoreal context. Off by default, and deliberately so: with the
+               toggle untouched no root tile request is ever issued, so the
+               session is free. -->
+          <section id="photoreal">
+            <div class="chead">
+              <span class="klabel">CONTEXT</span>
+            </div>
+            <button id="pr-toggle" aria-pressed="false">Photoreal context</button>
+            <p class="note" id="pr-hint">Google's 3D city mesh under the data — real
+              roads, kerbs and vehicles. Needs your own Maps API key.</p>
+            <div id="pr-key" hidden>
+              <label for="pr-key-input">GOOGLE MAPS API KEY</label>
+              <input id="pr-key-input" type="password" autocomplete="off"
+                     spellcheck="false" placeholder="AIza…" />
+              <div class="prbtns">
+                <button id="pr-key-save">Use key</button>
+                <button id="pr-key-clear">Forget</button>
+              </div>
+              <p class="note">Stored in this browser only, never sent anywhere but
+                Google. Enable the Map Tiles API and set a quota cap on root tile
+                requests.</p>
+            </div>
+            <div id="pr-look" hidden>
+              <label>
+                <span class="lrow"><span>PHOTO COLOUR</span><output id="pr-desat-out"></output></span>
+                <input id="pr-desat" type="range" min="0" max="100" value="35" />
+              </label>
+              <label>
+                <span class="lrow"><span>HEAT ON BUILDINGS</span><output id="pr-data-out"></output></span>
+                <input id="pr-data" type="range" min="0" max="100" value="55" />
+              </label>
+              <label>
+                <span class="lrow"><span>FIELD ON STREETS</span><output id="pr-wash-out"></output></span>
+                <input id="pr-wash" type="range" min="0" max="100" value="40" />
+              </label>
+              <label class="prcheck">
+                <input id="pr-solids" type="checkbox" />
+                Also draw our own blocks, for comparing alignment
+              </label>
+              <label class="prcheck">
+                <input id="pr-cpu" type="checkbox" />
+                CPU-efficient tiles, for a machine without a GPU
+              </label>
+              <label>
+                <span class="lrow"><span>VERTICAL ALIGN</span><output id="pr-nudge-out"></output></span>
+                <input id="pr-nudge" type="range" min="-20" max="20" step="0.5" value="0" />
+              </label>
+            </div>
+            <p class="note" id="pr-status"></p>
+          </section>
+        </section>
+
+        <!-- Both panes are written entirely by their own module, and both live
+             under the one Decide tab, stacked in reading order: the schedule
+             says why, the what-if says what a measure does. Empty here on
+             purpose — markup that a module is about to replace is markup that
+             will one day be left behind by a module that failed to load. -->
+        <section id="tab-diagnose" class="tabpane" hidden></section>
+        <section id="tab-whatif" class="tabpane" hidden></section>
+
+      </div>
+
+      <footer class="pfoot">NASA GISTEMP V4 · NATURAL EARTH · USGS NAIP · ESRI WORLD IMAGERY · NYC OPEN DATA · USGS 3DEP · FORTYGUARD TOS</footer>
     </div>
   </aside>
 
   <!-- RIGHT --------------------------------------------------------------- -->
   <aside id="side" class="panel">
-    <div class="hd">
-      <h2 id="side-title">Where to act first</h2>
-      <p id="side-sub"></p>
+    <div class="pnl">
+      <header class="phead">
+        <div class="ptop">
+          <div class="pname" id="side-title">WHERE TO ACT FIRST</div>
+          <div class="picons">
+            <button id="fold-right" class="icon fold" title="Hide panel  ]" aria-label="Hide this panel">
+              <svg width="6" height="9" viewBox="0 0 6 9" aria-hidden="true"><path d="M1 1 L5 4.5 L1 8" fill="none" stroke="currentColor" stroke-width="1.4"></path></svg>
+            </button>
+          </div>
+        </div>
+        <p class="plede" id="side-sub"></p>
+      </header>
+      <div class="pbody" id="side-body"></div>
+      <!-- The way from one building to the whole programme. It sits under the
+           ranking because that is where someone is standing when they stop
+           asking "which building" and start asking "what does this cost". -->
+      <footer class="pfoot pfoot-act">
+        <button id="open-portfolio" class="link" hidden>PORTFOLIO AND COSTS ↗</button>
+      </footer>
     </div>
-    <div class="body" id="side-body"></div>
   </aside>
 
   <!-- BOTTOM -------------------------------------------------------------- -->
-  <div id="time" class="panel">
-    <div class="row">
-      <button class="play" id="play" title="Play the day">&#9658;</button>
-      <div class="hours" id="hours"></div>
+  <div id="time">
+    <div class="rail">
+      <!-- Two independent time axes, deliberately not collapsed into one
+           slider. The year strip picks a date out of 365 and draws the data it
+           is selecting, so the five hot days are visible as you scrub; the hour
+           strip picks one of the eight solved hours within it. The question
+           worth asking is the same hour in different months, and one slider
+           cannot ask it. -->
+      <div class="yearrow">
+        <button class="play" id="play-year" title="Play the year">
+          <svg width="9" height="10" viewBox="0 0 9 10" aria-hidden="true"><path d="M0 0 L9 5 L0 10 Z" fill="currentColor"></path></svg>
+        </button>
+        <div id="year-host"></div>
+      </div>
+
+      <!-- One row that cannot break. As four loose children of a wrapping rail
+           these needed 487px in a 486px rail, so the fold chevron dropped onto a
+           line of its own and the rail grew 30px for one 22px button. -->
+      <div class="hourrow">
+        <button class="play" id="play" title="Play the day">
+          <svg width="9" height="10" viewBox="0 0 9 10" aria-hidden="true"><path d="M0 0 L9 5 L0 10 Z" fill="currentColor"></path></svg>
+        </button>
+        <div class="hours" id="hours"></div>
+        <span class="vsep"></span>
+        <button id="fold-bottom" class="icon" title="Hide timeline  \" aria-label="Hide the timeline">
+          <svg width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><path d="M1 1 L4.5 5 L8 1" fill="none" stroke="currentColor" stroke-width="1.4"></path></svg>
+        </button>
+      </div>
+      <div class="sunline" id="time-meta"></div>
+      <p class="frozen-note" id="time-frozen" hidden></p>
     </div>
-    <div class="meta" id="time-meta"></div>
+  </div>
+
+  <!-- ANALYST ---------------------------------------------------------------
+       A window rather than a column. The console emits tool traces, JSON and
+       charts, none of which fit in a 366px panel, so it gets the middle of the
+       screen and gives it back on Escape. -->
+  <div id="analyst" hidden>
+    <div id="analyst-scrim"></div>
+    <div id="analyst-win" role="dialog" aria-modal="true" aria-labelledby="analyst-name">
+      <header class="phead">
+        <div class="ptop">
+          <span class="pname" id="analyst-name">
+            <!-- A lit wall and the shadow it throws. The analyst is named for the
+                 umbra, the part of the street the sun does not reach at all,
+                 which is the quantity the whole model turns on. -->
+            <svg class="sigil" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="18" cy="6" r="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M9 4 L13 4 L13 20 L9 20 Z" fill="currentColor" opacity=".9"/>
+              <path d="M9 20 L2 20 L6.5 8.5 L9 4 Z" fill="currentColor" opacity=".28"/>
+            </svg>
+            <span class="wordmark">Umbra</span>
+            <span class="role">Resident analyst · Midtown Manhattan</span>
+          </span>
+          <div class="picons">
+            <button id="analyst-close" class="icon" title="Close  ·  Esc"
+                    aria-label="Close the analyst"><span class="g">ESC</span></button>
+          </div>
+        </div>
+        <p class="plede">
+          A year of this canyon, hour by hour and wall by wall. Ask about a
+          building, a street or a measure: it re-solves the physics, tests the
+          pattern, and puts the answer on the map. Every figure it states is
+          traced to a computation you can open.
+        </p>
+      </header>
+      <div id="analyst-body"></div>
+    </div>
+  </div>
+
+  <!-- The reopen tabs. Outside the panels, so they survive the fold. -->
+  <button id="unfold-left" class="rehandle left" title="Show this panel  [" hidden>INSPECT</button>
+  <button id="unfold-right" class="rehandle right" title="Show this panel  ]" hidden>RANKING</button>
+  <div id="unfold-bottom-wrap" hidden>
+    <button id="unfold-bottom" class="rehandle bottom" title="Show the timeline  \"></button>
   </div>
 
   <!-- OPENING FILM ----------------------------------------------------------
@@ -149,41 +324,68 @@
     <div id="film-vignette"></div>
     <div id="film-grain"></div>
     <div id="film-flash"></div>
-    <div class="film-bar top"></div>
-    <div class="film-bar bottom"></div>
 
     <div id="film-title">
-      <p class="kicker">FortyGuard tOS · HeatCanyon</p>
-      <h1>The Canyon</h1>
+      <p class="kicker">FORTYGUARD&nbsp;&nbsp;·&nbsp;&nbsp;URBAN CANYON</p>
+      <h1>The Urban Canyon</h1>
+      <div class="rule"></div>
+      <!-- The tagline is deliberately static and carries no figures from the
+           model. It is a claim about what the instrument is for, which is true
+           before a single byte has loaded, so the card never changes what it
+           says about itself halfway through the load. -->
       <p class="strap" id="film-title-strap">
-        A street-level account of one afternoon in Manhattan.
+        Heat maps stop at the ground. This one climbs. Every wall in Midtown,
+        every hour of the year, and what it costs to cool the ones that need it.
       </p>
       <div class="cta">
-        <button id="film-begin" disabled>Preparing</button>
-        <button id="film-straight" class="ghost">Skip to the map</button>
+        <button id="film-begin" disabled>Watch the film</button>
+        <button id="film-straight" class="ghost">Go straight to the atlas</button>
       </div>
-      <div class="progress"><i id="film-prog"></i></div>
-      <p class="load" id="film-load">loading</p>
+      <div class="boot">
+        <div class="bar"><i id="film-prog"></i></div>
+        <div class="brow"><span id="film-load">LOADING MODEL</span><span id="film-count"></span></div>
+      </div>
     </div>
 
     <div id="film-hud" hidden>
-      <div id="film-chaptercard"><span id="film-chapno"></span><b id="film-chapter"></b></div>
+      <div id="film-chaptercard">
+        <span id="film-chapno"></span>
+        <span class="ct"><b id="film-chapter"></b><i class="crule"></i></span>
+      </div>
 
       <div id="film-readout">
-        <p id="film-readout-label"></p>
+        <div id="film-readout-label"></div>
+        <div id="film-readout-value"></div>
         <canvas id="film-spark" width="680" height="124" hidden></canvas>
-        <p id="film-readout-value"></p>
       </div>
 
       <div id="film-marker"><i></i><b id="film-marker-name"></b><span id="film-marker-coords"></span></div>
 
       <p id="film-caption"></p>
 
-      <div id="film-controls">
-        <button id="film-sound" aria-pressed="true">Sound</button>
-        <button id="film-skip">Skip</button>
+      <!-- Credited on screen while it is on screen. The descent is flown over
+           real satellite imagery from about nine hundred kilometres down to
+           three, and whose imagery it is belongs in the frame, not in a file. -->
+      <p id="film-credit">IMAGERY&nbsp;&nbsp;·&nbsp;&nbsp;USGS NAIP&nbsp;&nbsp;·&nbsp;&nbsp;ESRI, MAXAR, EARTHSTAR GEOGRAPHICS</p>
+
+      <div id="film-bar">
+        <button id="film-prev" title="Previous chapter">
+          <svg width="11" height="10" viewBox="0 0 11 10" aria-hidden="true"><path d="M10 0 L2.6 5 L10 10 Z" fill="currentColor"></path><rect x="0" y="0" width="1.6" height="10" fill="currentColor"></rect></svg>
+        </button>
+        <button id="film-play" class="round" title="Pause">
+          <svg width="9" height="11" viewBox="0 0 9 11" aria-hidden="true"><rect x="0" y="0" width="3" height="11" fill="currentColor"></rect><rect x="6" y="0" width="3" height="11" fill="currentColor"></rect></svg>
+        </button>
+        <button id="film-next" title="Next chapter">
+          <svg width="11" height="10" viewBox="0 0 11 10" aria-hidden="true"><path d="M1 0 L8.4 5 L1 10 Z" fill="currentColor"></path><rect x="9.4" y="0" width="1.6" height="10" fill="currentColor"></rect></svg>
+        </button>
+
+        <div id="film-segs"></div>
+
+        <div id="film-time">0:00 / 0:00</div>
+
+        <button id="film-sound" class="txt" aria-pressed="true">SOUND ON</button>
+        <button id="film-skip" class="txt">SKIP TO ATLAS</button>
       </div>
-      <p id="film-credit"></p>
     </div>
   </div>
 
