@@ -521,6 +521,37 @@ a:hover { color: var(--t1); }
   box-shadow: 0 0 0 1px rgba(10, 9, 8, .55);
   pointer-events: none;
 }
+/* ---- the distribution, and the window dragged across it
+
+   The bracket says where the hour falls on the fixed scale and how wide it is.
+   It cannot say what the hour looks like INSIDE that width, and on this
+   instrument that is most of what there is to know: pooled across the 104 solved
+   fields, 96% of the facade field's variance is the hour's air temperature and
+   4% is everything spatial. A clear night and a sunlit afternoon can print the
+   same bracket and be a single spike and a two-lobed smear.
+
+   The histogram sits directly on top of the ramp, sharing its horizontal axis
+   and its colours, so the two read as one object rather than as a chart above a
+   key. Its bars are drawn in the ramp colour of their own bin for the same
+   reason.
+
+   Dragging across the pair keeps only those walls in the 3D view. The window is
+   a hole cut in a scrim — the same figure the walkthrough highlight uses — which
+   is why the shoulders are painted by an enormous spread shadow and clipped by
+   the parent rather than by two positioned elements. */
+.lscale { position: relative; padding: 3px 0; overflow: hidden; cursor: ew-resize; }
+.lscale .lhist {
+  display: block; width: 100%; height: 34px; margin-bottom: 5px;
+}
+.lscale .brush {
+  position: absolute; top: 0; bottom: 0;
+  border-left: 1px solid var(--t0); border-right: 1px solid var(--t0);
+  background: transparent;
+  box-shadow: 0 0 0 9999px rgba(10, 9, 8, .62);
+  pointer-events: none;
+}
+.note.lbrush { color: var(--t4); }
+
 .ticks {
   display: flex; justify-content: space-between; margin-top: 7px;
   font-family: var(--mono); font-size: 10px; letter-spacing: .06em; color: var(--t7);

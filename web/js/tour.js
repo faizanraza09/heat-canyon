@@ -70,12 +70,29 @@ const STEPS = [
     dim: 'light',
     place: 'center',
     title: 'The model itself',
-    body: `<b>Drag in any direction</b> to slide across the city, <b>scroll</b> to zoom.
+    /* The click goes first, and it used to go sixth.
+     *
+     * This card carried five separate interactions — drag, scroll, right-drag,
+     * the compass pad, the walk-round button — before it got to "click any
+     * building", and two sentences about colour after it. Every other panel in
+     * the application is downstream of a selection: the file, the floor
+     * schedule, the what-if table and half of what the analyst will talk about
+     * are all blank until something is picked. Burying the one move that opens
+     * all of them in the middle of a paragraph about camera controls is the
+     * tour failing at the only job it has.
+     *
+     * The camera still gets its sentence; it is simply no longer first.
+     */
+    body: `<b>Click any building</b> and its file opens at the top of this panel —
+      every wall, floor by floor, with the ranking on the right left exactly where
+      it was. Almost everything else in here is blank until you do it, so if you
+      remember one thing from this tour, this is the one.
+      <br /><br />
+      <b>Drag in any direction</b> to slide across the city, <b>scroll</b> to zoom.
       <b>Right-drag</b> — or hold shift — turns and tilts around whichever building
       is selected, which is how you get at the three walls facing away from you;
       the pad by the compass does the same in steps, and the button under it walks
-      right round. <b>Click any building</b> and its file
-      opens at the top of this panel — the ranking on the right stays put.
+      right round.
       <br /><br />
       Nothing here is decoration: wall colour is modelled surface temperature at
       the hour on the scrubber, and the ground wash is the measured air-temperature
@@ -88,13 +105,14 @@ const STEPS = [
     tab: 'view',
     enter: (ui) => ui.setLayer('surface'),
     title: 'What is drawn',
-    body: `Eight views of the same block, in two groups. The first four are one
-      moment: how hot each wall is, which walls the sun is on, how long the
-      seven-day wave holds it over the threshold, and where to act during it.
+    body: `Nine views of the same block, in two groups. The first five are one
+      moment: how hot each wall is, how far it runs above the air standing beside
+      it, which walls the sun is on, how long the seven-day wave holds it over the
+      threshold, and where to act during it.
       <br /><br />
-      The four below the rule are the <b>whole year</b> — accumulated heat dose,
-      the solar energy shading would remove, and what that shading costs you back
-      in January. None of those depends on the clock, so the time controls grey
+      The four below the rule are the <b>whole year</b> — where to act on chronic
+      load rather than on the wave, accumulated heat dose, the solar energy shading
+      would remove, and what that shading costs you back in January. None of those depends on the clock, so the time controls grey
       out while one is showing.
       <br /><br />
       Blue is cold and red is hot, on one scale &minus;20&nbsp;to&nbsp;60&nbsp;&deg;C
@@ -237,15 +255,33 @@ const STEPS = [
   },
   {
     id: 'ask',
-    // The analyst opens over the map now rather than living in the left rail,
-    // so the step spotlights the window itself; `tab: 'ask'` still reaches it,
-    // because showTab routes that name to openAnalyst.
-    target: '#analyst-win',
-    place: 'right',
+    /* The BOX YOU TYPE IN, not the window around it — and the film learned
+     * this first, on the same element.
+     *
+     * When the analyst moved out of the left rail and became a dialog over the
+     * map, this step followed it and spotlighted `#analyst-win`. That window is
+     * min(1080px, 92vw) by min(760px, 86vh), centred: lighting it dims a strip
+     * about a hundred pixels wide down each edge and therefore points at
+     * nothing. Worse, it leaves no side with room for the card — and `_place`
+     * responds to that by picking the least-bad side and then clamping the card
+     * back inside the viewport, which lands it directly on top of its own
+     * spotlight. A highlight underneath the text explaining it is the one
+     * arrangement that is certainly wrong, and 06-tour asserts against it.
+     *
+     * The form at the foot of the window is small, is the thing a reader
+     * actually has to find, and leaves the whole height of the transcript above
+     * it for the card. See the beat in story.js that says "you can just ask",
+     * which points at this same element for this same reason.
+     *
+     * `tab: 'ask'` still reaches it, because showTab routes that name to
+     * openAnalyst.
+     */
+    target: '#analyst-win .agentform',
+    place: 'top',
     tab: 'ask',
     title: 'The analyst',
     body: `Not a chat box. It is an agent with this model's physics engine, a shell,
-      and twenty tools over the solved fields, and it does work rather than
+      and twenty-four tools over the solved fields, and it does work rather than
       lookups: it re-solves an intervention anywhere in the city over any window,
       runs Moran's I and Getis-Ord hotspot statistics, writes its own scripts, and
       allocates a budget.
@@ -288,10 +324,24 @@ const STEPS = [
     place: 'right',
     tab: 'view',
     title: 'Photoreal context',
-    body: `Optional. This drapes the model over Google's 3D city mesh — real
-      roads, kerbs, vehicles — so the heat sits on a street you recognise. It
-      needs your own Maps API key and it is off until you paste one, so an idle
-      session never spends a tile request.`,
+    /* This card said the layer "is off until you paste one", which stopped
+     * being true when key resolution grew a server fallback: `resolveApiKey`
+     * asks /api/config when the browser has nothing, so a deployment or a dev
+     * machine with a key in its environment opens the layer with nothing
+     * pasted. The old copy also promised that an idle session never spends a
+     * tile request, which is the opposite of what now happens — billing is one
+     * root request per session, and with the toggle untouched every page load
+     * spends one. Telling someone their quota is safe when it is being spent is
+     * the worst way for a card to be out of date. */
+    body: `Optional, and already on if a key was found. This drapes the model over
+      Google's 3D city mesh — real roads, kerbs, vehicles — so the heat sits on a
+      street you recognise. The server offers its own key if it has one; otherwise
+      paste yours and it is remembered.
+      <br /><br />
+      Each session that opens it spends one of the project's daily tile-root
+      requests, so <b>switching it off is remembered</b> across reloads, and
+      <code>?photoreal=0</code> forces it off for a single visit without changing
+      that preference.`,
   },
   {
     id: 'fold',

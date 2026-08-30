@@ -23,7 +23,7 @@ import * as THREE from 'three';
 // desktop left-drag pan is implemented below: its distance-based approximation
 // made the city slip away from the pointer at oblique camera angles.
 import { MapControls } from 'three/addons/controls/MapControls.js';
-import { RAMPS, norm, SHADE_RGB, SUNLIT_RGB, TEMP_DOMAIN } from './colors.js';
+import { RAMPS, norm, SHADE_RGB, SUNLIT_RGB, TEMP_DOMAIN, EXCESS_DOMAIN } from './colors.js';
 import { Photoreal, findApiKey } from './photoreal.js';
 
 /** Contrast curve, indexed 0-255. A smoothstep-weighted lift: dark values fall
@@ -159,6 +159,98 @@ function selOverlay(mat) {
       .replace('#include <color_fragment>',
         '#include <color_fragment>\nif ( vGhost < 0.999 ) discard;');
   };
+  return mat;
+}
+
+/* Isotherms over the painted ramp, drawn in the fragment shader.
+ *
+ * WHY THE SCENE NEEDS A CHANNEL THAT IS NOT COLOUR.
+ *
+ * The fixed scale is 80 K wide and integrates to about 102 dE in OKLab, so one
+ * just-noticeable difference is roughly 0.8 K. The median solved field spans
+ * 4.0 K from its 1st to its 99th percentile. Five distinguishable colours, for
+ * 29,415 panels, on 55 of the 104 solved fields. No ramp fixes that — a
+ * perceptually even respacing of the stops buys about 2x and the theoretical
+ * ceiling is the ceiling.
+ *
+ * Contours are the answer cartography reached for the identical problem, which
+ * is a hypsometric tint that cannot carry relief. They add structure without
+ * touching a single hue, so nothing about the absolute scale is given up, and
+ * they do something the ramp and the gain both cannot: they make FLATNESS
+ * legible. A January night under four widely spaced lines reads as a shallow
+ * field, where the same night as an undifferentiated blue wash reads as a
+ * broken instrument. Density is the variable.
+ *
+ * They are drawn from the MEASURED value and never from the gained one, which
+ * is the reason they are worth having alongside the gain rather than instead of
+ * it. Whatever the exaggeration is doing to the colour, a line is still an
+ * isotherm and the spacing between two lines is still the interval printed on
+ * the legend. The gain shows you where the structure is; the contours tell you
+ * what it is worth.
+ *
+ * The line is an anti-aliased distance to the nearest multiple of the interval,
+ * measured in screen space through `fwidth` so it stays one pixel wide at every
+ * zoom rather than thickening as a wall comes closer. `fwidth` is core in
+ * WebGL2, which is what three r170 asks for here.
+ *
+ * THE GUARD IS NOT OPTIONAL. Where the field is flat across a quad — every
+ * panel clamped at an end of the domain, which is thousands of them on the
+ * heat-wave afternoon — the derivative is zero, and dividing by it turns the
+ * whole clamped region into a solid line the moment its value happens to sit
+ * near a multiple. So a quad with no gradient draws nothing, which is also the
+ * truthful answer: there is no isotherm crossing a surface that is all one
+ * temperature. */
+function contoured(mat, isoU, isoKU) {
+  const inner = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (sh, renderer) => {
+    if (inner) inner(sh, renderer);
+    sh.uniforms.uIso = isoU;
+    sh.uniforms.uIsoK = isoKU;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>',
+        '#include <common>\nattribute float aVal;\nvarying float vVal;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nvVal = aVal;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nvarying float vVal;\nuniform float uIso;\nuniform float uIsoK;')
+      .replace('#include <color_fragment>',
+        '#include <color_fragment>\n'
+        // The derivative is taken in UNIFORM control flow and the validity
+        // test comes after it. GLSL leaves fwidth undefined when fragments of
+        // the same 2x2 quad took different branches, and `vVal >= 0.0` is
+        // exactly such a branch — it is per-quad, so it divides the fragment
+        // quads that straddle the edge of an unsolved panel. `uIso` is a
+        // uniform, so the branch that remains around it is the same for every
+        // fragment in the frame. -1 differentiates like any other number; it is
+        // discarded a line later.
+        + 'if ( uIso > 0.0 ) {\n'
+        + '  float xs = vVal / uIso;\n'
+        + '  float w = fwidth( xs );\n'
+        + '  if ( vVal >= 0.0 && w > 1e-5 ) {\n'
+        + '    float d = abs( fract( xs - 0.5 ) - 0.5 ) / w;\n'
+        + '    float line = 1.0 - clamp( d, 0.0, 1.0 );\n'
+        // Fade the lines out as they approach the pixel grid, or they invert.
+        // Once one pixel spans most of an interval, every fragment is within a
+        // line-width of a multiple, `line` goes to 1 everywhere, and a wall that
+        // should show a dense pattern instead goes uniformly 55% darker. That is
+        // the standard failure of a screen-space grid at high frequency, and it
+        // would have hit the two views the app spends most of its time in: the
+        // whole-AOI overview, and any wall seen at a glancing angle. Fading from
+        // a third of an interval per pixel to nine tenths gives back a plain
+        // ramp colour where the contours can no longer resolve, which is the
+        // honest thing to draw when they cannot.
+        + '    line *= 1.0 - smoothstep( 0.35, 0.9, w );\n'
+        + '    diffuseColor.rgb *= 1.0 - 0.55 * line * uIsoK;\n'
+        + '  }\n'
+        + '}');
+  };
+  /* Written by hand for the reason `fadeable` gives, and chained onto whatever
+   * key was already there: two meshes wrapped by the same closure have
+   * identical `toString()`, so deriving a key from this wrapper alone would
+   * hand the overlay the ghosted mesh's compiled program. */
+  mat.customProgramCacheKey = () => `hciso|${prevKey ? prevKey() : ''}`;
   return mat;
 }
 
@@ -305,6 +397,20 @@ export class Scene {
     this.canvas = canvas;
     this.hour = data.meta.peak_index;
     this.layer = 'surface';
+    /* Local detail gain, and the value brush. Both are ways of reading the
+     * spatial structure inside one hour; see `setDetailGain` and `setValueBrush`
+     * for what they are for and what they cost. Identity and off by default, so
+     * a scene nobody has touched is the measured field. */
+    this.detailGain = 1;
+    this.valueBrush = null;
+    this._hist = new Uint32Array(Scene.HIST_BINS);
+    /* A second histogram, filled only while a gain is on, holding the field as
+     * the model solved it. The legend's FIGURES come from this one and its
+     * rectangle from the other; see `paintedCore` below. */
+    this._histTrue = new Uint32Array(Scene.HIST_BINS);
+    this.paintedHist = null;
+    this.paintedCore = null;
+    this.paintedCoreTrue = null;
     this.selected = null;
     /* The selection the ghost attributes were last written for. `undefined`
      * rather than null so the first repaint writes them. */
@@ -335,6 +441,12 @@ export class Scene {
      * drops it to 0 and `_stepFade` walks it back up. See `fadeable`.
      */
     this._mixU = { value: 1 };
+    /* Contour interval, on the drawn 0..1 domain, and how hard the lines are
+     * drawn. Zero interval is off. The interval is chosen by the panel, which is
+     * the only place that knows the layer's units — see `setContour`. */
+    this._isoU = { value: 0 };
+    this._isoKU = { value: 1 };
+    this.isoOn = true;
     this._fade = null;
     /* The solar state currently on screen, which is not `meta.hours[hour]`
      * while a dissolve is running. Held so an interrupted dissolve can start
@@ -690,9 +802,40 @@ export class Scene {
       for (const p of ps) { x += xy[p * 4]; y += xy[p * 4 + 1]; }
       x /= ps.length; y /= ps.length;
     }
-    // Tall buildings get a proportionally taller mast, so the dot clears the
-    // skyline around them rather than being lost among their neighbours.
-    const mast = Math.max(26, Math.min(90, a.h * 0.3));
+    /* The mast is as long as the NEIGHBOURS make it, not as long as the
+     * building is.
+     *
+     * It used to be `a.h * 0.3`, capped at 90 m, on the reasoning that a tall
+     * building needs a tall mast to clear the skyline around it. That gets the
+     * relationship backwards. The mast exists so the dot is not lost among
+     * whatever stands nearby, and a building that is already taller than
+     * everything around it has nothing to clear — so the rule spent its whole
+     * budget exactly where it was least needed. On the Empire State it hit the
+     * cap: a dot floating ninety-three metres over the spire, far enough off
+     * the roof to read as a bug rather than as a marker.
+     *
+     * So the height grid is asked what is actually there. Eight bearings at two
+     * radii is sixteen lookups into an array that is already in memory, and it
+     * answers the only question the mast has: how far above this roof does the
+     * marker have to sit before nothing else is in front of it. A tower gets a
+     * short mast and a brownstone in a canyon gets a long one, which is what
+     * the original comment wanted and the opposite of what it did.
+     */
+    const around = (() => {
+      const at = this.data.heightAt;
+      if (!at) return a.h;
+      let top = 0;
+      for (const r of [60, 140]) {
+        for (let k = 0; k < 8; k++) {
+          const t = (k / 8) * Math.PI * 2;
+          top = Math.max(top, at(x + Math.cos(t) * r, y + Math.sin(t) * r) || 0);
+        }
+      }
+      return top;
+    })();
+    // Sixteen metres of daylight over whatever is in the way, and never less
+    // than eighteen so the dot is never sitting on the roof itself.
+    const mast = Math.max(18, Math.min(90, (around - a.h) + 16));
     this.pin.position.set(x, a.h + 3, -y);
     this._pinMast.scale.set(1, mast, 1);
     this._pinDot.position.set(0, mast + 2.6, 0);
@@ -1337,9 +1480,24 @@ export class Scene {
     geo.setAttribute('aGhost',
       new THREE.BufferAttribute(new Float32Array(pos.length / 3).fill(1), 1));
 
-    this.facadeMesh = new THREE.Mesh(geo, fadeable(ghostable(new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide,
-    })), this._mixU));
+    /* The measured value at each vertex, for the isotherms.
+     *
+     * Interpolated VERTICALLY and not horizontally, because that is where the
+     * data has somewhere to interpolate to. A quad is one panel at one band and
+     * holds one solved number; its neighbours in height are the next bands of
+     * the same panel, so a quad's bottom edge takes the mean of its own value
+     * and the band below and its top edge the mean with the band above. Across a
+     * wall the neighbours are different panels, which is the model's horizontal
+     * resolution rather than a finer field to sample — so contours step at panel
+     * boundaries and run smoothly up a facade, which is the right way round: an
+     * isotherm on a wall is very nearly horizontal. */
+    geo.setAttribute('aVal',
+      new THREE.BufferAttribute(new Float32Array(pos.length / 3).fill(-1), 1));
+
+    this.facadeMesh = new THREE.Mesh(geo,
+      contoured(fadeable(ghostable(new THREE.MeshBasicMaterial({
+        vertexColors: true, side: THREE.DoubleSide,
+      })), this._mixU), this._isoU, this._isoKU));
     this.scene.add(this.facadeMesh);
     /* `facadeColors` is the buffer a repaint WRITES, which at rest is also the
      * buffer the GPU shows — `_mixU` sits at 1. During a dissolve it is the
@@ -1347,6 +1505,8 @@ export class Scene {
     this.facadeGeo = geo;
     this.facadeColors = geo.getAttribute('aColorTo');
     this.facadeGhost = geo.getAttribute('aGhost');
+    this.facadeVal = geo.getAttribute('aVal');
+    this._vals = new Float32Array(nQuad);
 
     /* The same geometry a second time, for the selected building alone.
      *
@@ -1358,9 +1518,10 @@ export class Scene {
      *
      * This is the mesh that clears the depth buffer, and it must therefore draw
      * before the roof copy, which shares the buffer it clears. */
-    this.facadeTop = new THREE.Mesh(geo, fadeable(selOverlay(new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide,
-    })), this._mixU));
+    this.facadeTop = new THREE.Mesh(geo,
+      contoured(fadeable(selOverlay(new THREE.MeshBasicMaterial({
+        vertexColors: true, side: THREE.DoubleSide,
+      })), this._mixU), this._isoU, this._isoKU));
     this.facadeTop.renderOrder = 999;
     this.facadeTop.visible = false;
     this.facadeTop.onBeforeRender = (renderer) => renderer.clearDepth();
@@ -1981,6 +2142,14 @@ export class Scene {
       data: this.data,
       datumM: this.datumM,
       fieldTex: this.groundTex,
+      /* The isotherm uniforms, handed over as the very same objects the massing
+       * shader holds rather than as values. The photograph IS the main surface
+       * here — the massing mesh is hidden whenever it is on, see `_applySolids`
+       * — so contours that lived only on the prisms were contours that almost
+       * nobody would ever see. One pair of uniforms, two shaders, no way for the
+       * interval on the legend to disagree with the interval on screen. */
+      isoU: this._isoU,
+      isoKU: this._isoKU,
       forceCpu: this.forceCpuPhotoreal,
       // The ground texture spans the AOI exactly, centred on the origin, and is
       // drawn north-up — the same rectangle _buildGround gives its plane.
@@ -2399,6 +2568,49 @@ export class Scene {
   //: and the walls should be answering the same question: painting a year of
   //: facade dose over a single heat wave's exceedance invites the eye to read one
   //: as the cause of the other.
+  /* Bins in the legend histogram. Ninety-six because the ramp is drawn about
+   * 250 px wide in the panel, so a bin is two or three pixels — fine enough to
+   * show the sun/shade gap on an afternoon, coarse enough that a bin still holds
+   * a few thousand of the 294,150 quads and the shape is not sampling noise. */
+  static HIST_BINS = 96;
+
+  /** The middle 98% of a histogram, as a [lo, hi] pair on the drawn 0..1 domain.
+   *
+   * The bracket used to be the outright min and max, and on a fixed scale that
+   * is a statistic one panel can destroy. It routinely did: the heat-wave hour
+   * has walls clamped at both ends of the excess scale, so the marker spanned
+   * the entire ramp and the line under it read "-4.0 TO 20.0 K" — arithmetically
+   * true, and a sentence that says nothing about any hour in particular. One
+   * panel in 294,150 was setting the width of the only widget on the panel whose
+   * job is to say how wide the hour is.
+   *
+   * Trimming a per cent off each end gives it back. It costs the extremes, which
+   * are not what a bracket is for — the extremes are a question about one wall,
+   * and the dossier answers that about the wall you clicked.
+   *
+   * Read off the histogram rather than by sorting 294,150 values, so the figures
+   * are quantised to a bin: 0.83 K on the temperature scale, 0.25 K on the
+   * excess one. That is a summary widget's worth of precision and the reason the
+   * line says MIDDLE 98% rather than pretending to a reading. */
+  static coreOf(hist) {
+    let tot = 0;
+    for (let i = 0; i < hist.length; i++) tot += hist[i];
+    if (!tot) return null;
+    const need = tot * 0.01;
+    let c = 0, lo = 0, hi = hist.length - 1;
+    for (let i = 0; i < hist.length; i++) {
+      c += hist[i];
+      if (c >= need) { lo = i; break; }
+    }
+    c = 0;
+    for (let i = hist.length - 1; i >= 0; i--) {
+      c += hist[i];
+      if (c >= need) { hi = i; break; }
+    }
+    if (hi < lo) hi = lo;
+    return [lo / hist.length, (hi + 1) / hist.length];
+  }
+
   static GROUND_FOR_ANNUAL = {
     annual_kh35: 'degree_hours_35',
     annual_dose: 'hours_above_35',
@@ -2406,7 +2618,78 @@ export class Scene {
     annual_priority: 'hours_above_35',
   };
 
+  /** How far the temperature layer exaggerates a wall's distance from the air.
+   *
+   * 1 is the measured field. The argument for anything above it, and the reasons
+   * it is not the auto-scaling this project deleted, are in `_recolour` at the
+   * branch that applies it. The caller is responsible for saying so on the
+   * legend — a gain nobody is told about is exactly the failure mode the fixed
+   * scale exists to prevent. */
+  setDetailGain(g) {
+    const v = Math.max(1, Math.min(8, Number(g) || 1));
+    if (v === this.detailGain) return;
+    this.detailGain = v;
+    this._recolour();
+  }
+
+  /** Keep only the walls whose value falls in [lo, hi] on the drawn 0..1 domain;
+   *  everything else drains and goes see-through. Null clears it.
+   *
+   * This is the answer to a question colour cannot hold. A median hour spans
+   * about five just-noticeable differences across the whole city, so "which
+   * walls are in the top two kelvin of this hour" is not a question any ramp can
+   * be read for. Dragging a window along the distribution and watching which
+   * walls survive answers it directly, and answers it in the geometry rather
+   * than in a table.
+   *
+   * The domain is the drawn one rather than kelvin so that this works unchanged
+   * on every layer — the histogram it is dragged across is in the same units. */
+  setValueBrush(range) {
+    const r = range && isFinite(range[0]) && isFinite(range[1])
+      ? [Math.max(0, Math.min(range[0], range[1])), Math.min(1, Math.max(range[0], range[1]))]
+      : null;
+    const same = (!r && !this.valueBrush)
+      || (r && this.valueBrush && r[0] === this.valueBrush[0] && r[1] === this.valueBrush[1]);
+    if (same) return;
+    this.valueBrush = r;
+    this._recolour();
+  }
+
+  /** Set the isotherm interval, on the drawn 0..1 domain. Zero turns them off.
+   *
+   * The interval is decided by the panel rather than here, because choosing a
+   * round one means knowing the layer's units — 1 K on the temperature scale,
+   * 2 K on the excess scale, five score points on priority — and this class
+   * deals only in the normalised domain everything is painted through. */
+  setContour(interval01) {
+    const v = isFinite(interval01) && interval01 > 0 ? interval01 : 0;
+    const wasOn = this._isoU.value > 0;
+    if (v === this._isoU.value) return;
+    this._isoU.value = v;
+    // Turning them on needs the attribute filled, which only a repaint does.
+    // Changing the interval on an attribute that is already correct is a single
+    // uniform and no repaint at all.
+    if (!wasOn && v > 0) this._recolour();
+  }
+
+  /** Whether isotherms are drawn at all. Separate from the interval so that
+   *  turning them off and on again does not have to re-derive one. */
+  setContoursOn(on) {
+    const v = !!on;
+    if (v === this.isoOn) return;
+    this.isoOn = v;
+    this._isoKU.value = v ? 1 : 0;
+    if (v) this._recolour();
+  }
+
   setLayer(layer) {
+    /* A brush is a range of values, and a value on one layer is not a value on
+     * the next — 0.6 of the temperature ramp is 40 degC and 0.6 of the priority
+     * ramp is a score of 51. Carrying it across would silently reinterpret the
+     * viewer's window as a different question, so it is dropped. It also ends
+     * the per-repaint ghost upload, which is the other reason not to leave one
+     * lying around. */
+    if (layer !== this.layer) this.valueBrush = null;
     this.layer = layer;
     // The ground shows whichever measured field pairs with the chosen facade
     // layer. For the modelled layers it shows exceedance, because that is the
@@ -2718,8 +3001,25 @@ export class Scene {
     const dom = this.surfaceDomain;
     const f = (layer === 'priority' || layer === 'annual_priority') ? RAMPS.priority
       : (layer === 'winter_sun') ? RAMPS.diverging
+      : (layer === 'excess') ? RAMPS.excess
       : (layer === 'annual_kh35' || layer === 'annual_dose') ? RAMPS.duration
       : RAMPS.temperature;
+
+    /* The hour's air anchor, and the gain read against it.
+     *
+     * Hoisted because it is one number for the whole city and `excessAt` would
+     * look it up 294,150 times to return the same value. Resolved to 0 when
+     * neither the excess layer nor a gain is asking for it, so an ordinary
+     * repaint does not touch `meta.hours` at all.
+     *
+     * The gain applies to the temperature layer only. On the excess layer it
+     * would be gain on gain, and on a duration, a priority or an annual total
+     * there is no air anchor to be an excess OVER — multiplying those about a
+     * temperature would be arithmetic with no physical reading. */
+    const gain = (layer === 'surface') ? (this.detailGain || 1) : 1;
+    const anchored = layer === 'excess' || gain !== 1;
+    const anchor = anchored ? d.anchorAt(this.hour) : 0;
+    const exDom = EXCESS_DOMAIN;
     // The duration layers read their value from the tile under each address
     // rather than from the panel, and against their own domain rather than the
     // temperature one.
@@ -2753,9 +3053,22 @@ export class Scene {
      * everything around it in this loop depends on all three of those. Left
      * ungated it added a 4.7 MB attribute upload to every hour tick, which on a
      * scrubbed timeline is sixty a second to say the same thing sixty times. */
-    const ghostKey = sel === null
-      ? '' : `${sel}|${hi ? [...hi].join(',') : ''}|${bf ? bf.b : ''}`;
-    const ghostDirty = this._ghostSel !== ghostKey;
+    const brush = this.valueBrush;
+    const ghostKey = (sel === null && !brush)
+      ? ''
+      : `${sel}|${hi ? [...hi].join(',') : ''}|${bf ? bf.b : ''}|${brush ? brush.join(':') : ''}`;
+    /* A value brush cannot be cached against a key, and is the one thing here
+     * that defeats the gate below.
+     *
+     * Everything else the ghost depends on is an identity — a building, a set, a
+     * band run — and identities survive an hour tick. A brush selects by the
+     * NUMBER on the wall, and that number changes with the hour, the date, the
+     * gain and the layer, so the same brush over the same city is a different
+     * set of quads one hour later. While one is up the ghost is rewritten every
+     * repaint, which is the 4.7 MB upload the gate exists to avoid. It is the
+     * right price for as long as somebody is actually holding the brush, and
+     * for no longer — which is why the brush clears on a layer change. */
+    let ghostDirty = this._ghostSel !== ghostKey || !!brush;
     this._ghostSel = ghostKey;
     this._ghostDirty = ghostDirty;
     /* The photograph dissolves on the same terms, and off the same key.
@@ -2797,6 +3110,27 @@ export class Scene {
      * Accumulated here rather than measured separately because this loop already
      * visits every quad and already has the value in hand. */
     let tvLo = Infinity, tvHi = -Infinity;
+    let ttLo = Infinity, ttHi = -Infinity;
+
+    /* The distribution, not just its ends.
+     *
+     * The bracket says WHERE on the ramp the hour falls and how wide it is. It
+     * cannot say what the hour looks like inside that width, and the difference
+     * matters: a clear night is one tall spike, a sunlit afternoon is two lobes
+     * with a gap where the sun/shade boundary is, and those are the same bracket.
+     * Ninety-six bins accumulated in the loop that is already visiting every quad
+     * and already normalising every value, for the same reason the bracket is —
+     * a second sweep would be a second implementation to drift. */
+    const isoOn = this.isoOn && this._isoU.value > 0;
+    const vals = this._vals;
+    const hist = this._hist;
+    hist.fill(0);
+    const HB = Scene.HIST_BINS;
+    // The measured field's own histogram, and only when that is a different
+    // thing from the drawn one. At gain 1 the two are identical and the second
+    // increment would be pure cost on the hot path.
+    const histT = gain !== 1 ? this._histTrue : hist;
+    if (histT !== hist) histT.fill(0);
 
     for (let q = 0; q < this.nQuad; q++) {
       const p = this.quadPanel[q], b = this.quadBand[q];
@@ -2813,6 +3147,12 @@ export class Scene {
        * shade is categorical, so it takes the two ends of the domain it is
        * already drawn with. */
       let tv;
+      /* The same value with no gain applied, which is the one the bracket's
+       * NUMBERS are read from. The bracket's rectangle marks where the colours
+       * on screen fall, so it has to follow the exaggeration; its label names
+       * temperatures, and there is no gain at which it may name one the model
+       * did not solve. Equal to `tv` everywhere except the gained branch. */
+      let tvTrue;
       if (layer === 'priority' || layer === 'annual_priority') {
         const bi = this.quadBuilding[q];
         const a = d.buildings.attrs[bi];
@@ -2831,12 +3171,59 @@ export class Scene {
       } else if (durField) {
         tv = norm(durSample[p], durDom[0], durDom[1]);
         c = f(tv);
+      } else if (layer === 'excess') {
+        // How far this wall is from the air beside it. Read against its own
+        // fixed 24 K domain — see EXCESS_DOMAIN in colors.js for why that domain
+        // and why its zero is not in the middle.
+        tv = norm(d.surfaceAt(this.hour, p, b) - anchor, exDom[0], exDom[1]);
+        c = f(tv);
       } else {
-        tv = norm(d.surfaceAt(this.hour, p, b), dom[0], dom[1]);
+        /* The temperature, optionally with its local detail exaggerated.
+         *
+         * At gain 1 this is the measured field and the expression reduces to
+         * the identity, which is why the multiply is not gated on a branch.
+         *
+         * Above 1 it is the one operation in this file that draws a number the
+         * model did not solve, so it is worth being exact about what it does.
+         * It scales the wall's distance from the hour's air anchor and leaves
+         * the anchor alone. The anchor carries 96% of the field's variance and
+         * all of its seasonality, so January stays blue and July stays red and
+         * the legend's fixed scale keeps meaning what it says; what stretches is
+         * only the 4% that separates one wall from the next. It is local tone
+         * mapping, and it is here for the reason a photographer lifts shadows
+         * rather than re-exposing: the scale must not move, but a median hour
+         * spans 4 K of an 80 K ramp and 4 K is about five just-noticeable
+         * differences for 29,415 panels.
+         *
+         * It is NOT the per-period auto-scaling this project deleted. That moved
+         * the domain underneath the viewer and only the small type knew. This
+         * moves nothing: the domain is TEMP_DOMAIN whatever the gain, the base
+         * is a physical quantity the solver itself anchors to rather than a
+         * percentile of the visible field, and the factor is printed on the
+         * legend with a key held down to drop it back to the truth.
+         *
+         * Safe to amplify because the field is smooth. Median band-to-band step
+         * within a panel is 11% of a field's own sd across all 104 solved
+         * fields, so the structure being multiplied is solved structure and not
+         * the solver's noise floor. */
+        const t = d.surfaceAt(this.hour, p, b);
+        tvTrue = norm(t, dom[0], dom[1]);
+        tv = gain === 1 ? tvTrue : norm(anchor + (t - anchor) * gain, dom[0], dom[1]);
         c = f(tv);
       }
+      if (tvTrue === undefined) tvTrue = tv;
       if (tv < tvLo) tvLo = tv;
       if (tv > tvHi) tvHi = tv;
+      if (tvTrue < ttLo) ttLo = tvTrue;
+      if (tvTrue > ttHi) ttHi = tvTrue;
+      // Kept for the isotherm pass below. -1 rather than NaN so an unsolved
+      // panel is a value the shader can test rather than one that poisons
+      // `fwidth` for the whole quad.
+      if (isoOn) vals[q] = tvTrue >= 0 ? tvTrue : -1;
+      // `tv >= 0` rather than isFinite: norm already clamped to 0..1, and NaN
+      // fails the comparison, so an unsolved panel is excluded for free.
+      if (tv >= 0) hist[tv >= 1 ? HB - 1 : (tv * HB) | 0]++;
+      if (histT !== hist && tvTrue >= 0) histT[tvTrue >= 1 ? HB - 1 : (tvTrue * HB) | 0]++;
       let sh = this.quadAO[q];
       /* The directional lift applies only where the value on the wall is this
          hour's value.
@@ -2851,7 +3238,7 @@ export class Scene {
          sun-and-shade it was also simply redundant: the colour there is already
          categorical. Those layers keep the baked ambient occlusion, which is
          geometry rather than a claim about the hour. */
-      if (sunUp && layer === 'surface') {
+      if (sunUp && (layer === 'surface' || layer === 'excess')) {
         const facing = Math.max(0, this.quadNX[q] * sx + this.quadNZ[q] * sz);
         const lit = d.sunlitAt(this.hour, p, b) ? 1 : 0;
         sh *= 1.0 + 0.38 * facing * lit;
@@ -2887,7 +3274,13 @@ export class Scene {
       const isHi = !!hi && hi.has(qb);
       const isSel = sel !== null && qb === sel;
       const subject = hi ? (isHi || isSel) : (sel === null || isSel);
-      const dimmed = offBand || !subject;
+      /* A brushed-out wall steps back on both channels the scene already owns —
+       * drained here and made see-through below. One alone was not enough: the
+       * whole point of a brush is that the walls it keeps are a small minority
+       * scattered through five thousand buildings, and desaturation on its own
+       * still leaves five thousand solid buildings in front of them. */
+      const outOfBrush = !!brush && !(tv >= brush[0] && tv <= brush[1]);
+      const dimmed = offBand || !subject || outOfBrush;
       if (dimmed) {
         /* Pushed back by draining the colour, not by darkening it.
          *
@@ -2938,7 +3331,7 @@ export class Scene {
         const b0 = this.quadBuilding[q];
         const subject = b0 === sel || (hi && hi.has(b0)) || (bf && b0 === bf.b);
         ga[q * 4] = ga[q * 4 + 1] = ga[q * 4 + 2] = ga[q * 4 + 3] =
-          (sel !== null && !subject) ? GHOST : 1;
+          ((sel !== null && !subject) || outOfBrush) ? GHOST : 1;
       }
 
       // Accumulate the projection lookup from the very same numbers. Deriving
@@ -2966,6 +3359,45 @@ export class Scene {
     // at the end of it and the bracket has to agree with what is on screen.
     this.paintedRange = (tvLo <= tvHi)
       ? [Math.max(0, tvLo), Math.min(1, tvHi)] : null;
+    // What the model actually solved, whatever the gain drew. The legend takes
+    // its figures from here and its rectangle from `paintedRange`.
+    this.paintedRangeTrue = (ttLo <= ttHi)
+      ? [Math.max(0, ttLo), Math.min(1, ttHi)] : null;
+    /* Vertex values for the isotherms, from the per-quad values just collected.
+     *
+     * A second pass rather than work inside the loop above, because a quad needs
+     * its NEIGHBOURS and the loop only has itself. Quads run panel-major and
+     * band-minor, so band b-1 and b+1 of the same panel are simply q-1 and q+1 —
+     * no adjacency table, one linear sweep, and no ramp evaluation in it. It
+     * costs about a millisecond against the forty the loop above takes.
+     *
+     * Gated on the contours actually being on: the attribute is 1.2 MB and
+     * uploading it beside the 3.5 MB of colour on every hour tick is a third
+     * again of the per-step cost, to feed a shader branch that is switched off. */
+    if (isoOn) {
+      const nb = this.data.facades.bands;
+      const va = this.facadeVal.array;
+      for (let q = 0; q < this.nQuad; q++) {
+        const v = vals[q];
+        const b = this.quadBand[q];
+        // An unsolved quad stays unsolved rather than borrowing a neighbour's
+        // value, which would draw a contour across a gap in the model.
+        if (v < 0) {
+          va[q * 4] = va[q * 4 + 1] = va[q * 4 + 2] = va[q * 4 + 3] = -1;
+          continue;
+        }
+        const below = b > 0 && vals[q - 1] >= 0 ? vals[q - 1] : v;
+        const above = b < nb - 1 && vals[q + 1] >= 0 ? vals[q + 1] : v;
+        // Corners are bottom-left, bottom-right, top-right, top-left.
+        const vb = (v + below) * 0.5, vt = (v + above) * 0.5;
+        va[q * 4] = vb; va[q * 4 + 1] = vb;
+        va[q * 4 + 2] = vt; va[q * 4 + 3] = vt;
+      }
+      this.facadeVal.needsUpdate = true;
+    }
+    this.paintedHist = hist;
+    this.paintedCore = Scene.coreOf(hist);
+    this.paintedCoreTrue = histT === hist ? this.paintedCore : Scene.coreOf(histT);
     this.facadeColors.needsUpdate = true;
     if (ghostDirty) this.facadeGhost.needsUpdate = true;
     if (lutSum !== null) {
@@ -3105,6 +3537,12 @@ export class Scene {
       : RAMPS.temperature;
     const hi = this.highlighted;
     const bf = this.bandFocus || null;
+    // The same three, on the same terms as the walls. A roof left at gain 1
+    // while the walls below it were exaggerated, or left solid while the walls
+    // were brushed away, is the city disagreeing with itself from altitude.
+    const rGain = (this.layer === 'surface') ? (this.detailGain || 1) : 1;
+    const rAnchor = (this.layer === 'excess' || rGain !== 1) ? d.anchorAt(this.hour) : 0;
+    const rBrush = this.valueBrush;
     // The same interpolated strength the facades use — see `_recolour`. Roofs
     // and walls have to recede together or the city half-fades.
     const k = this.dimK === undefined ? DIM_FULL : this.dimK;
@@ -3118,9 +3556,14 @@ export class Scene {
       if (!n) continue;
       const a = d.buildings.attrs[i];
       let c;
+      // The roof's own normalised value, for the brush. Left NaN on the layers
+      // that do not go through the temperature branch — brushing those is a
+      // question about facade bands, and a roof has none.
+      let rtv = NaN;
       if (this.layer === 'priority' || this.layer === 'annual_priority') {
         const v = this.layer === 'priority' ? a?.pr : a?.apr;
-        c = RAMPS.priority(norm(v !== undefined ? v : NaN, 0, 85));
+        rtv = norm(v !== undefined ? v : NaN, 0, 85);
+        c = RAMPS.priority(rtv);
       } else if (annualArr) {
         // The roof takes the mean of its own building's top-band values, which is
         // the closest solved quantity to roof level in an annual plane.
@@ -3132,11 +3575,14 @@ export class Scene {
             if (isFinite(v)) { sum += v; cnt++; }
           }
         }
-        c = annualRamp(norm(cnt ? sum / cnt : NaN, annualDom[0], annualDom[1]));
+        rtv = norm(cnt ? sum / cnt : NaN, annualDom[0], annualDom[1]);
+        c = annualRamp(rtv);
       } else if (this.layer === 'sun') {
+        rtv = 1;
         c = SUNLIT_RGB;   // roofs are always the most exposed surface
       } else if (rDurField) {
-        c = RAMPS.duration(norm(rDurSample[i], rDurDom[0], rDurDom[1]));
+        rtv = norm(rDurSample[i], rDurDom[0], rDurDom[1]);
+        c = RAMPS.duration(rtv);
       } else {
         // A roof sees the whole sky and nothing shades it, so it sits near the
         // top of the range whenever the sun is up. Taken from the panels of the
@@ -3152,7 +3598,13 @@ export class Scene {
           }
           if (cnt) t = sum / cnt;
         }
-        c = RAMPS.temperature(norm(t, dom[0], dom[1]));
+        if (this.layer === 'excess') {
+          rtv = norm(t - rAnchor, EXCESS_DOMAIN[0], EXCESS_DOMAIN[1]);
+          c = RAMPS.excess(rtv);
+        } else {
+          rtv = norm(rAnchor + (t - rAnchor) * rGain, dom[0], dom[1]);
+          c = RAMPS.temperature(rtv);
+        }
       }
       // Roofs are the least obstructed surface in the city, so they carry
       // nearly the full value — trimmed only enough to stop them flaring
@@ -3166,7 +3618,8 @@ export class Scene {
       // Selected OR highlighted, exactly as in `_recolour` — see the note there.
       const isHi = !!hi && hi.has(i);
       const isSel = sel !== null && i === sel;
-      const dimmed = offBand || !(hi ? (isHi || isSel) : (sel === null || isSel));
+      const rOut = !!rBrush && !(rtv >= rBrush[0] && rtv <= rBrush[1]);
+      const dimmed = offBand || !(hi ? (isHi || isSel) : (sel === null || isSel)) || rOut;
       if (dimmed) {
         // Desaturate then dim, for the reason given in _recolour: darkness now
         // carries the measurement and cannot also carry "not the subject".
@@ -3179,7 +3632,7 @@ export class Scene {
         bl = Math.min(1, bl * 1.05);
       }
       const subject = i === sel || (hi && hi.has(i)) || (bf && i === bf.b);
-      const gv = (sel !== null && !subject) ? GHOST : 1;
+      const gv = ((sel !== null && !subject) || rOut) ? GHOST : 1;
       for (let k = 0; k < n; k++) {
         const o = (start + k) * 3;
         arr[o] = r; arr[o + 1] = g; arr[o + 2] = bl;

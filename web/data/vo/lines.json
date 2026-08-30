@@ -1,9 +1,33 @@
 {
+ "01138e4f12018ada46c1": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 3.866,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "045535ac826ecac1fc78": {
+  "text": "Shading is the obvious answer, and it fails. The sun is twenty-six degrees up, almost level with the wall.",
+  "chars": 106,
+  "seconds": 7.314,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "05600336af3914828b9c": {
   "text": "Shading is the obvious answer, and it fails. The sun is twenty-six degrees up, almost level with the wall.",
   "chars": 106,
   "seconds": 8.359,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "0669eea4623941d9bb47": {
+  "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
+  "chars": 99,
+  "seconds": 6.426,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -31,6 +55,30 @@
   "made": "2026-08-30",
   "seconds": 9.587
  },
+ "0ae9f95e97c5228cf310": {
+  "text": "The brief pulls that apart. Sun, neighbours, and what it sheds.",
+  "chars": 63,
+  "seconds": 6.008,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "0cfc2eb115c5b689d132": {
+  "text": "Every building on the list is there for a reason.",
+  "chars": 49,
+  "seconds": 3.5,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "0dea2313b6eeb54759ba": {
+  "text": "One floor is the worst of them, and the schedule names it.",
+  "chars": 58,
+  "seconds": 4.519,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "0f2176ed01e6445e7ea1": {
   "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
   "chars": 70,
@@ -39,11 +87,59 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "0f9ff54c2ba6624a4fd4": {
+  "text": "The usual heat map stops at one number per block, taken at head height.",
+  "chars": 71,
+  "seconds": 5.538,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "10c25d9d0bfb75d2ad49": {
+  "text": "Now round to the north-east. Same floor, no sun at all. Still hot.",
+  "chars": 66,
+  "seconds": 6.374,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "10d50f020514b5cf273c": {
+  "text": "And if the panels don't cover it, you can just ask. This owner wants to insulate his wall.",
+  "chars": 90,
+  "seconds": 5.224,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "10d86f58d3c9178b8232": {
+  "text": "Then it spends a budget, and says where it went.",
+  "chars": 48,
+  "seconds": 3.683,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "1164aded4e691e40ee9f": {
   "text": "And what that bought. one point nine million hours of heat nobody sits through.",
   "chars": 79,
   "seconds": 6.322,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "119b2fe22f2c01561deb": {
+  "text": "Nobody has mapped what heat actually does to a building, wall by wall and hour by hour.",
+  "chars": 87,
+  "seconds": 6.975,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "11ff81e366b973276fb0": {
+  "text": "Down here it's walls. Twenty-nine thousand four hundred, each solved on its own.",
+  "chars": 80,
+  "seconds": 6.374,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -63,6 +159,38 @@
   "made": "2026-08-30",
   "seconds": 8.333
  },
+ "164644632bf100f1fc79": {
+  "text": "Every building on the list is there for a reason.",
+  "chars": 49,
+  "seconds": 3.135,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "1648e4743a4f285c3a24": {
+  "text": "The north-west face catches the late sun. Floor fifteen hits fifty-six.",
+  "chars": 71,
+  "seconds": 6.4,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "172e752014d3b19960af": {
+  "text": "Then floor by floor, split three ways: sun, neighbours, and what it sheds.",
+  "chars": 74,
+  "seconds": 4.989,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "1853c8f4517880314d25": {
+  "text": "Nobody has mapped what heat actually does to a building, wall by wall and hour by hour.",
+  "chars": 87,
+  "seconds": 5.59,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "19b2f590df9bca56e321": {
   "text": "Take this one. Seven forty-seven Second Avenue. Thirty-four floors, nineteen seventy-two, two hundred and sixty-nine homes.",
   "chars": 123,
@@ -79,6 +207,102 @@
   "made": "2026-08-30",
   "seconds": 6.661
  },
+ "1b88d3ae1f78ea6f35ed": {
+  "text": "The north-west face catches the late sun. Floor fifteen hits fifty-six.",
+  "chars": 71,
+  "seconds": 6.4,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "1e6c0001a1c43be86799": {
+  "text": "And what that bought. One point nine million hours of heat nobody sits through.",
+  "chars": 79,
+  "seconds": 6.191,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "1ed93f80b370f71deb1f": {
+  "text": "Nobody has mapped what heat actually does to a building, wall by wall and hour by hour.",
+  "chars": 87,
+  "seconds": 5.773,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "1fa144804ea335037533": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 4.571,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "203595af1253770ef678": {
+  "text": "So it prescribes the glass instead.",
+  "chars": 35,
+  "seconds": 2.247,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "222d3c02011b9d37600e": {
+  "text": "It has the model behind it and twenty tools, and shows its working.",
+  "chars": 67,
+  "seconds": 4.937,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "226666504f461a9f0e06": {
+  "text": "Then it spends a budget, and says where it went.",
+  "chars": 48,
+  "seconds": 2.377,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2373fcea61a060333ebe": {
+  "text": "Which is the answer worth paying for.",
+  "chars": 37,
+  "seconds": 2.664,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "25256a3d74ea90f83eb0": {
+  "text": "Floor fifteen is worst. Fifty-six outside, forty-seven inside, thirteen hundred hours.",
+  "chars": 86,
+  "seconds": 8.307,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "253264de8ad70652d7ea": {
+  "text": "And it moves through time. Any hour, any day, or the whole year.",
+  "chars": 64,
+  "seconds": 4.989,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2570ddc74b64e7fa9616": {
+  "text": "And if the panels don't cover it, you can just ask.",
+  "chars": 51,
+  "seconds": 3.631,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "263ccb7f96a3c7701e06": {
+  "text": "The usual heat map stops at one number per block, taken at head height.",
+  "chars": 71,
+  "seconds": 4.232,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "281f9ffa348d2e870372": {
   "text": "Floor fifteen is worst. Fifty-six outside, forty-seven inside, thirteen hundred hours.",
   "chars": 86,
@@ -91,6 +315,110 @@
   "text": "Concrete soaks up heat all day and gives it back after dark. A city never cools.",
   "chars": 80,
   "seconds": 6.818,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2854a57e2fd90e607069": {
+  "text": "Shading will not work here, and the model says why.",
+  "chars": 51,
+  "seconds": 3.918,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "29bff9b1c0db45c8c397": {
+  "text": "Every building on the list is there for a reason.",
+  "chars": 49,
+  "seconds": 3.5,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2a58419affde574da457": {
+  "text": "So we did. A year over Midtown Manhattan. Eight thousand seven hundred and sixty hours, five days past thirty-five.",
+  "chars": 115,
+  "seconds": 10.371,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2ab24feec91dfadf0d2e": {
+  "text": "So we measured a year of it over Midtown Manhattan. Eight thousand seven hundred and sixty hours, five days past thirty-five.",
+  "chars": 125,
+  "seconds": 9.352,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2b4eb2bc7e37d403d81d": {
+  "text": "This one went down the tower floor by floor, priced the job, and told the owner no.",
+  "chars": 83,
+  "seconds": 7.079,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2be4271da59a82e2616e": {
+  "text": "Change something and it solves again. Cool roofs, trees, a coating.",
+  "chars": 67,
+  "seconds": 6.478,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2c64ab514316f5dae5ad": {
+  "text": "Every building on the list is there for a reason.",
+  "chars": 49,
+  "seconds": 3.814,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2ecf1f6473a943ea6b94": {
+  "text": "The north-west face catches the late sun. Floor fifteen hits fifty-six.",
+  "chars": 71,
+  "seconds": 4.859,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2ef079a691564b0e53f0": {
+  "text": "This one went down the tower floor by floor, priced the job, and told the owner no.",
+  "chars": 83,
+  "seconds": 6.139,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2f5f421a3b85f56b5a7a": {
+  "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
+  "chars": 99,
+  "seconds": 6.191,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "2fda255883a8f6d1288f": {
+  "text": "Run the whole year and the ranking shifts. Twelve of the hottest day's worst fifty are still worst.",
+  "chars": 99,
+  "seconds": 6.191,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "318bf58ce6d4d0f733ad": {
+  "text": "The north-west face catches the late sun. Floor fifteen hits fifty-six.",
+  "chars": 71,
+  "seconds": 6.139,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "32b86a2e22a188d1fb80": {
+  "text": "Nine layers to read it by. Surface temperature, sun and shade, hours above thirty-five, where to act first.",
+  "chars": 107,
+  "seconds": 9.143,
   "voice_id": "local-en-GB-RyanNeural",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
@@ -111,11 +439,67 @@
   "made": "2026-08-30",
   "seconds": 7.445
  },
+ "362c1838f1bf67c00796": {
+  "text": "Give it a budget and it spends it. Fifty-seven million dollars, ninety-one buildings.",
+  "chars": 85,
+  "seconds": 6.922,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "375e7e78882176b1e36c": {
+  "text": "One floor is the worst of them, and the schedule names it.",
+  "chars": 58,
+  "seconds": 3.187,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "398cc191091f01577621": {
   "text": "Now round to the north-east. Same floor, no sun at all. Still forty-two.",
   "chars": 72,
   "seconds": 7.915,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "3a91ab577ec6a6e52476": {
+  "text": "And it moves through time. Any hour, any day, or the whole year.",
+  "chars": 64,
+  "seconds": 4.467,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "3ab5988bbcecec7e65f1": {
+  "text": "Change something and it solves again. Cool roofs, trees, a coating.",
+  "chars": 67,
+  "seconds": 6.531,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "3bb354e78b7d9371e709": {
+  "text": "It has the model behind it and twenty tools, and shows its working.",
+  "chars": 67,
+  "seconds": 4.833,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "3bdaa0877b62b2bed533": {
+  "text": "Then floor by floor, split three ways: sun, neighbours, and what it sheds.",
+  "chars": 74,
+  "seconds": 6.4,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "3c3387a61a540e44513d": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 5.695,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -127,11 +511,83 @@
   "made": "2026-08-30",
   "seconds": 5.825
  },
+ "3ce27df013d7914f0bef": {
+  "text": "So it breaks the building up. Ten bands. Forty-four at the bottom, fifty-seven just above.",
+  "chars": 90,
+  "seconds": 8.307,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "3f813666b400bafa5180": {
+  "text": "Averages hide a lot. Let's go down.",
+  "chars": 35,
+  "seconds": 3.553,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "3fe4b2a2a5e3abeb6110": {
+  "text": "Every building gets a brief. This one opens with three findings.",
+  "chars": 64,
+  "seconds": 5.799,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "3ff068163f70d3335471": {
   "text": "Down here it's walls. Twenty-nine thousand four hundred, each solved on its own.",
   "chars": 80,
   "seconds": 6.661,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "40c5bfa6a4fa7dd69761": {
+  "text": "So the model breaks it up. Ten height bands, every face worked out separately.",
+  "chars": 78,
+  "seconds": 7.079,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "418bb714bc526bde75b3": {
+  "text": "The north-west face catches the late sun. It is the hottest wall here.",
+  "chars": 70,
+  "seconds": 4.859,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "42307c0c05458c2d421b": {
+  "text": "Every building gets a brief. This one opens with three findings.",
+  "chars": 64,
+  "seconds": 4.284,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "43d50a1579278eeebff7": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 4.101,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "43fa54bfff2fd10e10a3": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 5.851,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "45cef82b16f9ffd4b599": {
+  "text": "So it recommends glass. Low solar-gain units, floors five to thirty-five, that face only.",
+  "chars": 89,
+  "seconds": 8.411,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -143,6 +599,38 @@
   "made": "2026-08-30",
   "seconds": 7.784
  },
+ "48d45556fb2e69d0d9dd": {
+  "text": "Which is the answer worth paying for.",
+  "chars": 37,
+  "seconds": 3.056,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "494f090818ac17871970": {
+  "text": "The usual heat map stops at one number per block, taken at head height.",
+  "chars": 71,
+  "seconds": 4.284,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "4b468e4c29c8f8287796": {
+  "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
+  "chars": 99,
+  "seconds": 7.367,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "50580230f686a11a300c": {
+  "text": "And if the panels don't cover it, you can just ask. This owner wants to insulate his wall.",
+  "chars": 90,
+  "seconds": 6.374,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "508f936bfc3d151ca0ba": {
   "text": "So it prescribes the glass. Low solar-gain units, floors one to seven, on that one face.",
   "chars": 88,
@@ -151,10 +639,138 @@
   "made": "2026-08-30",
   "seconds": 8.568
  },
+ "525a9f26bba49e8ac6d7": {
+  "text": "Floor fifteen is worst. Fifty-six outside, forty-seven inside, thirteen hundred hours.",
+  "chars": 86,
+  "seconds": 6.557,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "52c4f99ad524aa3b40d3": {
+  "text": "Run the whole year and the ranking shifts. Twelve of the hottest day's worst fifty are still worst.",
+  "chars": 99,
+  "seconds": 7.68,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "52dd463e72f90e280397": {
+  "text": "It prices the job too. That's one wall, on one building, on one street.",
+  "chars": 71,
+  "seconds": 5.407,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5375bc5189472e1ede99": {
+  "text": "Change something and it solves again. Cool roofs, trees, a coating.",
+  "chars": 67,
+  "seconds": 6.426,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "54f5388fa94c027c8161": {
   "text": "It has the model behind it and twenty tools, and shows its working.",
   "chars": 67,
   "seconds": 4.833,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "556494d6dc49f6159681": {
+  "text": "Every building on the list is there for a reason.",
+  "chars": 49,
+  "seconds": 2.717,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5772b80e021e4c6b4331": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 5.355,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "579dc4e9e718d0b9076a": {
+  "text": "Nine layers to read it by. Surface temperature, sun and shade, hours above thirty-five, where to act first.",
+  "chars": 107,
+  "seconds": 7.393,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "57cb494ecb2221859f50": {
+  "text": "Now round to the north-east. Same floor, no sun, still forty-two.",
+  "chars": 65,
+  "seconds": 4.989,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "582623206d6a7ef52164": {
+  "text": "Floor fifteen is worst. Fifty-six outside, forty-seven inside, thirteen hundred hours.",
+  "chars": 86,
+  "seconds": 8.307,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "588f92b1a1559d6c178b": {
+  "text": "And it moves through time. Any hour, any day, or the whole year.",
+  "chars": 64,
+  "seconds": 5.773,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5984b02747e932433c94": {
+  "text": "Then floor by floor, split three ways: sun, neighbours, and what it sheds.",
+  "chars": 74,
+  "seconds": 6.975,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5a61295d0a82f4388fcb": {
+  "text": "Give it a budget and it spends it. Fifty-seven million dollars, ninety-one buildings.",
+  "chars": 85,
+  "seconds": 5.486,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5a9fd14abe6fd1652027": {
+  "text": "Change something and it solves again. Cool roofs, trees, a coating.",
+  "chars": 67,
+  "seconds": 5.303,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5b6b6fa10d30b08f3c92": {
+  "text": "So the model breaks it up. Ten bands, every face apart. Forty-four degrees at the bottom, fifty-seven just above it.",
+  "chars": 116,
+  "seconds": 9.953,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5c5a3cf13371d1353366": {
+  "text": "It prices the job too. That's one wall, on one building, on one street.",
+  "chars": 71,
+  "seconds": 5.355,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5ca16629f2f819047092": {
+  "text": "Then floor by floor. Every storey split three ways. The sun, the neighbours, and what it sheds.",
+  "chars": 95,
+  "seconds": 8.829,
   "voice_id": "local-en-GB-RyanNeural",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
@@ -167,11 +783,27 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "5ef46774a2150eddb577": {
+  "text": "Take this one as an example. Five sixty Third Avenue, thirty-five floors.",
+  "chars": 73,
+  "seconds": 6.008,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "5f56195f0e10864dfaca": {
   "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
   "chars": 70,
   "seconds": 5.851,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "5f745e526d80d2b45cf8": {
+  "text": "Nine layers to read it by. Surface temperature, sun and shade, hours above thirty-five, where to act first.",
+  "chars": 107,
+  "seconds": 9.822,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -191,6 +823,22 @@
   "made": "2026-08-30",
   "seconds": 14.054
  },
+ "60988c50ed991e8fc208": {
+  "text": "One floor is the worst of them, and the schedule names it.",
+  "chars": 58,
+  "seconds": 3.396,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "60d69daa49a05d11816d": {
+  "text": "Averages hide a lot. Let's go down.",
+  "chars": 35,
+  "seconds": 4.362,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "6206cce459084cc71601": {
   "text": "And you can ask it questions.",
   "chars": 29,
@@ -199,11 +847,27 @@
   "made": "2026-08-30",
   "seconds": 1.881
  },
+ "64650bcdcb4a9828dc29": {
+  "text": "And what that bought. One point nine million hours of heat nobody sits through.",
+  "chars": 79,
+  "seconds": 5.068,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "64ddf1c83e8a17b32cb0": {
   "text": "Down here it's walls. Twenty-nine thousand four hundred, each solved on its own.",
   "chars": 80,
   "seconds": 6.661,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "674735e99618dce2d413": {
+  "text": "Shading will not work here, and the model says why.",
+  "chars": 51,
+  "seconds": 3.37,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -223,11 +887,35 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "6bc3200fb308ba11c8ba": {
+  "text": "So the model breaks it up. Ten height bands, every face worked out separately.",
+  "chars": 78,
+  "seconds": 5.355,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "6c608650dc5ce13af27d": {
+  "text": "Take this one as an example. Five sixty Third Avenue, thirty-five floors.",
+  "chars": 73,
+  "seconds": 5.172,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "6dae8a80fc38f2d0931f": {
   "text": "It prices the job too. That's one wall, on one building, on one street.",
   "chars": 71,
   "seconds": 6.74,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "6dfec123b1722c6d68db": {
+  "text": "So the model breaks it up. Ten height bands, every face worked out separately.",
+  "chars": 78,
+  "seconds": 5.068,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -247,11 +935,67 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "71d6d461c3311f9eea8b": {
+  "text": "So we did. A year over Midtown Manhattan, five days past thirty-five degrees.",
+  "chars": 77,
+  "seconds": 7.445,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "71df28ac080c986f11de": {
+  "text": "So we measured a year of it over Midtown Manhattan. Eight thousand seven hundred and sixty hours, five days past thirty-five.",
+  "chars": 125,
+  "seconds": 9.352,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "7267b097b36b880cfd63": {
+  "text": "Every building on the list is there for a reason.",
+  "chars": 49,
+  "seconds": 3.37,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "744292dcf89f9e7cce2a": {
+  "text": "Averages hide a lot. Let's go down.",
+  "chars": 35,
+  "seconds": 2.978,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "74c1a70bc8ee33e543d2": {
+  "text": "Change something and it solves again. Cool roofs, trees, a coating.",
+  "chars": 67,
+  "seconds": 4.624,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "755768ce774749961372": {
+  "text": "It prices the job too. That's one wall, on one building, on one street.",
+  "chars": 71,
+  "seconds": 5.12,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "7648854e56d179da0ec2": {
   "text": "The brief pulls that apart. Sun, neighbours, and what it sheds.",
   "chars": 63,
   "seconds": 6.217,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "7712d127bb33363b97fb": {
+  "text": "Every building gets a brief. This one opens with three findings.",
+  "chars": 64,
+  "seconds": 4.153,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -263,6 +1007,54 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "79b2c291181cb4c83b7f": {
+  "text": "The north-west face catches the late sun. It is the hottest wall here.",
+  "chars": 70,
+  "seconds": 5.277,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "7a279a2dc18483d4e9df": {
+  "text": "So it prescribes the glass instead.",
+  "chars": 35,
+  "seconds": 3.03,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "7a794ff4445081a9ca02": {
+  "text": "Hours of exposure nobody has to sit through.",
+  "chars": 44,
+  "seconds": 3.187,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "7b9df8c5208d1d1213a3": {
+  "text": "It prices the job too. That's one wall, on one building, on one street.",
+  "chars": 71,
+  "seconds": 6.426,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "7fc5accf99321059bff6": {
+  "text": "Shading will not work here, and the model says why.",
+  "chars": 51,
+  "seconds": 3.448,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "81311ab63aaeb9f4f2e0": {
+  "text": "Now round to the north-east. Same floor, no sun, and still hot.",
+  "chars": 63,
+  "seconds": 4.989,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "82ed3fd24805b05c1e1e": {
   "text": "So we measured a year of it over Midtown. Eight thousand seven hundred and sixty hours.",
   "chars": 87,
@@ -271,11 +1063,51 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "85ff49c07b4144c8cb56": {
+  "text": "The usual heat map stops at one number per block, taken at head height.",
+  "chars": 71,
+  "seconds": 5.224,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "8667acff3207ba41426a": {
+  "text": "So it breaks the building up. Ten bands. Forty-four at the bottom, fifty-seven just above.",
+  "chars": 90,
+  "seconds": 6.113,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "876da2ec7f8fb0ec2f38": {
+  "text": "Down here it's walls. Twenty-nine thousand four hundred, each solved on its own.",
+  "chars": 80,
+  "seconds": 5.172,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "883c17c7bfb09696cc38": {
+  "text": "It told him no. The heat is coming through his glass, not his masonry.",
+  "chars": 70,
+  "seconds": 4.885,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "8c067583365f6cf0c557": {
   "text": "This one went down the tower floor by floor, priced the job, and told the owner no.",
   "chars": 83,
   "seconds": 5.956,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "8c4def199a2ec1170f4c": {
+  "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
+  "chars": 99,
+  "seconds": 7.262,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -319,6 +1151,14 @@
   "made": "2026-08-30",
   "seconds": 7.027
  },
+ "91079590f05a729629b5": {
+  "text": "Run the whole year and the ranking shifts. Twelve of the hottest day's worst fifty are still worst.",
+  "chars": 99,
+  "seconds": 6.191,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "92535e26f8b2747ee03a": {
   "text": "The north-west face takes the late sun. On the twenty-fifth floor it reaches fifty-five degrees.",
   "chars": 96,
@@ -326,6 +1166,46 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30",
   "seconds": 8.046
+ },
+ "92a57e51216345d51a53": {
+  "text": "So we did. A year over Midtown Manhattan, five days past thirty-five degrees.",
+  "chars": 77,
+  "seconds": 6.113,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "97316dcf8c1c5e47be7c": {
+  "text": "Run the whole year and the ranking shifts. Twelve of the hottest day's worst fifty are still worst.",
+  "chars": 99,
+  "seconds": 7.497,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "97d6330d88a95a5148f0": {
+  "text": "From up here it's one number per block, taken at head height.",
+  "chars": 61,
+  "seconds": 4.415,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "99c26d18f7508edbde0a": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 5.851,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "99d70db1d43cd7f69402": {
+  "text": "Nobody has mapped what heat actually does to a building, wall by wall and hour by hour.",
+  "chars": 87,
+  "seconds": 8.046,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
  },
  "9a6d875eedf0d14006ae": {
   "text": "Then it spends a budget. Two million dollars, twenty buildings, thirty-three measures.",
@@ -335,7 +1215,23 @@
   "made": "2026-08-30",
   "seconds": 7.158
  },
+ "9b6ae979cd8372b8a7ed": {
+  "text": "So we did. A year over Midtown Manhattan, five days past thirty-five degrees.",
+  "chars": 77,
+  "seconds": 5.538,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "9e7c1cde4201e6405883": {
+  "text": "And it moves through time. Any hour, any day, or the whole year.",
+  "chars": 64,
+  "seconds": 6.269,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "9ead8c24f5dba42b4c6a": {
   "text": "And it moves through time. Any hour, any day, or the whole year.",
   "chars": 64,
   "seconds": 6.269,
@@ -351,11 +1247,59 @@
   "made": "2026-08-30",
   "seconds": 8.046
  },
+ "a0cc83e3537710952785": {
+  "text": "So we did. A year over Midtown Manhattan. Eight thousand seven hundred and sixty hours, five days past thirty-five.",
+  "chars": 115,
+  "seconds": 9.822,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "a32ce2bd567117a44f30": {
+  "text": "So the model breaks it up. Ten bands, every face apart. Forty-four at the bottom, fifty-seven just above it.",
+  "chars": 108,
+  "seconds": 9.038,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "a43de409ded523f95b40": {
+  "text": "So it recommends glass. Low solar-gain units, floors five to thirty-five, that face only.",
+  "chars": 89,
+  "seconds": 6.896,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "a7ad9012b8c4278cd5f3": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 4.937,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "a985f519dee8c9bd4a5d": {
   "text": "So the model breaks it up. Ten height bands, every face worked out separately.",
   "chars": 78,
   "seconds": 6.609,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "aac3439f18a5613c996d": {
+  "text": "Shading is the obvious answer, and it fails. The sun is twenty-six degrees up, almost level with the wall.",
+  "chars": 106,
+  "seconds": 8.986,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "ab27f04d5a6801d5049b": {
+  "text": "The north-west face catches the late sun. It is the hottest wall here.",
+  "chars": 70,
+  "seconds": 4.284,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -367,6 +1311,38 @@
   "made": "2026-08-30",
   "seconds": 9.3
  },
+ "aca0e81e74947629d802": {
+  "text": "Averages hide a lot. Let's go down.",
+  "chars": 35,
+  "seconds": 2.978,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "aca335884e45a7ae9df4": {
+  "text": "Hours of exposure nobody has to sit through.",
+  "chars": 44,
+  "seconds": 4.336,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "adaef01b11f0a3bf5f3e": {
+  "text": "The usual heat map stops at one number per block, taken at head height.",
+  "chars": 71,
+  "seconds": 5.224,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "adddbd9f6a069fa4ce12": {
+  "text": "Then floor by floor, split three ways: sun, neighbours, and what it sheds.",
+  "chars": 74,
+  "seconds": 5.46,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "afe59daf7899e11b050c": {
   "text": "Shading is the obvious answer, and it fails. The sun is twenty-six degrees up, almost level with the wall.",
   "chars": 106,
@@ -375,10 +1351,34 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "b1392c623ef5d071d5e2": {
+  "text": "The usual heat map stops at one number per block, taken at head height.",
+  "chars": 71,
+  "seconds": 5.59,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "b1795dd9fb1a0e360aed": {
   "text": "Averages hide a lot. Let's go down.",
   "chars": 35,
   "seconds": 4.362,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "b2127a40e1daae7f5288": {
+  "text": "Then floor by floor. Surface temperature, the cost of holding twenty-four inside.",
+  "chars": 81,
+  "seconds": 7.158,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "b426e949533751623a5e": {
+  "text": "And if the panels don't cover it, you can just ask. This owner wants to insulate his wall.",
+  "chars": 90,
+  "seconds": 6.844,
   "voice_id": "local-en-GB-RyanNeural",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
@@ -391,6 +1391,14 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "b6e6276b457090c138d1": {
+  "text": "So the model breaks it up. Ten bands, every face apart. Forty-four at the bottom, fifty-seven just above it.",
+  "chars": 108,
+  "seconds": 9.456,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "b7a325720147ea4bd28b": {
   "text": "A hundred and fifty thousand hours of exposure nobody has to sit through.",
   "chars": 73,
@@ -398,6 +1406,22 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30",
   "seconds": 5.172
+ },
+ "b88db3d2671a8c2e7661": {
+  "text": "On the flat map it's one shade of orange. It's nowhere near that even.",
+  "chars": 70,
+  "seconds": 5.851,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "bb13ef7cf9bec0bab1f6": {
+  "text": "Give it a budget and it spends it. Fifty-seven million dollars, ninety-one buildings.",
+  "chars": 85,
+  "seconds": 6.609,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
  },
  "bc25b94bec9c98eecde8": {
   "text": "Shading will not work here. At the peak hour the sun is twenty-six degrees up and twenty degrees off the wall. An overhang would need four metres.",
@@ -407,10 +1431,82 @@
   "made": "2026-08-30",
   "seconds": 11.128
  },
+ "bcef4d5a128166b379e1": {
+  "text": "It told him no. The heat is coming through his glass, not his masonry.",
+  "chars": 70,
+  "seconds": 5.355,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c02dab37f6f438720854": {
+  "text": "It has the model behind it and twenty tools, and shows its working.",
+  "chars": 67,
+  "seconds": 3.866,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c05a30b3809df3c345c0": {
+  "text": "Then floor by floor. Surface temperature, the cost of holding twenty-four inside.",
+  "chars": 81,
+  "seconds": 6.975,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c18298e9e7161cd8bd18": {
+  "text": "And what that bought. One point nine million hours of heat nobody sits through.",
+  "chars": 79,
+  "seconds": 6.322,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c2f52bd0d971bdae4fed": {
+  "text": "The north-west face catches the late sun. Floor fifteen hits fifty-six.",
+  "chars": 71,
+  "seconds": 6.06,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c3c03354f6c95bc1a0a1": {
+  "text": "Which is the answer worth paying for.",
+  "chars": 37,
+  "seconds": 2.299,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c4ac5b1e5ad58d747947": {
+  "text": "Now scale it up. Every wall in Midtown has had the same treatment.",
+  "chars": 66,
+  "seconds": 4.153,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c4f4f87f201c54c63a5f": {
+  "text": "Nobody has mapped what heat actually does to a building, wall by wall and hour by hour.",
+  "chars": 87,
+  "seconds": 5.773,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "c50223d8b342aa182e81": {
   "text": "The north-west face catches the late sun. Floor twenty-five hits fifty-five.",
   "chars": 76,
   "seconds": 6.531,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c57d370984483d3f4eef": {
+  "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
+  "chars": 99,
+  "seconds": 7.34,
   "voice_id": "local-en-GB-RyanNeural",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
@@ -428,6 +1524,30 @@
   "chars": 78,
   "seconds": 6.609,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c64abb5b1d2e199acbaf": {
+  "text": "Then it spends a budget, and says where it went.",
+  "chars": 48,
+  "seconds": 3.03,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c6bc940e30dd9484edb6": {
+  "text": "Which is the answer worth paying for.",
+  "chars": 37,
+  "seconds": 2.064,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "c780e8f4f42a66a2f259": {
+  "text": "It prices the job too. That's one wall, on one building, on one street.",
+  "chars": 71,
+  "seconds": 6.322,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -463,6 +1583,14 @@
   "made": "2026-08-30",
   "seconds": 11.755
  },
+ "cf3a862b634697297eec": {
+  "text": "The north-west face catches the late sun. Floor fifteen hits fifty-six.",
+  "chars": 71,
+  "seconds": 6.4,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "d28cfa4441803c3d0a48": {
   "text": "Floor twenty-five is the worst. Fifty-five outside, forty-one to forty-eight in the rooms, and it fails for fifteen hundred hours a year.",
   "chars": 137,
@@ -487,11 +1615,123 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "d6711c25afb100d554e6": {
+  "text": "Now scale it up. Every wall in Midtown has had the same treatment.",
+  "chars": 66,
+  "seconds": 5.695,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "d6cbd0f676593133ef83": {
+  "text": "And it moves through time. Any hour, any day, or the whole year.",
+  "chars": 64,
+  "seconds": 6.269,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "d8a479887b516c763420": {
+  "text": "Now round to the north-east. Same floor, no sun at all. Still forty-two.",
+  "chars": 72,
+  "seconds": 6.426,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "d8a8ccb61fc4b7c27c46": {
+  "text": "So we did. A year over Midtown Manhattan. Eight thousand seven hundred and sixty hours, five days past thirty-five degrees.",
+  "chars": 123,
+  "seconds": 12.565,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "d8c933e4077ca6712e1a": {
+  "text": "Hours of exposure nobody has to sit through.",
+  "chars": 44,
+  "seconds": 3.082,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "d9aa3d899c1ddf3c37b8": {
+  "text": "Every building on the list is there for a reason.",
+  "chars": 49,
+  "seconds": 3.082,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "db78b420a8804bc3dfd3": {
   "text": "Now round to the north-east. Same floor, no sun at all. Still forty-one.",
   "chars": 72,
   "seconds": 7.967,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "dbbe2257d7f4b2bb2cb8": {
+  "text": "Concrete soaks up heat all day and gives it back after dark. A city never cools.",
+  "chars": 80,
+  "seconds": 6.818,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "dd16f66d1ec26772197c": {
+  "text": "Nobody has mapped what heat actually does to a building, wall by wall and hour by hour.",
+  "chars": 87,
+  "seconds": 5.773,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "ddc90c1d64949a8d7258": {
+  "text": "Now scale it up. Every wall in Midtown has had the same treatment.",
+  "chars": 66,
+  "seconds": 4.441,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "e07d037bb479394f6284": {
+  "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
+  "chars": 99,
+  "seconds": 7.34,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "e108c80c1c1046fa779b": {
+  "text": "Take this one as an example. Five sixty Third Avenue, thirty-five floors.",
+  "chars": 73,
+  "seconds": 4.859,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "e13ed03217ded512ee3b": {
+  "text": "Down here it's walls. Twenty-nine thousand four hundred, each solved on its own.",
+  "chars": 80,
+  "seconds": 5.46,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "e2d5321072937344b4bd": {
+  "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
+  "chars": 99,
+  "seconds": 6.06,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "e3de41418b8b0d318698": {
+  "text": "It has the model behind it and twenty tools, and shows its working.",
+  "chars": 67,
+  "seconds": 4.441,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -503,11 +1743,43 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "e6111d0cadc82f9f8017": {
+  "text": "Nine layers to read it by. Surface temperature, sun and shade, hours above thirty-five, where to act first.",
+  "chars": 107,
+  "seconds": 8.046,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "e95135e50ec51b5b0bbd": {
+  "text": "Now scale it up. Every wall in Midtown has had the same treatment.",
+  "chars": 66,
+  "seconds": 5.355,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "e9c7bb6159b7af752e5b": {
   "text": "Concrete soaks up heat all day and gives it back after dark. A city never cools.",
   "chars": 80,
   "seconds": 6.818,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "ea0d87ed6c54fdf4253d": {
+  "text": "Floor fifteen is worst. Fifty-six outside, forty-seven inside, thirteen hundred hours.",
+  "chars": 86,
+  "seconds": 8.281,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "eb444bd244034da86938": {
+  "text": "Nobody has mapped what heat actually does to a building, wall by wall and hour by hour.",
+  "chars": 87,
+  "seconds": 5.486,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
@@ -543,6 +1815,22 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "f0256c866c6b396c3e34": {
+  "text": "So it prescribes the glass instead.",
+  "chars": 35,
+  "seconds": 2.612,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "f040282b6f2569bd77bc": {
+  "text": "It told him no. The heat is coming through his glass, not his masonry.",
+  "chars": 70,
+  "seconds": 6.008,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "f2600f11ad59fb54c676": {
   "text": "So where's that from? The wall across an eighteen-metre street, radiating heat straight back at it.",
   "chars": 99,
@@ -559,10 +1847,34 @@
   "made": "2026-08-30",
   "seconds": 5.12
  },
+ "f4fadb208e0c73486d2a": {
+  "text": "So the model breaks it up. Ten bands, every face apart. Forty-four degrees at the bottom, fifty-seven just above it.",
+  "chars": 116,
+  "seconds": 10.136,
+  "voice_id": "onwK4e9ZLuTAKqWW03F9",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "f68a40c702d837258f3e": {
+  "text": "Every building gets a brief. This one opens with three findings.",
+  "chars": 64,
+  "seconds": 5.799,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "fa21ea883ebf4bc04350": {
   "text": "Take this one as an example. Five sixty Third Avenue, thirty-five floors.",
   "chars": 73,
   "seconds": 6.949,
+  "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "fb606fb1b8a887bb6f9c": {
+  "text": "Now round to the north-east. Same floor, no sun, still forty-two.",
+  "chars": 65,
+  "seconds": 6.818,
   "voice_id": "local-en-GB-RyanNeural",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
@@ -575,11 +1887,27 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "fbddbb23d26264ea32f8": {
+  "text": "Now round to the north-east. Same floor, no sun, and still hot.",
+  "chars": 63,
+  "seconds": 5.407,
+  "voice_id": "pNInz6obpgDQGcFmaJgB",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
  "fe003de34363ba293711": {
   "text": "Eight ways to read it. Surface temperature, sun and shade, hours above thirty-five, where to act first.",
   "chars": 103,
   "seconds": 8.594,
   "voice_id": "local-en-GB-RyanNeural",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-30"
+ },
+ "fe795132a7bebeaa2dd2": {
+  "text": "Change something and it solves again. Cool roofs, trees, a coating.",
+  "chars": 67,
+  "seconds": 4.937,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },

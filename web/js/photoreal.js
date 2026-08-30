@@ -503,6 +503,10 @@ export class Photoreal {
      * even nearly, because the pale middle is the *lightest* part of the scale.
      * Carried explicitly and packed into the LUT's alpha. */
     this.lutT = null;
+    /* Isotherm interval and strength, shared by reference with the massing
+     * shader — see the note where the scene hands them over. */
+    this.isoU = o.isoU || { value: 0 };
+    this.isoKU = o.isoKU || { value: 1 };
     /* One aggregate per building: the peak value anywhere on its facades, and
      * the ramp colour at that value. This is what the far regime paints on
      * roofs, and it is written by the scene rather than derived in GLSL for the
@@ -1104,6 +1108,8 @@ export class Photoreal {
         uParams: { value: this.params },
         uLut: { value: this.lut },
         uLutSize: { value: new THREE.Vector2(this.lutW, this.lutH) },
+        uIso: this.isoU,
+        uIsoK: this.isoKU,
         uNBands: { value: this.nBands },
         uGroundY: { value: this.groundY },
       };
@@ -1139,6 +1145,8 @@ export class Photoreal {
              uniform sampler2D uLut;
              uniform sampler2D uAgg;
              uniform vec2 uLutSize;
+             uniform float uIso;
+             uniform float uIsoK;
              uniform float uNBands;
              uniform float uGroundY;
 
@@ -1467,6 +1475,96 @@ export class Photoreal {
                          vec2( ( col + 0.5 ) / uLutSize.x,
                                ( bidx + 0.5 ) / uLutSize.y ) );
 
+                       /* ---- the same value again, continuous in height
+                        *
+                        * ONLY for the isotherms, and it exists because the
+                        * lookup is a step function. A cell is one building, one
+                        * 45 degree bucket, one of ten bands, so t below is
+                        * flat across a whole band and jumps at the boundary.
+                        * Contours read the derivative, and the derivative of a
+                        * staircase is zero everywhere and infinite at ten
+                        * heights — which draws nothing at all, or ten hard
+                        * seams, and neither is an isotherm.
+                        *
+                        * So the two bands either side of the fragment are
+                        * sampled and mixed by where it actually sits between
+                        * their centres. Ten knots up a facade, linear between
+                        * them.
+                        *
+                        * That is very nearly, but not exactly, the profile the
+                        * massing mesh draws. A quad there carries one straight
+                        * segment per band between its two edge values, where
+                        * this carries the knot at the band centre. Measured on a
+                        * plausible wall the two agree EXACTLY at every band
+                        * boundary and differ by at most 0.25 K in between, an
+                        * eighth of a 2 K interval, and both cross the same
+                        * isotherms the same number of times. So a line can sit a
+                        * fraction of a storey apart between the photograph and
+                        * the prisms. Worth knowing; not worth doubling the
+                        * facade geometry to remove.
+                        *
+                        * Two extra samples, inside a branch on a uniform, so
+                        * they cost nothing at all with the contours switched
+                        * off. The COLOUR is deliberately left on the nearest
+                        * band: this is here to add lines, not to quietly
+                        * resample the projection everybody has been looking at.
+                        *
+                        * A cell with alpha 0 is an orientation the building does
+                        * not have, and mixing toward it would drag a contour
+                        * toward a value no panel ever reported — so where either
+                        * neighbour is empty the fragment keeps its own band's
+                        * value and simply draws no line. */
+                       float tIso = -1.0;
+                       float wIso = 0.0;
+                       if ( uIso > 0.0 ) {
+                         /* Clamp the COORDINATE, then split it. Clamping the
+                          * band index instead leaves the fraction behind: below
+                          * the lowest band centre bc is negative, floor takes it
+                          * to -1, the index clamps back up to 0 but the fraction
+                          * is still 0.5 - so the bottom of every wall in the
+                          * city came out halfway between its first two bands
+                          * instead of holding its first. Measured against the
+                          * massing profile on a plausible wall that was 0.5 K of
+                          * disagreement at the ground, a quarter of a contour
+                          * interval, on the storey at eye level. */
+                         float bc = clamp( rel * uNBands - 0.5,
+                                           0.0, uNBands - 1.0 );
+                         float bA = floor( bc );
+                         float bB = min( bA + 1.0, uNBands - 1.0 );
+                         vec4 hA = texture2D( uLut,
+                           vec2( ( bucket * uNBands + bA + 0.5 ) / uLutSize.x,
+                                 ( bidx + 0.5 ) / uLutSize.y ) );
+                         vec4 hB = texture2D( uLut,
+                           vec2( ( bucket * uNBands + bB + 0.5 ) / uLutSize.x,
+                                 ( bidx + 0.5 ) / uLutSize.y ) );
+                         /* Mix first, differentiate, THEN test validity.
+                          *
+                          * fwidth is undefined where fragments of one 2x2 quad
+                          * took different branches, and the alpha test is such a
+                          * branch: it divides the quads that straddle the seam
+                          * between two 45 degree orientation buckets, which is a
+                          * line running up every corner of every building. Doing
+                          * the derivative before the test puts every fragment on
+                          * the same path for it. An empty cell has alpha 0, so
+                          * its term is a well-defined -0.0039 rather than a NaN,
+                          * and it is thrown away immediately afterwards.
+                          *
+                          * This does NOT make the derivative fully defined. The
+                          * whole wall block sits inside per-fragment tests on
+                          * height and coverage, so quads straddling a building's
+                          * silhouette still diverge. That residue is a one-pixel
+                          * edge and it fails safe: a garbage derivative is a
+                          * large one, and a large one is faded to nothing by the
+                          * smoothstep below. Removing it entirely would mean
+                          * hoisting the LUT sampling to the top of main and
+                          * paying for it on every fragment in the frame. */
+                         float tMix = mix( ( hA.a * 255.0 - 1.0 ) / 254.0,
+                                           ( hB.a * 255.0 - 1.0 ) / 254.0,
+                                           bc - bA );
+                         wIso = fwidth( tMix / uIso );
+                         if ( hA.a > 0.0 && hB.a > 0.0 ) tIso = tMix;
+                       }
+
                        /* Alpha 0 marks a cell no panel ever contributed to — a
                         * wall orientation this building does not have. Anything
                         * else carries the cell's own normalised value, which is
@@ -1498,8 +1596,29 @@ export class Photoreal {
                          float shade = mix( 1.0,
                                             clamp( l * 2.2 + 0.15, 0.35, 1.5 ),
                                             depth );
+                         /* The isotherms, on the photograph.
+                          *
+                          * Identical arithmetic to the massing shader: distance
+                          * to the nearest multiple of the interval, measured in
+                          * screen space so a line stays one pixel wide at any
+                          * zoom, and faded out before the spacing reaches the
+                          * pixel grid — without that fade every fragment lands
+                          * within a line-width of a multiple at distance and a
+                          * dense wall renders uniformly darker instead of
+                          * banded. The zero-gradient guard does the same work it
+                          * does there, and more of it: a building whose bands
+                          * are all clamped at an end of the domain is flat in
+                          * tIso too. */
+                         vec3 heatRgb = heat.rgb;
+                         if ( uIso > 0.0 && tIso >= 0.0 && wIso > 1e-5 ) {
+                           float xs = tIso / uIso;
+                           float line = 1.0 - clamp(
+                             abs( fract( xs - 0.5 ) - 0.5 ) / wIso, 0.0, 1.0 );
+                           line *= 1.0 - smoothstep( 0.35, 0.9, wIso );
+                           heatRgb *= 1.0 - 0.55 * line * uIsoK;
+                         }
                          float amt = wallAmt * over;
-                         glow += heat.rgb * ( amt * shade );
+                         glow += heatRgb * ( amt * shade );
                          wSum += amt;
                        }
                      }

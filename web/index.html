@@ -173,9 +173,16 @@
 
           <div class="lblock">
             <p class="mdesc" id="legend-cap"></p>
-            <div class="ramp" id="legend-ramp"><i id="legend-span" hidden></i></div>
+            <div class="lscale" id="legend-scale">
+              <canvas class="lhist" id="legend-hist"></canvas>
+              <div class="ramp" id="legend-ramp"><i id="legend-span" hidden></i></div>
+              <i class="brush" id="legend-brush" hidden></i>
+            </div>
             <div class="ticks" id="legend-ticks"></div>
             <p class="note" id="legend-here" hidden></p>
+            <p class="note lbrush" id="legend-brushnote" hidden></p>
+            <p class="note" id="legend-gain" hidden></p>
+            <p class="note" id="legend-iso" hidden></p>
             <p class="note" id="legend-note" hidden></p>
           </div>
 

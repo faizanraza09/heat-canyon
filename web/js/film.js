@@ -1276,9 +1276,13 @@ export class Film {
      * BROADBAND NOISE CANNOT BE FILTERED OUT OF THE WAY. Two cascaded highpass
      * filters at 6 kHz still leave noise at 2-3 kHz only about 25 dB down, and
      * noise has energy everywhere by definition — adding an "air" bed at any
-     * useful level took the separation from 30 dB to 11. So there is no
-     * continuous air bed. It survives only in the descent, where it is a sound
-     * effect on a camera move rather than a bed under a sentence.
+     * useful level took the separation from 30 dB to 11. So there is no air bed
+     * at all. It was kept for a while in the descent, on the argument that a
+     * sound effect on a camera move is not a bed under a sentence — which is
+     * true, and beside the point: the descent is also the only stretch of the
+     * film with no narration over it, so there was nothing there to cover what
+     * the table calls "air" and it read plainly as escaping gas. See the note
+     * where it used to be built, below the oscillators.
      *
      * SINES HAVE NO HARMONICS, which is the whole trick. A triangle at 220 Hz
      * puts energy at 660, 1100, 1540 — straight into the speech band. Pure
@@ -1329,29 +1333,22 @@ export class Film {
     lfo.connect(lfoGain); lfoGain.connect(swell.gain); lfo.start();
     this.nodes.push(lfo);
 
-    /* Air, and it is a descent effect now rather than part of the bed.
+    /* THERE IS NO AIR BED ANY MORE, and the descent is better without it.
      *
-     * Held at zero except while the camera is falling — see the beat that ramps
-     * `airGain` — because of the measurement above: at any level where it can be
-     * heard it is also masking consonants. Two poles at 7 kHz rather than one at
-     * 780 Hz, so what does open during the dive is the top of a rush of air and
-     * not a hiss across the middle of the voice.
+     * There was: white noise through two highpasses at 7 kHz, opened to 0.12
+     * over the fall and closed again, meant to read as a rush of air. The
+     * measurement above is the reason it was filtered so far up — at any level
+     * where it could be heard at all it was also masking consonants — and the
+     * honest reading of that table is that the effect never had a level that
+     * both worked and stayed out of the way. What it actually sounded like was
+     * escaping gas over the one stretch of film with no narration to hide it.
+     *
+     * The 36 Hz sub below survives and is doing the work the air was supposed
+     * to: the fall reads as weight, not as friction. Deleted outright rather
+     * than left at zero, because a looping buffer source and two biquads that
+     * can never be heard are cost with no upside, and a gain node nothing ramps
+     * is an invitation to wonder what it was for.
      */
-    const len = ac.sampleRate * 4;
-    const buf = ac.createBuffer(1, len, ac.sampleRate);
-    const ch = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * 0.5;
-    const noise = ac.createBufferSource();
-    noise.buffer = buf; noise.loop = true;
-    const h1 = ac.createBiquadFilter();
-    h1.type = 'highpass'; h1.frequency.value = 7000; h1.Q.value = 0.5;
-    const h2 = ac.createBiquadFilter();
-    h2.type = 'highpass'; h2.frequency.value = 7000; h2.Q.value = 0.7;
-    this.airGain = ac.createGain(); this.airGain.gain.value = 0;
-    noise.connect(h1); h1.connect(h2); h2.connect(this.airGain);
-    this.airGain.connect(master);
-    noise.start(); this.nodes.push(noise);
-
     const sub = ac.createOscillator();
     sub.type = 'sine'; sub.frequency.value = 36;
     this.subGain = ac.createGain(); this.subGain.gain.value = 0;
@@ -1896,11 +1893,11 @@ export class Film {
       // when the globe finally goes, the frame underneath is not a frame the
       // application chose, it is this frame with buildings in it.
       this.hooks.onHandoff?.(b.dur);
-      if (this.airGain && this.ac) {
+      if (this.subGain && this.ac) {
         const t = this.ac.currentTime;
-        this.airGain.gain.linearRampToValueAtTime(0.12, t + b.dur * 0.7);
+        // The sub alone now. It used to be the floor under a bed of filtered
+        // noise; with the noise gone these two ramps are the whole descent.
         this.subGain.gain.linearRampToValueAtTime(0.34, t + b.dur * 0.6);
-        this.airGain.gain.linearRampToValueAtTime(0.0, t + b.dur + 3.0);
         this.subGain.gain.linearRampToValueAtTime(0.04, t + b.dur + 3.0);
       }
     }

@@ -57,10 +57,29 @@ API = "https://api.elevenlabs.io/v1"
 
 CACHE = Path("web") / "data" / "vo"
 
-# Daniel: British, low, unhurried, and the closest thing in the public voice
-# library to the register the script is written in. Overridable, and
-# `heatcanyon voice --voices` prints the ids on the account.
-DEFAULT_VOICE = "onwK4e9ZLuTAKqWW03F9"
+# Adam. Overridable with HEATCANYON_VOICE_ID, and `heatcanyon voice --voices`
+# prints the ids on the account.
+#
+# CHANGING THIS RETIRES THE WHOLE CACHE, and that is by design rather than by
+# accident: `key_for` hashes the voice id along with the sentence, so every
+# recording made under the previous voice becomes unreachable rather than being
+# silently mixed in with the new one. A film half in one voice and half in
+# another is the failure that guarantees, and it cannot happen.
+#
+# It was Daniel before this. Nothing is lost by the change — the script had
+# already moved far enough that none of those recordings matched a line the film
+# still says — but if it is changed again after a paid bake, that bake is spent.
+# THERE ARE TWO ADAMS, and only one of them works on a free key.
+#
+# `wBXNqKUATyqu0RtYt25i` is the community-library Adam — narrative, deep, and the
+# better read for this script. The API refuses it with 402 paid_plan_required:
+# "Free users cannot use library voices via the API." That refusal costs nothing
+# and is per line, so the bake completes, records nothing, and reports success
+# with every line still missing. `heatcanyon voice --voices` is what tells the
+# two apart: the library one is tagged `professional`, this one `premade`.
+# George: British, middle-aged, tagged narrative_story — the register the script
+# is actually written in. Adam (premade) read it as social-media firm.
+DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb"
 
 # `eleven_multilingual_v2` is the expensive one (one credit per character) and
 # the one that sounds like a person reading rather than a person announcing.

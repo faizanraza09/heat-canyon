@@ -155,6 +155,83 @@ export const SUNLIT_RGB = [238, 184, 102];
 export const SUN_CSS =
   `linear-gradient(90deg, rgb(${SHADE_RGB}) 0 50%, rgb(${SUNLIT_RGB}) 50% 100%)`;
 
+/** The excess-over-air scale, K. What "Façade excess over air" is read against.
+ *
+ * WHY A SECOND SCALE EXISTS AT ALL, WHEN THE WHOLE FILE ARGUES FOR ONE.
+ *
+ * It is not a second scale for the same quantity. TEMP_DOMAIN is still the only
+ * thing any TEMPERATURE is read against. This is the domain of a different
+ * quantity — the difference between a wall and the air standing beside it — and
+ * that quantity exists because of a measurement.
+ *
+ * Decompose the solved facade field and it comes apart cleanly:
+ *
+ *     T_surface(panel, band, hour)  =  T_air(hour)  +  excess(panel, band, hour)
+ *
+ * Pooled over all thirteen solved periods at all eight hours — 104 fields, 294,150
+ * panel-bands each — 96.0% of the total variance is BETWEEN fields and 4.0% is
+ * within one. The between-field term is T_air: one number per hour, no spatial
+ * structure of any kind. It is what makes January blue and July red, and it eats
+ * the scale. Median within-field spatial sd is 0.93 K against a total sd of 12.74 K.
+ *
+ * So a fixed 80 K domain is being spent on a field whose spatial content is a
+ * twenty-fifth of its variance, and the arithmetic of that is brutal. Integrating
+ * dE along CANYON in OKLab gives about 102 dE across the whole ramp — roughly
+ * 0.8 K per just-noticeable difference. The median field spans 4.0 K from its 1st
+ * to its 99th percentile. Five distinguishable steps, for 29,415 panels. On the
+ * heat-wave afternoon it is thirty-one and the layer is superb; on 55 of the 104
+ * fields it is five or fewer and the city reads as one flat wash. The layer works
+ * where it is not needed.
+ *
+ * Subtracting T_air does not widen a single field — subtracting a constant cannot
+ * — but it lets the DOMAIN shrink from 80 K to 24 K without a colour ever moving
+ * between one hour and another. Measured the same way: median 25.8 dE per field
+ * against the absolute layer's 4.8. About 5.4x the visible structure, for no loss
+ * of comparability whatsoever. A +22 K wall in January and a +22 K wall in July
+ * are still the same colour and still the same fact.
+ *
+ * WHERE THE ENDS COME FROM. Both are round, for the reason TEMP_DOMAIN's are.
+ * -4 K covers night-time radiative cooling to the sky, which bottoms near -6 K on
+ * a handful of top-band panels and clamps. +20 K covers the sunlit tail; the
+ * pooled 99th percentile is 15.1 K and the heat-wave afternoon's own 99th is 21.6,
+ * so the very peak of the peak hour clamps. Across all 104 fields 0.25% of panels
+ * clamp at one end or the other. A tighter +16 buys another 2 dE of median and
+ * triples the clamping, which is the wrong trade on the one hour the project is
+ * actually about.
+ *
+ * THE ZERO IS THE POINT, and it is not in the middle. Zero means the wall is at
+ * air temperature, so it sits at (0 - -4) / 24 = 16.7% of the ramp and the stops
+ * below are compressed to match. Asymmetric on purpose: the sign change is
+ * physical — below zero a surface is losing to the sky faster than the air can
+ * resupply it, above zero it is gaining from the sun or from its neighbours — and
+ * an ordinary symmetric ramp would put that boundary somewhere with no meaning.
+ * Compressing four stops into the cool 17% is also where it helps most: the night
+ * fields that are flattest on the absolute scale straddle zero, and they get the
+ * fastest part of the ramp.
+ *
+ * It reuses DIVERGING's colours rather than inventing a set. Blue is cooler and
+ * red is warmer here exactly as it is on the heat ramp and on scenario deltas,
+ * which is the one colour language this file exists to defend. */
+export const EXCESS_DOMAIN = [-4, 20];
+
+/** DIVERGING's nine colours, re-spaced so its neutral lands on excess = 0. */
+const EXCESS = [
+  [0.0000, [ 58,  96, 122]],
+  [0.0417, [ 96, 132, 150]],
+  [0.0833, [148, 172, 180]],
+  [0.1250, [206, 210, 206]],
+  [0.1667, [237, 231, 220]],
+  [0.3750, [236, 198, 168]],
+  [0.5833, [223, 155, 116]],
+  [0.7917, [206, 108,  70]],
+  [1.0000, [176,  62,  44]],
+];
+
+export const EXCESS_CSS =
+  'linear-gradient(90deg, rgb(58,96,122) 0%, rgb(96,132,150) 4.17%, rgb(148,172,180) 8.33%,'
+  + ' rgb(206,210,206) 12.5%, rgb(237,231,220) 16.67%, rgb(236,198,168) 37.5%,'
+  + ' rgb(223,155,116) 58.33%, rgb(206,108,70) 79.17%, rgb(176,62,44) 100%)';
+
 const DIVERGING = [
   [58, 96, 122], [96, 132, 150], [148, 172, 180], [206, 210, 206], [237, 231, 220],
   [236, 198, 168], [223, 155, 116], [206, 108, 70], [176, 62, 44],
@@ -198,6 +275,7 @@ export const RAMPS = {
   duration:    (t) => stopped(CANYON, t),
   priority:    (t) => stopped(CANYON, t),
   diverging:   (t) => even(DIVERGING, t),
+  excess:      (t) => stopped(EXCESS, t),
 };
 
 export function css(rgb, alpha) {
@@ -210,6 +288,7 @@ export function css(rgb, alpha) {
  *  authored stops verbatim rather than a resampled approximation of them. */
 export function gradient(name, steps = 24) {
   if (name === 'temperature' || name === 'duration' || name === 'priority') return CANYON_CSS;
+  if (name === 'excess') return EXCESS_CSS;
   const f = RAMPS[name] || RAMPS.temperature;
   const out = [];
   for (let i = 0; i < steps; i++) out.push(css(f(i / (steps - 1))));

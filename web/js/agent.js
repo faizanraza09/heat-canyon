@@ -27,7 +27,7 @@
  * TWO BACKENDS, ONE INTERFACE
  *
  * `/api/agent/*` is the real analyst: a Claude Agent SDK turn with a shell, a
- * workspace, twenty tools and three specialists. `/api/ask` is the older
+ * workspace, twenty-four tools and three specialists. `/api/ask` is the older
  * single-shot loop, kept because it needs nothing but an API key. If the agent
  * cannot start, this falls back to the single-shot path and says which one
  * answered rather than pretending the capability is there.

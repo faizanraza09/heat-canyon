@@ -23,7 +23,8 @@
  * being made rather than a disclaimer about it.
  */
 
-import { RAMPS, css, gradient, norm, SUN_CSS, TEMP_DOMAIN } from './colors.js';
+import { RAMPS, css, gradient, norm, SUN_CSS, TEMP_DOMAIN, EXCESS_DOMAIN }
+  from './colors.js';
 import { findApiKey, resolveApiKey, storeApiKey } from './photoreal.js';
 import { YearStrip } from './year.js';
 import { AgentConsole } from './agent.js';
@@ -38,6 +39,17 @@ const el = (tag, cls, html) => {
   return n;
 };
 const f1 = (v) => (isFinite(v) ? v.toFixed(1) : '—');
+
+/* Round numbers a contour interval is allowed to take.
+ *
+ * A contour interval has to be a number somebody can do arithmetic with in their
+ * head — "every 2 K, so that wall is six kelvin over the one beside it" — which
+ * an interval derived straight from the span never is. So the span picks from
+ * this ladder rather than dividing. The 2.5 and 25 are there because the gap
+ * from 2 to 5 is otherwise wide enough to force either fifteen lines or four. */
+const NICE_STEPS = [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500];
+const niceStep = (want) =>
+  NICE_STEPS.find((n) => n >= want) || NICE_STEPS[NICE_STEPS.length - 1];
 const f2 = (v) => (isFinite(v) ? v.toFixed(2) : '—');
 const f0 = (v) => (isFinite(v) ? Math.round(v).toLocaleString('en-US') : '—');
 const HH = (h) => String(h).padStart(2, '0');
@@ -126,6 +138,25 @@ export const LAYERS = [
     caption: 'How hot each wall actually gets. A sunlit face runs far hotter than the air standing beside it.',
   },
   {
+    /* The same solved field as the row above, with the hour's air temperature
+       taken out of it.
+
+       It is here because of a measurement rather than a preference. Across the
+       104 solved fields, 96% of the facade field's variance is the air
+       temperature of the hour — one number, no spatial structure — and 4% is
+       everything that separates one wall from another. So the absolute layer
+       spends an 80 K scale to show a 4 K city, and on 55 of those 104 fields the
+       whole of Midtown lands inside about five just-noticeable colours.
+
+       Subtracting the anchor widens nothing. It lets the DOMAIN close from 80 K
+       to 24 K with no colour ever moving between one hour and the next, which is
+       5.4x the visible structure for no loss of comparability: a wall 22 K over
+       the air in January is the same colour, and the same fact, as one in July.
+       See EXCESS_DOMAIN in colors.js. */
+    key: 'excess', name: 'Façade excess over air', unit: 'K', ramp: 'excess',
+    caption: 'How far each wall runs above the air standing beside it. The day\u2019s own warmth is taken out, so what is left is what the canyon does.',
+  },
+  {
     key: 'sun', name: 'Sun and shade', unit: '', ramp: 'temperature',
     caption: 'Which walls the sun reaches this hour. Watch the lit band climb as the afternoon goes on.',
   },
@@ -193,6 +224,14 @@ export class UI {
     this.d = data;
     this.scene = scene;
     this.layer = 'surface';
+    /* The gain the viewer has CHOSEN, which is not always the gain the scene is
+     * drawing: holding X drops the scene to 1 without forgetting this. Keeping
+     * the two apart is what lets the legend go on saying what the key will give
+     * back, instead of the note vanishing at the moment it is being used. */
+    this._gain = 1;
+    this._gainHeld = false;
+    this._sweepTimer = null;
+    this._sweepU = 0;
     this.hour = data.meta.peak_index;
     this.playing = false;
     this.scenarioSite = 0;
@@ -210,6 +249,7 @@ export class UI {
     this._tabs();
     this._layers();
     this._hours();
+    this._brush();
     this._cam();
     this._photoreal();
     this._whatif();
@@ -377,8 +417,37 @@ export class UI {
           e.preventDefault();
           if (this.playing) this.stop(); else this.play();
           break;
+        case 'b': case 'B': this.toggleSweep(); break;
+        case 'c': case 'C':
+          this.scene.setContoursOn(!this.scene.isoOn);
+          this._legend();
+          break;
         case 'Escape':
-          if (this.selected !== null) this.clearSelection();
+          this.stopSweep();
+          if (this.scene.valueBrush) this._setBrush(null);
+          else if (this.selected !== null) this.clearSelection();
+          break;
+        /* G steps the gain and X holds the truth.
+         *
+         * Two keys rather than one because they are two different acts. The gain
+         * is a setting you leave on while you read the city; the measured field
+         * is something you check against, for a second, without losing your
+         * place. A single toggle would make the second act cost two presses and
+         * a memory of which state you were in. */
+        case 'g': case 'G': {
+          if (this.layer !== 'surface') break;
+          this._gain = { 1: 2, 2: 3, 3: 4, 4: 1 }[this._gain] || 2;
+          if (!this._gainHeld) this.scene.setDetailGain(this._gain);
+          this._legend();
+          break;
+        }
+        case 'x': case 'X':
+          // `repeat` guard: a held key fires keydown at the OS repeat rate, and
+          // each one would be a full recolour of 294,150 quads.
+          if (e.repeat || this._gainHeld) break;
+          this._gainHeld = true;
+          this.scene.setDetailGain(1);
+          this._legend();
           break;
         case '[': this.toggleFold('left'); break;
         case ']': this.toggleFold('right'); break;
@@ -410,6 +479,22 @@ export class UI {
           break;
         default: break;
       }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.key !== 'x' && e.key !== 'X') return;
+      if (!this._gainHeld) return;
+      this._gainHeld = false;
+      this.scene.setDetailGain(this._gain || 1);
+      this._legend();
+    });
+    /* A key held down while the window loses focus never sends its keyup, and
+     * the city would stay at gain 1 with the legend promising otherwise. */
+    window.addEventListener('blur', () => {
+      if (!this._gainHeld) return;
+      this._gainHeld = false;
+      this.scene.setDetailGain(this._gain || 1);
+      this._legend();
     });
   }
 
@@ -567,6 +652,9 @@ export class UI {
   }
 
   setLayer(key) {
+    // The scene drops the brush itself on a layer change — a value on one ramp
+    // is not a value on the next. This clears what the panel is saying about it.
+    if (key !== this.layer) { this.stopSweep(); this._setBrush(null); }
     this.layer = key;
     for (const b of $('layers').children) {
       b.setAttribute('aria-pressed', String(b.dataset.key === key));
@@ -621,6 +709,7 @@ export class UI {
     let lo, hi;
     if (L.key === 'exceedance') { const s = d.tiles.stats.exceedance; lo = s.min; hi = s.max; }
     else if (L.key === 'priority' || L.key === 'annual_priority') { lo = 0; hi = 85; }
+    else if (L.key === 'excess') { [lo, hi] = EXCESS_DOMAIN; }
     else if (L.annual) { [lo, hi] = this.scene.annualDomain(L.plane); }
     else { [lo, hi] = this.scene.surfaceDomain; }
 
@@ -653,7 +742,9 @@ export class UI {
      * runs is the clearest statement of that the panel can make. */
     const span = $('legend-span');
     const here = $('legend-here');
-    const pr = (L.key === 'surface') ? this.scene.paintedRange : null;
+    // The middle 98%, not the outright extremes — see `Scene.coreOf` for the
+    // hour that made the difference matter.
+    const pr = (L.key === 'surface' || L.key === 'excess') ? this.scene.paintedCore : null;
     span.hidden = !pr;
     here.hidden = !pr;
     if (pr) {
@@ -668,9 +759,72 @@ export class UI {
       span.style.left = `${(left * 100).toFixed(2)}%`;
       span.style.width = `${(w * 100).toFixed(2)}%`;
       const u = L.unit ? ` ${L.unit}` : '';
-      here.textContent =
-        `ON SCREEN NOW · ${f1(lo + a * (hi - lo))} TO ${f1(lo + b * (hi - lo))}${u}`;
+      /* The rectangle above marks where the COLOURS fall, so it follows the
+       * gain. These figures name TEMPERATURES, so they never can: an
+       * exaggerated field is still a claim about the ramp, not about the city,
+       * and a bracket reading 28 to 52 degC on an hour the model solved at 34 to
+       * 42 would be the instrument lying in its own legend. The two are read
+       * from two accumulators for exactly this reason, and where they disagree
+       * the line says by how much. */
+      const gNow = this._gainHeld ? 1 : (this._gain || 1);
+      const [ta, tb] = (L.key === 'surface' && this.scene.paintedCoreTrue)
+        ? this.scene.paintedCoreTrue : [a, b];
+      here.innerHTML =
+        `MIDDLE 98% ON SCREEN · ${f1(lo + ta * (hi - lo))} TO ${f1(lo + tb * (hi - lo))}${u}`
+        + (gNow > 1 ? ` &nbsp;·&nbsp; DRAWN &times;${gNow} WIDER` : '');
     }
+
+    /* The gain, said out loud whenever it is not 1.
+     *
+     * This is the whole licence for exaggerating anything. The project deleted a
+     * per-period auto-scale because the domain moved and only the small type
+     * knew; a detail gain that were not printed here would be the same sin in a
+     * subtler form. The held key is the other half — being able to see the
+     * measured field at any moment is what makes the exaggerated one readable
+     * rather than merely striking. */
+    const gainNote = $('legend-gain');
+    const g = this._gain || 1;
+    const showGain = L.key === 'surface' && g > 1;
+    gainNote.hidden = !showGain;
+    if (showGain) {
+      gainNote.innerHTML = this._gainHeld
+        ? 'MEASURED FIELD &nbsp;·&nbsp; RELEASE X FOR '
+          + `LOCAL DETAIL &times;${g}`
+        : `LOCAL DETAIL &times;${g} &nbsp;·&nbsp; `
+          + 'NEIGHBOURHOODS HELD AT TRUE COLOUR &nbsp;·&nbsp; HOLD X FOR THE MEASURED FIELD';
+    }
+
+    /* Isotherms, and the interval they are drawn at.
+     *
+     * Chosen here rather than in the scene because a round interval is a fact
+     * about the layer's UNITS, and the scene deals only in the 0..1 domain
+     * everything is painted through. Aimed at eight lines across the middle 98%:
+     * enough that the spacing reads as a texture and you can see where the field
+     * steepens, few enough that they stay lines rather than becoming a hatch.
+     *
+     * From the MEASURED core, so the interval does not change when the gain
+     * does — the whole value of the contours beside a gain is that they are the
+     * one thing on screen the exaggeration cannot move.
+     *
+     * Not on sun and shade, which is categorical: an isotherm needs a field to
+     * be continuous before it means anything, and two values are not a field. */
+    const core = this.scene.paintedCoreTrue || this.scene.paintedCore;
+    let step = 0;
+    if (L.key !== 'sun' && core && hi > lo) {
+      step = niceStep(((core[1] - core[0]) * (hi - lo)) / 8);
+    }
+    this.scene.setContour(step > 0 ? step / (hi - lo) : 0);
+    const isoNote = $('legend-iso');
+    const showIso = step > 0 && this.scene.isoOn;
+    isoNote.hidden = !showIso;
+    if (showIso) {
+      const iu = L.unit ? ` ${L.unit}` : '';
+      isoNote.innerHTML =
+        `CONTOURS EVERY ${step}${iu} &nbsp;·&nbsp; DRAWN FROM THE MEASURED FIELD`
+        + ' &nbsp;·&nbsp; C HIDES THEM';
+    }
+
+    this._drawHist(L);
 
     // Where a layer is solved on a coarser grid than the thing it is painted
     // on, the panel says so under the scale. One shared ramp means a legend
@@ -695,6 +849,199 @@ export class UI {
           + 'THE DATE AND HOUR DO NOT CHANGE IT'
         : '';
     }
+  }
+
+  /** The distribution of what is on screen, drawn on the ramp's own axis.
+   *
+   * Read straight out of `scene.paintedHist`, which the recolour loop fills
+   * while it is already visiting all 294,150 quads and already normalising every
+   * value — the same argument as the bracket. A separate sweep would be a second
+   * implementation of the ramp and the gain, and it would drift.
+   *
+   * SQUARE ROOT, NOT LINEAR. The counts are violently skewed: on a clear night
+   * the entire city lands in two or three bins, and drawn linearly that is one
+   * full-height spike beside ninety-three empty ones — technically the truth and
+   * visually a single line. The root keeps zero at zero, keeps the ordering, and
+   * leaves the small bins tall enough to have a shape. It is a shape to be read,
+   * not a bar to be measured off, and the numbers underneath are the bracket's
+   * job. */
+  _drawHist(L) {
+    const cv = $('legend-hist');
+    const h = this.scene.paintedHist;
+    const w = cv.clientWidth;
+    // The panel can be folded away, in which case there is nothing to draw on
+    // and `clientWidth` is 0. Coming back re-runs `_legend`.
+    if (!cv || !h || !w) return;
+    const H = 34;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(H * dpr);
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, H);
+
+    let max = 0;
+    for (let i = 0; i < h.length; i++) if (h[i] > max) max = h[i];
+    if (!max) return;
+
+    // Each bar in the ramp colour of its own bin, so the histogram and the ramp
+    // beneath it read as one object rather than as a chart above a key.
+    const f = RAMPS[L.ramp] || RAMPS.temperature;
+    const bw = w / h.length;
+    const k = 1 / Math.sqrt(max);
+    for (let i = 0; i < h.length; i++) {
+      if (!h[i]) continue;
+      // A floor of one pixel: a bin holding forty panels out of 294,150 is a
+      // real and often interesting fact — it is usually the hottest wall in
+      // Midtown — and rounding it to nothing is how the tail disappears.
+      const bh = Math.max(1, Math.sqrt(h[i]) * k * (H - 1));
+      ctx.fillStyle = css(f((i + 0.5) / h.length));
+      ctx.fillRect(i * bw, H - bh, Math.max(1, bw - 0.5), bh);
+    }
+  }
+
+  /* The window dragged across the scale, and what it is for.
+   *
+   * A median hour is about five just-noticeable colours wide across the whole
+   * city, so "which walls are in the top two kelvin of this hour" is a question
+   * no ramp can be read for at any gain. Dragging a window along the
+   * distribution and watching which walls survive answers it in the geometry.
+   *
+   * The gesture is deliberately the crudest one available — press, drag,
+   * release, click to clear — because it is a thing to sweep rather than a thing
+   * to set. The interesting reading is the sweep itself: pushing a narrow window
+   * up the distribution and watching the surviving walls climb the sunlit flanks
+   * is the spatial structure of an hour, delivered one slice at a time. */
+  _brush() {
+    const host = $('legend-scale');
+    if (!host) return;
+    let dragging = false;
+    let a = 0;
+    const xOf = (e) => {
+      const r = host.getBoundingClientRect();
+      return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : 0;
+    };
+    host.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      // Taking hold of the window ends the sweep. Two things moving the same
+      // control is not a mode anybody can be in.
+      this.stopSweep();
+      dragging = true;
+      a = xOf(e);
+      host.setPointerCapture(e.pointerId);
+      this._setBrush(a, a);
+    });
+    host.addEventListener('pointermove', (e) => {
+      if (dragging) this._setBrush(a, xOf(e));
+    });
+    const end = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      // A press that never moved is a click, and a click on the scale clears.
+      // Six thousandths of the width is about a pixel and a half at the panel's
+      // size — under the hand tremor that turns every click into a tiny drag.
+      if (Math.abs(xOf(e) - a) < 0.006) this._setBrush(null);
+    };
+    host.addEventListener('pointerup', end);
+    host.addEventListener('pointercancel', end);
+  }
+
+  /* Walk the window up the distribution on its own.
+   *
+   * The brush answers "which walls are in this slice"; the sweep asks it of
+   * every slice in turn, and the answer is the thing the ramp cannot hold. On a
+   * flat hour the whole city is five just-noticeable colours wide, so there is
+   * no colour to read the spatial structure OFF — but there is an order, and a
+   * narrow window climbing that order draws it directly: the surviving walls
+   * start at the shaded bases of the deep canyons and finish on the upper west
+   * flanks, and you watch them go.
+   *
+   * PACED IN STEPS, NOT IN KELVIN. Ninety steps across the span whatever the
+   * span is, so a two-kelvin night and a twenty-kelvin afternoon take the same
+   * six seconds. Tying the rate to the data instead would make exactly the hours
+   * that need the sweep most take the least time to show.
+   *
+   * Seventy milliseconds a step rather than a frame: each one is a full recolour
+   * of 294,150 quads plus the ghost upload, which is ~40 ms measured, so a
+   * per-frame sweep would simply drop every other frame and read as a stutter.
+   * Fourteen a second is smooth enough to follow and leaves the frame budget
+   * alone. */
+  toggleSweep() {
+    if (this._sweepTimer) { this.stopSweep(); return; }
+    this._sweepU = 0;
+    this._sweepTimer = setInterval(() => this._sweepStep(), 70);
+    this._sweepStep();
+  }
+
+  stopSweep() {
+    if (!this._sweepTimer) return;
+    clearInterval(this._sweepTimer);
+    this._sweepTimer = null;
+    this._setBrush(null);
+  }
+
+  _sweepStep() {
+    // Re-read the span every step, so a sweep left running while the clock plays
+    // follows the hour instead of walking a range that has moved out from under
+    // it.
+    const core = this.scene.paintedCore || [0, 1];
+    const span = Math.max(0.02, core[1] - core[0]);
+    // Wide enough to hold a useful number of walls, narrow enough that moving it
+    // changes which ones. An eighth of the span, floored at three bins so a very
+    // flat hour still has a window rather than a hairline.
+    const w = Math.max(3 / 96, span * 0.125);
+    const a = core[0] - w;
+    const b = core[1];
+    const lo = a + this._sweepU * (b - a);
+    this._setBrush(lo, lo + w);
+    this._sweepU += 1 / 90;
+    if (this._sweepU > 1) this._sweepU = 0;
+  }
+
+  /** Apply a brush, or clear it with a single null argument, and say in numbers
+   *  what the window is keeping. */
+  _setBrush(a, b) {
+    const note = $('legend-brushnote');
+    const bar = $('legend-brush');
+    if (a === null) {
+      this.scene.setValueBrush(null);
+      note.hidden = true;
+      bar.hidden = true;
+      return;
+    }
+    const loT = Math.min(a, b), hiT = Math.max(a, b);
+    this.scene.setValueBrush([loT, hiT]);
+    bar.hidden = false;
+    bar.style.left = `${(loT * 100).toFixed(2)}%`;
+    bar.style.width = `${Math.max(0.4, (hiT - loT) * 100).toFixed(2)}%`;
+
+    const L = LAYERS.find((x) => x.key === this.layer);
+    let lo, hi;
+    if (L.key === 'exceedance') { const st = this.d.tiles.stats.exceedance; lo = st.min; hi = st.max; }
+    else if (L.key === 'priority' || L.key === 'annual_priority') { lo = 0; hi = 85; }
+    else if (L.key === 'excess') { [lo, hi] = EXCESS_DOMAIN; }
+    else if (L.annual) { [lo, hi] = this.scene.annualDomain(L.plane); }
+    else { [lo, hi] = this.scene.surfaceDomain; }
+
+    // How many panel-bands survived, counted off the same histogram the window
+    // was dragged across rather than by re-walking the field.
+    const h = this.scene.paintedHist;
+    let kept = 0, all = 0;
+    if (h) {
+      for (let i = 0; i < h.length; i++) {
+        all += h[i];
+        const c = (i + 0.5) / h.length;
+        if (c >= loT && c <= hiT) kept += h[i];
+      }
+    }
+    const u = L.unit ? ` ${L.unit}` : '';
+    const pct = all ? (100 * kept) / all : 0;
+    note.hidden = false;
+    note.innerHTML =
+      `KEEPING ${f1(lo + loT * (hi - lo))} TO ${f1(lo + hiT * (hi - lo))}${u}`
+      + ` &nbsp;·&nbsp; ${f0(kept)} PANEL-BANDS, ${pct < 0.1 && kept ? '<0.1' : pct.toFixed(1)}%`
+      + (this._sweepTimer ? ' &nbsp;·&nbsp; B STOPS THE SWEEP'
+        : ' &nbsp;·&nbsp; CLICK THE SCALE TO CLEAR');
   }
 
   /* ---------------------------------------------------------------- hours */
@@ -902,7 +1249,10 @@ export class UI {
       + 'O ORBITS&nbsp;&nbsp;·&nbsp;&nbsp;N FACES NORTH<br>'
       + 'DOUBLE-CLICK TO CLOSE IN&nbsp;&nbsp;·&nbsp;&nbsp;CLICK TO INSPECT<br>'
       + 'SPACE PLAYS THE DAY&nbsp;&nbsp;·&nbsp;&nbsp;← → THE HOUR<br>'
-      + '[ ] \\ THE PANELS&nbsp;&nbsp;·&nbsp;&nbsp;H CLEARS THE VIEW';
+      + '[ ] \\ THE PANELS&nbsp;&nbsp;·&nbsp;&nbsp;H CLEARS THE VIEW<br>'
+      + 'G LOCAL DETAIL&nbsp;&nbsp;·&nbsp;&nbsp;X HOLDS THE MEASURED FIELD<br>'
+      + 'C CONTOURS<br>'
+      + 'DRAG THE SCALE TO KEEP ONLY THOSE WALLS&nbsp;&nbsp;·&nbsp;&nbsp;B SWEEPS IT';
 
     $('cam-reset').onclick = () => this._holdScroll(() => this.scene.resetView());
 
@@ -1498,8 +1848,16 @@ export class UI {
      * So the list is ordered by the MEAN of the two priority scores, and the
      * finding survives where it is actually useful: every row carries its rank
      * under both, so a building that sits 1st on the wave and 54th on the year
-     * says so on its own line. The agreement figure stays underneath, now as a
-     * statement about the ranking rather than as a caption on a control.
+     * says so on its own line — which is the disagreement, shown per building,
+     * where someone can act on it.
+     *
+     * The overlap and Spearman figures used to be printed underneath as a
+     * paragraph. They are gone. A panel headed "where to act first" opens with
+     * a reader who wants to know which building to start on, and three lines of
+     * rank-correlation statistics before the first row answers a question
+     * nobody asked and reads as the tool hedging. Both numbers are still in
+     * `ranked.json`, the per-row ranks still make the same point, and the film
+     * still quotes the overlap where it has the time to explain it.
      *
      * The two scores are on the same 0-100 scale by construction — both are a
      * geometric mean of an exposure index against the same vulnerability score —
@@ -1509,16 +1867,14 @@ export class UI {
      * wants one ordering alone still has both scores on every row and both
      * orderings in `ranked.json`.
      */
-    const agree = this.d.ranked.orderings?.agreement;
-    if (agree) {
-      const note = el('p', 'note',
-        'RANKED BY THE MEAN OF THE EVENT-DAY AND ANNUAL PRIORITY SCORES'
-        + `<br>THE TWO DISAGREE — THEY SHARE <b>${agree.top50_overlap}</b> OF THEIR `
-        + `TOP FIFTY, SPEARMAN <b>${f2(agree.spearman)}</b> — SO EVERY ROW CARRIES `
-        + 'BOTH RANKS. THE YEAR FINDS CHRONIC LOAD; THE WAVE FINDS TRAPPED AIR');
-      note.style.margin = '0 22px 14px';
-      body.appendChild(note);
-    }
+    /* Unconditional, now that it no longer quotes the agreement figures. It was
+     * guarded on `orderings.agreement` because everything in it came from
+     * there; what is left is a statement about how this list is sorted, which
+     * is true of every build whether or not the agreement block exists. */
+    const note = el('p', 'note',
+      'RANKED BY THE MEAN OF THE EVENT-DAY AND ANNUAL PRIORITY SCORES');
+    note.style.margin = '0 22px 14px';
+    body.appendChild(note);
 
     this._rows = [];
     this._rowIndex = [];
@@ -1864,7 +2220,29 @@ export class UI {
       return;
     }
     const top = node.getBoundingClientRect().top - box.getBoundingClientRect().top;
-    box.scrollTo({ top: Math.max(0, box.scrollTop + top - 28), behavior: 'smooth' });
+    const to = Math.max(0, box.scrollTop + top - 28);
+
+    /* A LONG JUMP IS NOT A SCROLL ANYONE FOLLOWS.
+     *
+     * `smooth` everywhere was costing the walkthrough its whole point. The
+     * highlight is a hole cut in a scrim, and `boxOf` refuses a box that is
+     * entirely off screen — correctly, because a hole below the fold is a
+     * dimmed frame with nothing lit in it. So while a smooth scroll crosses
+     * several thousand pixels the target does not exist on screen yet, the
+     * highlight is hidden, and the beat opens with a caption naming something
+     * the viewer cannot see. Measured over a playthrough that was about six
+     * tenths of a second at the head of every beat that changes section, and on
+     * one beat the target was moved on again before it ever arrived.
+     *
+     * Distance decides. Inside about a screen and a half, gliding is legible
+     * and worth having — it shows the document is one document and the reader
+     * is moving down it. Past that, nobody is tracking the blur; they are
+     * waiting for it to stop. So a long move lands immediately and a short one
+     * glides, which is also how a person reading a long document actually
+     * behaves: page down, then adjust.
+     */
+    const far = Math.abs(to - box.scrollTop) > box.clientHeight * 1.5;
+    box.scrollTo({ top: to, behavior: far ? 'auto' : 'smooth' });
   }
 
   /** The nth numbered section of the building brief, 1-based. */

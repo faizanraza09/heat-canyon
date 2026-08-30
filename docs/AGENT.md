@@ -146,7 +146,7 @@ Anything the agent can do with NumPy and a documented array is left to NumPy and
 a documented array, and `data_dictionary` — which returns the on-disk layout,
 the units, and the exact import lines — is what makes that viable.
 
-### The twenty tools
+### The twenty-four tools
 
 | | |
 |---|---|
@@ -170,6 +170,10 @@ the units, and the exact import lines — is what makes that viable.
 | `run_python` | Python with the dataset already loaded |
 | `consult_specialist` | hand one sub-problem to a specialist, blocking |
 | `chart` | a matplotlib figure rendered into the transcript |
+| `building_schedule` | one building floor by floor: peak facade temperature, free-running indoor estimate, load, which surface term the heat arrives from, and whether it recovers overnight |
+| `prescribe_building` | the measures specified for one building — device, geometry, faces and floors covered, effect from a re-solve, winter cost, capex, payback, funding programme |
+| `programme_allocation` | every priced measure as a cost curve, a budget allocated down it, and where a second objective would have spent the same money differently |
+| `economic_constants` | the money table: value or range, unit, source, currency date, and whether anyone has verified it — call it before quoting any dollar figure |
 
 ### The three specialists, and why they are not SDK subagents
 

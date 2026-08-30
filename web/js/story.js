@@ -156,6 +156,19 @@ function maxOf(items, pick) {
   return items.reduce((m, it) => Math.max(m, pick(it) ?? -Infinity), -Infinity);
 }
 
+/** The building the film uses as its example, exported so nothing has to
+ *  restate it.
+ *
+ * It was a `const` inside `buildStory` and the tests carried their own copy of
+ * the BIN. Changing the hero therefore left `05-film.spec.mjs` checking the old
+ * building's temperatures against the new building's script, which is a test
+ * that fails for the right reason and points at the wrong thing — it took a
+ * reading of the failure to see that the film was correct and the test was
+ * remembering. One definition, imported by both.
+ */
+export const HERO_BUILDING = '1019099';
+
+
 export function buildStory(data, globe, getUI = () => null) {
   const m = data.meta;
   const items = data.ranked.items;
@@ -238,7 +251,7 @@ export function buildStory(data, globe, getUI = () => null) {
    * This one takes 1.71 from its neighbours against 1.18 from the sun — a
    * stronger signal than the building it replaces — and it is taller, has one
    * more storey, and runs hotter at its worst floor. */
-  const HERO_BIN = '1019099';
+  const HERO_BIN = HERO_BUILDING;
 
   /* The recorded analyst turn chapter five plays back.
    *
@@ -498,34 +511,78 @@ export function buildStory(data, globe, getUI = () => null) {
      * finished loading.
      */
     {
-      chapter: 'I', title: 'A year over Manhattan', seconds: 1.4,
+      chapter: 'I', title: 'A year over Manhattan', seconds: 1.2,
       stage: { alt: 29000, fov: 28, turn: 0.2, heat: 0.45, tilt: 0.13, counter: 0.5 },
     },
     {
-      chapter: 'I', seconds: 6.18,
-      text: 'Concrete soaks up heat all day and gives it back after dark. '
-        + 'A city never cools.',
+      chapter: 'I', seconds: 6.04,
+      /* THE FILM OPENS ON THE GAP, not on the physics.
+       *
+       * It used to open with how a city stores heat — true, and the wrong first
+       * sentence for this. Everyone watching already believes cities are hot;
+       * spending the opening establishing it asks a viewer to sit through a
+       * fact they hold before hearing anything they do not. What they do not
+       * know is that nobody can currently tell them WHICH WALL, on which floor,
+       * at which hour — which is the whole reason the rest of the film exists.
+       *
+       * So the first line states the missing thing, and every beat after it is
+       * the film closing that gap: a year measured, the block average that is
+       * all anyone has today, the descent to the walls, and then one building
+       * taken apart. "Wall by wall and hour by hour" is also, exactly, what the
+       * model does, so the opening sets the terms the rest is judged on.
+       */
+      text: 'Nobody has mapped what heat actually does to a building, '
+        + 'wall by wall and hour by hour.',
       stage: { alt: 24000, fov: 28, turn: 0.46, heat: 1, cities: 1, bloom: 1,
                tilt: 0.1, counter: 1 },
     },
     {
-      chapter: 'I', seconds: 6.47,
+      chapter: 'I', seconds: 6.09,
       /* The full label here, and only here. This is the first time the film
        * names the place, over a shot of the planet — "Midtown" on its own is a
        * word the viewer has no way to locate, and the beat's whole job is to
        * say where we are. Later beats use `place`, which is the short form, and
        * they can: by then the camera has arrived and the panel is up. */
-      text: `So we measured a year of it over ${m.aoi.label}. `
-        + `${(year.hours || 8760).toLocaleString('en-US')} hours.`,
-      say: `So we measured a year of it over ${m.aoi.label}. `
-        + `Eight thousand seven hundred and sixty hours.`,
+      /* "So we did." answers the line above it, and it has to.
+       *
+       * This read "So we measured a year of it", which was written when the
+       * opening line ended "a city never cools" — there, "it" was the heat and
+       * the sentence followed. The opening is a gap statement now: nobody has
+       * mapped what heat does to a building. "A year of it" has nothing to
+       * attach to any more, and a second sentence whose pronoun points at
+       * nothing is exactly the disconnected feel the rewrite was for.
+       *
+       * A gap followed by "so we did" is the plainest join there is, and it
+       * makes the pair one thought instead of two facts.
+       */
+      text: `So we did. A year over ${m.aoi.label}, `
+        + `${(year.hours || 8760).toLocaleString('en-US')} hours, `
+        + `${words(daysOver)} days past ${words(m.event.threshold_c)} degrees.`,
+      /* The caption keeps the hour count; the read does not.
+       *
+       * "Eight thousand seven hundred and sixty" takes three and a half seconds
+       * to say and reads in a glance, and this film is against a hard three
+       * minutes. The figure stays on screen — which is where the test for it
+       * looks, and where a viewer takes it in faster than any voice can deliver
+       * it — and the read spends those seconds in chapter five instead, on what
+       * the analyst actually concluded. */
+      say: `So we did. A year over ${m.aoi.label}, `
+        + `${words(daysOver)} days past ${words(m.event.threshold_c)} degrees.`,
       altEase: 'out', turnEase: 'out',
       stage: { alt: 5200, fov: 30, turn: 1, heat: 1, cities: 0.6, bloom: 0.4,
                lock: 1, pin: 1, aim: 0, phi: 0.05, clouds: 0.6, tilt: 0 },
     },
     {
-      chapter: 'I', seconds: 5.6,
-      text: 'From up here it’s one number per block, taken at head height.',
+      chapter: 'I', seconds: 4.78,
+      /* WHOSE MAP THIS IS, which the new opening made load-bearing.
+       *
+       * The line read "From up here it's one number per block" — written when
+       * the film opened on the physics, where it plainly described the view on
+       * screen. Against an opening that claims we mapped every wall and every
+       * hour, the same words say the opposite: that OUR model is a block
+       * average. It has to name the thing it is contrasting with.
+       */
+      text: 'The usual heat map stops at one number per block, taken at head height.',
       stage: { alt: 3400, cities: 0.3, bloom: 0.15, clouds: 0.85 },
     },
 
@@ -587,15 +644,36 @@ export function buildStory(data, globe, getUI = () => null) {
        * film is the other kind. The picture is still doing the work; the line
        * just stops the viewer wondering whether the film has stalled.
        */
-      chapter: 'II', title: 'Going in', seconds: 4.04,
+      chapter: 'II', title: 'Going in', seconds: 3.53,
       text: 'Averages hide a lot. Let’s go down.',
-      stage: { alt: 640, fov: 38, phi: 0.16, dust: 0.7, cities: 0, bloom: 0,
+      /* FOUR HUNDRED, NOT SIX HUNDRED AND FORTY, and the line above is why.
+       *
+       * The boundary altitude and this beat's length are one setting, not two.
+       * At 640 km the split was tuned for a THREE-SECOND silent beat: two and a
+       * half halvings here against seven and a half below, so the rate climbed
+       * across the boundary by about half again — the fall getting faster
+       * exactly where the dissolve begins.
+       *
+       * Giving this beat a line stretched it to four seconds, and a longer beat
+       * over the same altitude span is a slower one. The rate below the
+       * boundary did not change, so the step across it went from 1.5x to 2.03x:
+       * the camera doubling its speed in a single frame at the cut. That is the
+       * lurch `the descent accelerates out of the hold` exists to catch, and it
+       * caught it.
+       *
+       * Moving the boundary down restores the ratio without touching either
+       * duration — 400 km puts it back to 1.44x, which is the same gentle climb
+       * the 640/3.0 pair used to give. Anything a viewer would notice is in the
+       * ratio, not in the number.
+       */
+      stage: { alt: 400, fov: 38, phi: 0.16, dust: 0.7, cities: 0, bloom: 0,
                clouds: 1, lock: 1, pin: 1, aim: 0, tilt: 0 },
     },
     {
-      chapter: 'II', phase: 'handoff', seconds: 6.3,
+      chapter: 'II', phase: 'handoff', seconds: 6.01,
       text: `Down here it’s walls. `
-        + `${m.counts.facade_panels.toLocaleString('en-US')}, each solved on its own.`,
+        + `${m.counts.facade_panels.toLocaleString('en-US')} of them, `
+        + `on ${m.counts.buildings.toLocaleString('en-US')} buildings.`,
       say: 'Down here it’s walls. Twenty-nine thousand four hundred, '
         + 'each solved on its own.',
       altEase: 'land',
@@ -616,7 +694,7 @@ export function buildStory(data, globe, getUI = () => null) {
      * anyone would have guessed.
      */
     {
-      chapter: 'III', title: 'One building', phase: 'city', seconds: 6.29,
+      chapter: 'III', title: 'One building', phase: 'city', seconds: 5.72,
       /* NO SPOTLIGHT ON THIS BEAT, and that is the fourth reason it was dull.
        *
        * The walkthrough's highlight paints a 58%-black scrim over everything
@@ -730,7 +808,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.6,
+      chapter: 'III', phase: 'city', seconds: 4.65,
       text: 'On the flat map it’s one shade of orange. '
         + 'It’s nowhere near that even.',
       // Still turning. The line is that one flat colour on a map is four
@@ -739,7 +817,7 @@ export function buildStory(data, globe, getUI = () => null) {
       act: ({ ui }) => { ui.setHour(m.peak_index); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 8.95,
+      chapter: 'III', phase: 'city', seconds: 6.66,
       // The subject is the building's banding, which is geometry in the model
       // rather than a control — so there is nothing on a panel to light, and
       // pointing at the colour legend instead would be a highlight on the wrong
@@ -767,9 +845,11 @@ export function buildStory(data, globe, getUI = () => null) {
           return `So the model breaks it up. ${Words(m.bands)} height bands, `
             + 'every face worked out separately.';
         }
-        return `So the model breaks it up. ${Words(m.bands)} bands up the building, `
-          + `every face apart. ${Words(bs[0].t)} at the bottom, `
-          + `${words(bs[1].t)} just above it.`;
+        // "every face apart" comes out: the next two beats walk round to two
+        // of those faces and read a number off each, which makes the point
+        // better than a clause does and costs the line 1.3 seconds it needs.
+        return `So it breaks the building up. ${Words(m.bands)} bands. `
+          + `${Words(bs[0].t)} at the bottom, ${words(bs[1].t)} just above.`;
       })(); },
       act: ({ ui }) => { ui.focusFloors(); },
       cues: (() => {
@@ -791,7 +871,7 @@ export function buildStory(data, globe, getUI = () => null) {
       })(),
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.3,
+      chapter: 'III', phase: 'city', seconds: 5.41,
       get text() { return (() => {
         const f = heroFloor();
         return f?.sun
@@ -837,7 +917,7 @@ export function buildStory(data, globe, getUI = () => null) {
       cues: [{ at: 0.42, do: ({ scene }) => scene.zoomBy(0.84) }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.13,
+      chapter: 'III', phase: 'city', seconds: 5.54,
       get text() { return (() => {
         const f = heroFloor();
         return f?.shade
@@ -847,8 +927,8 @@ export function buildStory(data, globe, getUI = () => null) {
       get say() { return (() => {
         const f = heroFloor();
         return f?.shade
-          ? `Now round to the north-east. Same floor, no sun at all. Still ${words(f.shade.t)}.`
-          : 'Now round to the north-east. Same floor, no sun at all. Still hot.';
+          ? `Now round to the north-east. Same floor, no sun, still ${words(f.shade.t)}.`
+          : 'Now round to the north-east. Same floor, no sun, and still hot.';
       })(); },
       /* The turn the whole chapter rests on, and it is a camera move rather
        * than a sentence.
@@ -878,7 +958,7 @@ export function buildStory(data, globe, getUI = () => null) {
       cues: [{ at: 0.42, do: ({ scene }) => scene.zoomBy(0.84) }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.63,
+      chapter: 'III', phase: 'city', seconds: 6.98,
       /* THE CLAIM MOVED WITH THE BUILDING, and it had to.
        *
        * On the old hero the wall opposite the shaded face was 145 m of tower,
@@ -945,8 +1025,13 @@ export function buildStory(data, globe, getUI = () => null) {
       }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.0,
-      text: 'The brief pulls that apart. Sun, neighbours, and what it sheds.',
+      chapter: 'III', phase: 'city', seconds: 4.7,
+      /* Section two is "The three findings", and it does not contain the
+       * three-way attribution — that is the chart's legend, one beat later.
+       * This line described the attribution while the highlight sat on
+       * "FINDING ONE · THE EVENT", which is about how long the heat wave ran.
+       * The words now match the section they are over. */
+      text: 'Every building gets a brief. This one opens with three findings.',
       // The brief opens here and not three beats earlier. It is a full-screen
       // document, so while it is up the city is not — and the beats before this
       // are about the building itself, which the model shows better than any
@@ -971,35 +1056,43 @@ export function buildStory(data, globe, getUI = () => null) {
       /* No spot while the document is arriving — a full-screen brief sliding in
        * with a hole cut in it reads as a rendering fault — then the highlight
        * lands on the findings as the scroll does. */
+      /* ONE MOVE, NOT TWO. This walked to section two and then, a third of the
+       * beat later, to the findings inside it — so the highlight spent half its
+       * time on a section that was still sliding into view. The line names the
+       * three findings and nothing else, so the document goes there once and
+       * stays. Measured: 50% of the beat lit before, 100% after. */
       cues: [
-        { at: 0.34, spot: '#brief-doc .brf-sec:nth-of-type(2)',
+        { at: 0.30, spot: '#brief-doc .brf-sec:nth-of-type(2)',
           do: ({ ui }) => ui.briefSection(2) },
-        { at: 0.70, spot: '#brief-doc .brf-sec:nth-of-type(2) .brf-find',
-          do: ({ ui }) => ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(2) .brf-find') },
       ],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.5,
+      chapter: 'III', phase: 'city', seconds: 5.54,
       /* The heading, and then whatever the scroll moves on to. Pointing at the
        * heading for the whole beat is what put a sliver of highlight along the
        * top of the frame while the chart being described sat unlit below it. */
+      /* THE ATTRIBUTION LIVES HERE, on the chart whose legend is exactly it:
+       * DIRECT SOLAR, TRAPPED LONGWAVE, RELIEF TO SKY — the sun, the
+       * neighbours, and what the wall sheds. The claim used to be made a beat
+       * earlier, over the findings list, where nothing on screen supported it;
+       * this beat meanwhile pointed at the section's load summary, peak
+       * kilowatts and annual megawatt-hours, under a line about surface
+       * temperature. Both were near-misses. This is the thing itself, so the
+       * beat goes to the chart and stays on it.
+       */
       spot: '#brief-doc .brf-sec:nth-of-type(3) .brf-h',
-      text: 'Then floor by floor. Surface temperature, the cost of holding 24 inside.',
-      say: 'Then floor by floor. Surface temperature, the cost of holding '
-        + 'twenty-four inside.',
+      text: 'Then floor by floor, every storey split three ways: '
+        + 'the sun, the neighbours, and what it sheds.',
+      say: 'Then floor by floor, split three ways: '
+        + 'sun, neighbours, and what it sheds.',
       act: ({ ui }) => { ui.briefSection(3); },     // The floor schedule
-      // Three things named in the line, so the document moves twice under it:
-      // the heading, then the facts, then the chart the next beat reads a row
-      // out of. Fractions rather than seconds, so a longer read carries them.
       cues: [
-        { at: 0.40, spot: '#brief-doc .brf-sec:nth-of-type(3) .brf-facts',
-          do: ({ ui }) => ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(3) .brf-facts') },
-        { at: 0.76, spot: '#brief-doc .brf-sec:nth-of-type(3) .brf-fig',
+        { at: 0.38, spot: '#brief-doc .brf-sec:nth-of-type(3) .brf-fig',
           do: ({ ui }) => ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(3) .brf-fig') },
       ],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.47,
+      chapter: 'III', phase: 'city', seconds: 7.11,
       get text() { return (() => {
         const f = heroFloor();
         if (!f) return 'One floor is the worst of them, and the schedule names it.';
@@ -1033,23 +1126,51 @@ export function buildStory(data, globe, getUI = () => null) {
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.9,
+      chapter: 'III', phase: 'city', seconds: 7.86,
       get text() { return (() => {
         const g = heroRx()?.geometry;
         if (!g) return 'Shading will not work here, and the model says why.';
+        /* The overhang figure is in the caption and not in the mouth.
+         *
+         * "You'd need an overhang four metres deep" is the most concrete thing
+         * this beat has — it is what makes "shading fails" a finding rather
+         * than an assertion — and cutting it for length left the film saying
+         * the sun is low without ever saying what that costs. There is no room
+         * for it in the read at three minutes, and a caption costs no runtime,
+         * so it goes where it fits. */
         return `Shading is the obvious answer, and it fails. The sun is `
-          + `${r0(g.peak_altitude_deg)}° up, almost level with the wall.`;
+          + `${r0(g.peak_altitude_deg)}° up, almost level with the wall. `
+          + `An overhang would need ${g.projection_uncapped_m.toFixed(1)} m.`;
       })(); },
-      spot: '#brief-doc .brf-sec:nth-of-type(4)',
-      act: ({ ui }) => { ui.briefSection(4); },     // What to do
       /* `.brf-wpart` is the block headed "Why not something simpler", and it is
        * word for word what this line says: no fixed device works on this wall,
-       * the sun is 26° up, the overhang would have to be four metres. Pointing
-       * at the section's summary facts instead was pointing near it. */
-      cues: [
-        { at: 0.52, spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-wpart',
-          do: ({ ui }) => ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(4) .brf-wpart') },
-      ],
+       * the sun is 26° up, the overhang would have to be four metres. Arrived at
+       * in the act rather than on a cue half way through, because there is
+       * nothing else in section four this sentence is about and a beat that
+       * spends its first half travelling is a beat with no picture. */
+      /* A FUNCTION, because no class picks this block.
+       *
+       * Section four holds eight prescriptions and each one carries its own
+       * `.brf-why`, `.brf-wpart`, `.brf-facts` and `.brf-caveats` — twenty-nine
+       * `.brf-wpart` elements in all. `querySelector` returns the first, which
+       * is prescription one's "Where the heat is", so this beat spent its life
+       * saying "shading fails" over a paragraph about which floor is hottest.
+       * Three separate audits scored it green, because all three checked that
+       * the highlight existed, was visible and was a sensible size, and none of
+       * them read what was inside it.
+       *
+       * `spot.js` accepts a function, so the beat asks for the block by its
+       * heading. That cannot drift when the section grows another measure.
+       */
+      spot: () => [...document.querySelectorAll(
+        '#brief-doc .brf-sec:nth-of-type(4) .brf-wpart')]
+        .find((n) => /why not something simpler/i.test(n.textContent || '')),
+      act: ({ ui }) => {
+        const n = [...document.querySelectorAll(
+          '#brief-doc .brf-sec:nth-of-type(4) .brf-wpart')]
+          .find((x) => /why not something simpler/i.test(x.textContent || ''));
+        if (n) ui.scrollSurface('brief-doc', n);
+      },
       get say() { return (() => {
         const g = heroRx()?.geometry;
         if (!g) return 'Shading will not work here, and the model says why.';
@@ -1058,7 +1179,7 @@ export function buildStory(data, globe, getUI = () => null) {
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.09,
+      chapter: 'III', phase: 'city', seconds: 7.45,
       get text() { return (() => {
         const rx = heroRx();
         if (!rx) return 'So it prescribes the glass instead.';
@@ -1088,7 +1209,7 @@ export function buildStory(data, globe, getUI = () => null) {
       },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.11,
+      chapter: 'III', phase: 'city', seconds: 5.67,
       text: 'It prices the job too. That’s one wall, on one building, on one street.',
       // Section five is the one that says what the whole document rests on, and
       // it is the reason the film can print a dollar figure at all. The brief
@@ -1109,9 +1230,21 @@ export function buildStory(data, globe, getUI = () => null) {
        * a two-minute walkthrough is simply not where a caveats appendix earns
        * its place. The one costed figure the film speaks aloud is still labelled
        * ASSUMED on the ticker while it is being said. */
-      spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-cost',
+      /* The costs GRID, not the bare figure.
+       *
+       * `.brf-cost` is a colour class on the value alone, so the highlight came
+       * out 178 by 36 pixels — 0.7% of the frame, a smear the size of a word.
+       * It was also cutting the label off the number, so the one thing lit said
+       * a dollar amount without saying what the dollars were for.
+       *
+       * `:has()` picks the grid that contains it: capital cost, energy saved,
+       * penalty avoided, net present value, each with its label. 720 by 91,
+       * which is a region a viewer can land on, and it is what "it prices the
+       * job" actually means — not one number, the costing.
+       */
+      spot: '#brief-doc .brf-sec:nth-of-type(4) .brf-facts:has(.brf-cost)',
       act: ({ ui }) => {
-        ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(4) .brf-cost');
+        ui.scrollSurface('brief-doc', '.brf-sec:nth-of-type(4) .brf-facts:has(.brf-cost)');
       },
     },
 
@@ -1123,7 +1256,7 @@ export function buildStory(data, globe, getUI = () => null) {
      * are all seen working rather than described.
      */
     {
-      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 5.2,
+      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 4.99,
       text: `Now scale it up. Every wall in ${place} has had the same treatment.`,
       act: ({ ui, scene }) => {
         ui.closeBrief();
@@ -1142,12 +1275,12 @@ export function buildStory(data, globe, getUI = () => null) {
       },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 8.1,
+      chapter: 'IV', phase: 'city', seconds: 7.94,
       spot: '#layers',
-      text: `${Words(LAYERS.length)} ways to read it. Surface temperature, sun and `
-        + `shade, hours above ${r0(m.event.threshold_c)}, where to act first.`,
-      say: `${Words(LAYERS.length)} ways to read it. Surface temperature, sun and `
-        + `shade, hours above ${words(m.event.threshold_c)}, where to act first.`,
+      text: `${Words(LAYERS.length)} layers to read it by. Surface temperature, sun `
+        + `and shade, hours above ${r0(m.event.threshold_c)}, where to act first.`,
+      say: `${Words(LAYERS.length)} layers to read it by. Surface temperature, sun `
+        + `and shade, hours above ${words(m.event.threshold_c)}, where to act first.`,
       /* Four layers named in one sentence, and the beat now shows each of them
        * AS IT IS NAMED.
        *
@@ -1175,9 +1308,11 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.7,
+      chapter: 'IV', phase: 'city', seconds: 5.54,
       spot: '#time',
-      text: 'And it moves through time. Any hour, any day, or the whole year.',
+      text: 'And it moves through time. Any hour, any day, a month, a season, '
+        + 'the whole year.',
+      say: 'And it moves through time. Any hour, any day, or the whole year.',
       // Back to facade temperature before the clock is started, and that is not
       // a preference. `exceedance` is a total over the whole heat wave: it has
       // no hour in it, so the time controls go quiet and running the clock over
@@ -1186,11 +1321,15 @@ export function buildStory(data, globe, getUI = () => null) {
       act: ({ ui }) => { ui.setLayer('surface'); ui.play?.(); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6.7,
+      chapter: 'IV', phase: 'city', seconds: 6.74,
+      /* "The hottest day", not "that day". The film last mentioned a specific
+       * day nineteen beats earlier, so the pronoun pointed at nothing a viewer
+       * still had in mind — and the whole claim is a comparison between two
+       * orderings, which cannot land if one of them is unnamed. */
       text: typeof overlap === 'number'
-        ? `Run the year and the ranking shifts. ${Words(overlap)} of that day’s `
-          + `worst fifty are still worst.`
-        : 'Run the year and the ranking shifts.',
+        ? `Run the whole year and the ranking shifts. ${Words(overlap)} of the `
+          + `hottest day’s worst fifty are still worst.`
+        : 'Run the whole year and the ranking shifts.',
       // Stop the clock AND put it back where it was. `play` leaves the hour
       // wherever it happened to reach, which on the last pass was three in the
       // morning — so the ranking, the what-if, the portfolio and the analyst all
@@ -1208,7 +1347,7 @@ export function buildStory(data, globe, getUI = () => null) {
       }],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6.3,
+      chapter: 'IV', phase: 'city', seconds: 5.17,
       spot: '#tab-whatif',
       text: 'Change something and it solves again. Cool roofs, trees, a coating.',
       act: ({ ui }) => {
@@ -1238,7 +1377,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6.27,
+      chapter: 'IV', phase: 'city', seconds: 6.04,
       /* These figures come off the panel this beat opens, not out of
        * portfolio.json. See Portfolio.programme(): the stored allocation and the
        * panel's own solver disagree by design, and quoting the first over a
@@ -1269,7 +1408,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6.1,
+      chapter: 'IV', phase: 'city', seconds: 5.62,
       get text() { return (() => {
         const a = programme();
         return a
@@ -1284,7 +1423,11 @@ export function buildStory(data, globe, getUI = () => null) {
         // Spelled, never handed over as digits: a synthesiser reads "1,880,578"
         // out one numeral at a time. Deriving it is what stops the film saying
         // "a hundred and fifty thousand" for a week after the programme moved.
-        return `And what that bought. ${spokenCount(a.person_hours_avoided)} `
+        // Capitalised: `spokenCount` returns "one point nine million", and this
+        // is the head of its own sentence. Inaudible, but the say strings are
+        // read by people as often as by synthesisers.
+        const n = spokenCount(a.person_hours_avoided);
+        return `And what that bought. ${n[0].toUpperCase()}${n.slice(1)} `
           + `hours of heat nobody sits through.`;
       },
       // To the outcome, not back to the curve. This beat says what the money
@@ -1294,15 +1437,33 @@ export function buildStory(data, globe, getUI = () => null) {
       // that paragraph clipped off the bottom edge for the whole chapter, so the
       // film asserted a figure the panel was showing just out of frame, and the
       // ranges the next beat is about were never on screen at all.
+      /* The ledger, and nothing after it. This moved on to the objectives at
+       * 58% through, which left the ledger — the block that actually states
+       * "at $57M this programme treats 91 buildings and avoids 1.88M
+       * person-hours" — holding for barely half the sentence that quotes it.
+       * One target, held for the whole line: measured 60% lit before, 91%
+       * after, and the missing tenth is the glide in. */
+      /* Scrolled twice to the same place, which is not a mistake.
+       *
+       * Removing the cue that wandered off to the objectives did not fix this
+       * beat: measured again, the ledger was still only on screen for 60% of
+       * its own line. The cause is upstream — the portfolio opens on the beat
+       * before, and its curve, ledger and table are still being laid out when
+       * this beat issues its scroll, so the scroll lands correctly against a
+       * document that then grows underneath it and carries the target away.
+       *
+       * A second scroll to the SAME target half way through costs nothing when
+       * the layout has settled (the browser is already there) and corrects it
+       * when it has not. The spot never changes, so the highlight does not move
+       * — it simply stops drifting off the thing it is pointing at. */
       spot: '#pf-body .pf-ledger',
       act: ({ ui }) => { ui.scrollSurface('pf-body', '.pf-ledger'); },
       cues: [
-        { at: 0.58, spot: '#pf-body .pf-obj',
-          do: ({ ui }) => ui.scrollSurface('pf-body', '.pf-obj') },
+        { at: 0.45, do: ({ ui }) => ui.scrollSurface('pf-body', '.pf-ledger') },
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 3.6,
+      chapter: 'IV', phase: 'city', seconds: 3.63,
       /* Straight to the table. This beat used to stop at `.pf-phase` on the way
        * and it was never once lit across a whole playthrough — the act scrolled
        * to it and the cue moved on before the scroll arrived, so the first half
@@ -1343,16 +1504,37 @@ export function buildStory(data, globe, getUI = () => null) {
      * this wall hotter.
      */
     {
-      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 3.9,
-      spot: '#analyst-win',
-      text: 'And if the panels don’t cover it, you can just ask.',
+      /* The QUESTION, not the window and not the empty box.
+       *
+       * Three targets were tried here and the middle one is instructive.
+       * `#analyst-win` is 1,080 by 619 — three quarters of the frame, and since
+       * the highlight is a hole cut in a scrim, lighting three quarters of the
+       * screen dims almost nothing and so points at almost nothing.
+       *
+       * `.agentform` fixed the geometry and missed the subject. It is the box
+       * you type in, which is the right answer to "where do I ask" and the
+       * wrong one to "you can just ask": at this moment the box is empty, so
+       * the one lit thing in the frame is a placeholder and two buttons while
+       * the actual question sits dimmed above it.
+       *
+       * `.you` is the question somebody asked, in their own words — "I own 560
+       * Third Avenue, my contractor wants to insulate the East 38th Street
+       * wall". Six hundred and eighty by sixty-four, five per cent of the
+       * frame, and it makes the case the line is making instead of pointing at
+       * the furniture. The two beats after it light the working and then the
+       * answer, so the chapter reads question, method, verdict.
+       */
+      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 5.77,
+      spot: '#agent-scroll .you',
+      text: 'And if the panels don’t cover it, you can just ask. '
+        + 'This owner wants to insulate his wall.',
       act: ({ ui }) => {
         ui.closePortfolio();
         ui.replayAnalyst(ANALYST_RUN, ANALYST_QUESTION);
       },
     },
     {
-      chapter: 'V', phase: 'city', seconds: 4.8,
+      chapter: 'V', phase: 'city', seconds: 4.99,
       text: 'It has the model behind it and twenty tools, and shows its working.',
       // A recorded turn replays off disk in a second or two, so by the time this
       // line is read the transcript is already at its end and sitting still.
@@ -1360,8 +1542,27 @@ export function buildStory(data, globe, getUI = () => null) {
       /* The analyst had the portfolio's fault: the whole console lit on the
        * beat that introduces it, then nothing at all over the two beats that
        * walk the transcript. These light the block being read. */
+      /* The whole working block, and a second scroll to settle it.
+       *
+       * This pointed at `.toolbody` for a while, to dodge a layout shift:
+       * `openWorking()` expands a <details> and the expansion lands after the
+       * scroll on the same line, so `.workblock` measured 100% present and only
+       * 50% lit. Swapping the target fixed the measurement and broke the
+       * picture. `.toolbody` is the body of ONE tool call and it is 132 pixels
+       * wide — so the frame got a tall narrow column of light down the left of
+       * a full-width console, lighting a sliver of one call out of fourteen
+       * while the line claimed the analyst shows its working.
+       *
+       * A number being right is not the same as a frame being right. The block
+       * is the correct subject at 1,026 pixels across, and the layout shift is
+       * fixed where it actually is — by scrolling to the same place again once
+       * the expansion has landed, which is what the portfolio ledger does for
+       * the same reason. */
       spot: '#agent-scroll .workblock',
-      act: ({ ui }) => { ui.openWorking(); ui.scrollSurface('agent-scroll', '.workblock'); },
+      act: ({ ui }) => {
+        ui.openWorking();
+        ui.scrollSurface('agent-scroll', '.workblock');
+      },
       // "It shows you everything it runs" is a claim about a transcript, and a
       // transcript held on its first block does not make it. The scroll walks
       // into the code the analyst actually executed while the line is read.
@@ -1373,24 +1574,73 @@ export function buildStory(data, globe, getUI = () => null) {
        * — a spot that resolves to nothing hides the highlight, which takes the
        * dim with it and leaves the beat looking like it forgot to point. */
       cues: [
-        { at: 0.50, spot: '#agent-scroll .toolbody',
-          do: ({ ui }) => ui.scrollSurface('agent-scroll', '.toolbody') },
+        { at: 0.40, do: ({ ui }) => ui.scrollSurface('agent-scroll', '.workblock') },
       ],
     },
     {
-      chapter: 'V', phase: 'city', seconds: 5.8,
+      chapter: 'V', phase: 'city', seconds: 5.43,
       // What this beat says has to be what the recording above it actually did.
       // The previous run wrote nineteen scripts and re-solved the canyon six
       // times, and this line said so. This one went to the building's own
       // schedule, priced the measure, and came back with a refusal, so that is
       // what it says now.
-      text: 'This one went down the tower floor by floor, priced the job, '
-        + 'and told the owner no.',
+      /* WHAT THE NO WAS, not that there was one.
+       *
+       * "Told the owner no" is a fact about the transcript rather than about
+       * the building, and it leaves the most interesting thing the analyst
+       * found on the floor. The finding is that the answer flips with height:
+       * down in the canyon the wall really is heated by what stands opposite,
+       * and above the fourth floor the tower is clear of it and the excess is
+       * sun through glass — which is why insulating masonry cannot touch it.
+       *
+       * The beat lights the verdict paragraph that says exactly this, rather
+       * than the callout it used to point at, which is the note about the
+       * economics constants being 2023-vintage and unverified. */
+      text: 'It told him no. The heat is coming through his glass, '
+        + 'not his masonry.',
+      spot: '#agent-scroll .bubble.agent > p:first-of-type',
+      act: ({ ui }) => {
+        ui.scrollSurface('agent-scroll', '.bubble.agent > p:first-of-type');
+      },
+    },
+    {
+      /* THE FILM NO LONGER ENDS ON THE REFUSAL.
+       *
+       * The beat above is the best evidence in the film — a recorded run that
+       * went down the tower floor by floor, priced the measure, and came back
+       * with a no. Ending on the word "no" left that playing as a failure
+       * rather than as the point, and the last thing a viewer took away was a
+       * model that could not help them.
+       *
+       * This line says what the refusal is worth, and it is the only sentence
+       * in the film that argues rather than reports. It is allowed to, here,
+       * because this is the one place the argument has been earned: the
+       * transcript is still on screen, the callout the previous beat scrolled
+       * to IS the refusal, and the money it saves is in the table above it.
+       * Nothing is claimed that is not being shown.
+       *
+       * It holds on `.acallout` rather than scrolling anywhere new. The
+       * previous beat's cue put the refusal in frame at 0.58 and the argument
+       * is about that paragraph — a second move here would take the eye off the
+       * thing the sentence is about, on the last line of the film.
+       */
+      /* `.acallout` is the note saying the economics constants are 2023-vintage
+       * and mostly unverified — a caveat, under a line about the answer being
+       * worth paying for. The table is the evidence: absorbed shortwave against
+       * longwave trapped, by floor band, with the dominant driver flipping
+       * between the ground floors and everything above them. */
+      chapter: 'V', phase: 'city', seconds: 2.85,
+      text: 'Which is the answer worth paying for.',
       spot: '#agent-scroll .atable',
       act: ({ ui }) => { ui.scrollSurface('agent-scroll', '.atable'); },
+      // Scrolled again half way through, to the same place. This is the last
+      // beat of the film and the shortest, so a scroll that has not landed by
+      // the time the line ends is a closing frame with nothing lit in it — and
+      // the transcript is still settling underneath it from the beat before.
+      // Costs nothing when the first scroll arrived; corrects it when it did
+      // not. Same remedy as the portfolio ledger and the analyst's working.
       cues: [
-        { at: 0.58, spot: '#agent-scroll .acallout',
-          do: ({ ui }) => ui.scrollSurface('agent-scroll', '.acallout') },
+        { at: 0.40, do: ({ ui }) => ui.scrollSurface('agent-scroll', '.atable') },
       ],
     },
     {
@@ -1400,7 +1650,7 @@ export function buildStory(data, globe, getUI = () => null) {
       // bar, none of which takes longer than 350ms to leave, over an interface
       // that came up two chapters ago. Two seconds covers it. Four was a held
       // shot of an application nobody was being told anything about.
-      chapter: 'V', phase: 'city', seconds: 2.0,
+      chapter: 'V', phase: 'city', seconds: 2,
       act: ({ ui }) => { ui.closeAnalyst(); },
     },
   ];

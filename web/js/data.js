@@ -375,6 +375,39 @@ export async function load(onProgress = () => {}) {
     return out.active.air[i] + (out.time.offsetK[hour] || 0);
   };
 
+  /** The hour's air temperature anchor for the date being shown, degC.
+   *
+   *  A SCALAR. One number for the whole AOI, which is exactly what makes it
+   *  worth having: it is the term that carries 96% of the facade field's
+   *  variance and none of its spatial structure. See EXCESS_DOMAIN in colors.js
+   *  for the measurement and for what subtracting it buys.
+   *
+   *  This is the same quantity `surfaceAt` anchors its reconstruction to, and
+   *  deliberately not `airAt`. The modelled air field is per-panel, 4.7 MB a
+   *  month, and the one field in the model whose uncertainty exceeds its own
+   *  signal — differencing against it would fold that uncertainty into every
+   *  wall. The anchor has none of those problems and is already in meta.
+   *
+   *  `offsetK` carries the departure of the date being shown from the solved
+   *  period's own day, the same shift `airAt` applies. Note that the surface
+   *  does NOT move by the full offset — it moves by `gamma * off`, because a
+   *  wall with thermal mass answers an air-temperature departure only partly —
+   *  so the excess below is not the stored field minus a constant. It is
+   *  computed through `surfaceAt` so it can never disagree with what is drawn. */
+  out.anchorAt = (hour) =>
+    out.active.hours[hour].t_anchor_c + (out.time.offsetK[hour] || 0);
+
+  /** How much hotter one band of one panel is than the air beside it, K.
+   *
+   *  Negative where a surface is losing to the sky faster than the air can
+   *  resupply it, which is most walls on most clear nights. This is also the
+   *  precise quantity `surfaceAt`'s irradiance and wind ratios scale — they act
+   *  on the surface-to-air excess, because that is what the radiation and the
+   *  convection act on — so painting it is painting the model's own working
+   *  variable rather than a quantity derived after the fact. */
+  out.excessAt = (hour, panel, band) =>
+    out.surfaceAt(hour, panel, band) - out.anchorAt(hour);
+
   out.hasAir = () => !!out.active.air;
   out.ensureAir = () => out.ensurePeriod(out.time.period, true)
     .then((p) => { out.active = p; return p; });
