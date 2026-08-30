@@ -750,3 +750,59 @@ def test_the_decision_tools_report_a_missing_layer_rather_than_raising(monkeypat
                     tools._programme_allocation):
         got = _call(handler, {"bin_or_address": "1017105"})
         assert "docs/DECISIONS.md" in got["error"]
+
+
+# ----------------------------------------------------- the film's recorded run
+
+
+def test_the_run_the_film_replays_is_the_one_that_ships():
+    """`ANALYST_RUN` in story.js must name a run that is tracked in git.
+
+    Chapter five replays a real turn from `.agent/runs/<id>/frames.jsonl` rather
+    than asking live on camera. `.agent/` is ignored, so that one run is
+    re-included by four lines in .gitignore and named again in .dockerignore,
+    .gcloudignore and deploy_hf.py's INCLUDE list. Five places, no link between
+    them, and the id is a hex string nobody reads.
+
+    They drifted. The turn was re-recorded against a better question, story.js
+    was pointed at the new id, and the five ignore/include entries were left on
+    the old one. On a laptop that is invisible: every run this machine ever made
+    is still in .agent/runs/ and the server replays it happily. Deployed, the
+    container holds only what those entries name, so the film asked for a run
+    that had never shipped, got a 404, and chapter five played to an empty
+    console.
+
+    This is the check that was missing, and it is a filesystem check on purpose:
+    "tracked in git" is exactly the property that the deploys inherit.
+    """
+    import re
+    import subprocess
+
+    story = Path("web/js/story.js").read_text()
+    m = re.search(r"ANALYST_RUN\s*=\s*'([^']+)'", story)
+    assert m, "story.js no longer declares ANALYST_RUN in a form this can read"
+    run_id = m.group(1)
+
+    tracked = subprocess.run(
+        ["git", "ls-files", f".agent/runs/{run_id}/"],
+        capture_output=True, text=True, check=True).stdout.split()
+    assert tracked, (
+        f"story.js replays {run_id}, which is not tracked in git. Deployed, the "
+        f"console will 404 and chapter five will play empty. Re-point the four "
+        f"lines in .gitignore, the entries in .dockerignore and .gcloudignore, "
+        f"and INCLUDE in scripts/deploy_hf.py, then `git add -f` the run."
+    )
+    # The replay reads exactly these two; the workspace of scratch scripts the
+    # turn wrote is deliberately not shipped.
+    assert f".agent/runs/{run_id}/frames.jsonl" in tracked
+    assert f".agent/runs/{run_id}/status.json" in tracked
+
+    # And the question printed above the transcript has to be the question that
+    # turn was actually asked, or the film shows an answer to something else.
+    status = json.loads(Path(f".agent/runs/{run_id}/status.json").read_text())
+    q = re.search(r"ANALYST_QUESTION\s*=\s*'([^']*)'\s*\+?\s*'?([^']*)'?", story)
+    assert q, "story.js no longer declares ANALYST_QUESTION in a form this can read"
+    asked = (q.group(1) + q.group(2)).strip()
+    assert asked and asked in status["question"], (
+        f"story.js prints a different question from the one {run_id} was asked"
+    )

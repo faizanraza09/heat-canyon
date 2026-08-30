@@ -55,7 +55,7 @@ INCLUDE = [
     "Dockerfile",
     ".dockerignore",
     "LICENSE",
-    ".agent/runs/r17880442193644fa/",  # the run chapter five replays
+    ".agent/runs/r178810446770079f/",  # the run chapter five replays
 ]
 
 #: Pruned from the staged tree after copying. These are inside INCLUDE'd

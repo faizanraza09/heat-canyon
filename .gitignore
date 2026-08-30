@@ -305,10 +305,20 @@ data/globe/*
 # …except the one recorded turn the opening walkthrough plays back.
 #
 # Chapter five of the film shows the analyst working rather than describing it,
-# and what it shows is a real turn — fifty-six tool calls, six re-solves of the
-# canyon physics — replayed from its own JSONL by the server. Asking live on
-# camera would cost minutes of waiting and money on every play, and would put
-# whatever the model said that afternoon in front of whoever is watching.
+# and what it shows is a real turn — fifteen tool calls, six scripts run against
+# the solved model, five minutes and eighty-one cents — replayed from its own
+# JSONL by the server. Asking live on camera would cost minutes of waiting and
+# money on every play, and would put whatever the model said that afternoon in
+# front of whoever is watching.
+#
+# THE ID HERE MUST MATCH `ANALYST_RUN` IN web/js/story.js, and nothing checks
+# that it does. The turn was re-recorded against a better question — a man with
+# a contractor's quote, rather than the author's own vocabulary — story.js was
+# pointed at the new run, and these four lines were not. On a laptop that is
+# invisible, because every run this machine has ever made is still sitting in
+# .agent/runs/ and the server replays it happily. Deployed, the container gets
+# exactly what is named below: the film asked for a run that had never been
+# shipped, the server answered 404, and chapter five played to an empty console.
 #
 # It is checked in because the film depends on it and a run directory is not
 # reproducible: clear it and chapter five plays with an empty console.
@@ -322,10 +332,10 @@ data/globe/*
 !.agent/
 !.agent/runs/
 .agent/runs/*
-!.agent/runs/r17880442193644fa/
-.agent/runs/r17880442193644fa/*
-!.agent/runs/r17880442193644fa/frames.jsonl
-!.agent/runs/r17880442193644fa/status.json
+!.agent/runs/r178810446770079f/
+.agent/runs/r178810446770079f/*
+!.agent/runs/r178810446770079f/frames.jsonl
+!.agent/runs/r178810446770079f/status.json
 
 # The design brief this overhaul was worked from — a 10 MB zip of reference
 # imagery that was an INPUT to the work, not part of it. The result is in
