@@ -61,10 +61,26 @@ USER user
 # accident and a container always does.
 ENV HEATCANYON_HOST=0.0.0.0 \
     PORT=7860 \
-    HEATCANYON_AGENT_AUTH=api_key \
+    HEATCANYON_AGENT_AUTH=oauth \
     HEATCANYON_AGENT_WORKSPACE=/app/.agent \
     CLAUDE_CONFIG_DIR=/home/user/.claude \
     CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+
+# Spend, bounded tighter here than on a laptop, because the difference between a
+# laptop and this is that anyone can drive it. The three caps do different jobs
+# and none of them substitutes for another: BUDGET_USD stops one runaway turn but
+# is invisible to the model, so it cuts mid-tool-call; TASK_BUDGET_TOKENS is a
+# countdown the model can see, so it wraps up holding its finding instead of
+# being guillotined; SESSION_BUDGET_USD is the only one that bounds the process
+# across every visitor, and it is the one that matters on a public URL.
+#
+# All three are plain environment variables, so they are raised or lowered from
+# the Space's settings without a rebuild.
+ENV HEATCANYON_AGENT_BUDGET_USD=1.50 \
+    HEATCANYON_AGENT_SESSION_BUDGET_USD=15 \
+    HEATCANYON_AGENT_TASK_BUDGET_TOKENS=250000 \
+    HEATCANYON_AGENT_MAX_CONCURRENT=2 \
+    HEATCANYON_AGENT_TIMEOUT_S=600
 
 EXPOSE 7860
 
