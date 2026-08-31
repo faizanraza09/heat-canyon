@@ -92,11 +92,24 @@ const svg = (tag, attrs) => {
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const mid = rangeMid;
 
-/* The four objectives, in the register the rest of the interface uses: a name
- * that is a name, and one sentence that says what the number MEANS rather than
- * how it was computed. The subtitles matter more here than anywhere else in the
+/* The objectives, in the register the rest of the interface uses: a name that is
+ * a name, and one sentence that says what the number MEANS rather than how it
+ * was computed. The subtitles matter more here than anywhere else in the
  * application, because the whole section exists to make somebody notice that
- * choosing between these two words is choosing between two programmes. */
+ * choosing between these two words is choosing between two programmes.
+ *
+ * Five now, not four. `carbon` was added because the other four are all
+ * heat-exposure objectives and between them they could not see a whole measure
+ * family: exterior insulation earns its keep in January by stopping a building
+ * burning gas, and under every one of the four it ranked 281st to 700th of 769
+ * while the budget bought the first 222. Correctly modelled, correctly priced,
+ * correctly ranked, and structurally unbuyable, because nothing the panel could
+ * be asked was a question insulation answers.
+ *
+ * Its gloss is the one that has to work hardest. The other four all buy somebody
+ * relief from heat; this one explicitly does not, and a reader who picks it
+ * without noticing that has been misled by this dictionary rather than informed
+ * by it. */
 const OBJECTIVES = {
   person_hours: {
     label: 'Person-hours',
@@ -113,6 +126,10 @@ const OBJECTIVES = {
   peak_relief: {
     label: 'Peak relief',
     gloss: 'Kilowatts taken off the worst hour, which is what the grid feels.',
+  },
+  carbon: {
+    label: 'Carbon',
+    gloss: 'Tonnes a year, on both fuels — and the one objective here that buys nobody any relief from heat.',
   },
 };
 

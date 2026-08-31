@@ -466,3 +466,93 @@ def test_missing_economics_gives_a_sentence_not_a_traceback(monkeypatch):
     r, src = PF._economics_range("electricity_usd_kwh", PF.ASSUMED_TARIFF_USD_KWH)
     assert r == PF.ASSUMED_TARIFF_USD_KWH
     assert "assumed" in src
+
+
+# ------------------------------------------------------------ carbon objective
+
+
+def test_carbon_ranks_on_tonnes_at_the_low_corner():
+    """Dollars per tonne, scored against the pessimistic end of the range.
+
+    The low corner, not the midpoint, because every other scorer in this layer
+    reads the assumption table at its least flattering — `severity_of` and
+    `_exceedance_hours` both do — and a carbon figure is the one most likely to
+    be quoted at a podium.
+    """
+    c = cand("A", ph=1_000.0, capex=(50_000.0, 100_000.0))
+    lo, hi = c.carbon_t
+    assert lo < hi, "the fixture must have a real range for this to mean anything"
+    assert PF.benefit(c, "carbon") == pytest.approx(lo)
+    assert PF.unit_cost(c, "carbon", basis="high") == pytest.approx(100_000.0 / lo)
+
+
+def test_a_measure_whose_net_carbon_is_a_loss_is_never_bought_on_carbon():
+    """A negative annual carbon is a real outcome, not bad data.
+
+    Once the gas behind a rejected winter beam is counted, a solar-control
+    measure on a heating-dominated elevation can emit more than it saves. Such a
+    measure must not be purchasable under an objective called carbon, and
+    `unit_cost` returning inf is the mechanism.
+    """
+    from dataclasses import replace
+    loss = replace(cand("LOSS", ph=5_000.0, capex=(10_000.0, 10_000.0)),
+                   carbon_t=(-4.0, -1.0))
+    # `_carbon` returns the loss signed; `benefit` clamps it to zero the way it
+    # clamps every objective, and `unit_cost` turns that into inf. The ordering
+    # cannot tell a carbon loss from a carbon of exactly zero and does not need
+    # to -- both must sort last. The signed figure survives on `carbon_t` for
+    # anything that wants to show it.
+    assert PF._carbon(loss) < 0.0
+    assert PF.benefit(loss, "carbon") == 0.0
+    assert PF.unit_cost(loss, "carbon") == math.inf
+    good = cand("GOOD", ph=100.0, capex=(10_000.0, 10_000.0))
+    order = [c.bin for c in PF.curve([loss, good], objective="carbon")]
+    assert order == ["GOOD", "LOSS"], "a carbon loss must sort behind a carbon gain"
+    # And it still sorts behind on the DEFAULT objective's own terms reversed --
+    # this measure has the larger person-hours benefit of the two, so the carbon
+    # ordering is not accidentally agreeing with the person-hours one here.
+    assert [c.bin for c in PF.curve([loss, good], objective="person_hours")] \
+        == ["LOSS", "GOOD"]
+
+
+def test_carbon_and_person_hours_disagree_which_is_the_whole_point():
+    """The objective was added because the other four could not see a measure
+    whose case is winter. If it ordered the same way as person-hours it would be
+    decoration, so this asserts the disagreement rather than hoping for it.
+
+    `FABRIC` is the shape of an insulation measure after the heating saving was
+    priced: a large carbon benefit on both fuels, and very little relief in
+    August. `SHADE` is the shape of a shading measure: the reverse.
+    """
+    from dataclasses import replace
+    fabric = replace(cand("FABRIC", ph=200.0, capex=(100_000.0, 100_000.0)),
+                     carbon_t=(18.0, 22.0))
+    shade = replace(cand("SHADE", ph=4_000.0, capex=(100_000.0, 100_000.0)),
+                    carbon_t=(1.0, 2.0))
+
+    by_ph = [c.bin for c in PF.curve([fabric, shade], objective="person_hours")]
+    by_co2 = [c.bin for c in PF.curve([fabric, shade], objective="carbon")]
+    assert by_ph == ["SHADE", "FABRIC"]
+    assert by_co2 == ["FABRIC", "SHADE"]
+    assert by_ph != by_co2
+
+
+def test_carbon_is_deliberately_absent_from_the_analysts_objectives():
+    """Five here, four in the analyst, and the asymmetry is structural.
+
+    `agent/analysis.allocate` scores BUILDINGS from their own attributes against
+    an assumed per-unit effect. Tonnes avoided is a property of a MEASURE on a
+    building and comes from `economics.price`, so it cannot be computed there at
+    all. This pins the reason, so that a later reader who finds four in one place
+    and five in the other does not "fix" it by inventing a building-level carbon
+    figure.
+    """
+    AN = pytest.importorskip("heatcanyon.agent.analysis")
+    import inspect
+    src = inspect.getsource(AN.allocate)
+    assert "carbon" not in src, (
+        "the analyst grew a carbon objective; if it is computable from building "
+        "attributes now, mirror it in portfolio.OBJECTIVES and add it to the "
+        "cross-check in this file")
+    assert "carbon" in PF.OBJECTIVES
+

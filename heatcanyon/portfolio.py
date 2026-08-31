@@ -12,8 +12,9 @@ into a programme under a budget.
 WHY THE DISAGREEMENT IS THE OUTPUT
 
 ``compare_objectives`` is the function this module exists for. Four objectives
-are already implemented in the analyst (``agent/analysis.allocate``) and each
-produces a defensible ranking. The value is not in any one of them. It is in the
+are already implemented in the analyst (``agent/analysis.allocate``), a fifth —
+``carbon`` — exists only here for a reason given below, and each produces a
+defensible ranking. The value is not in any one of them. It is in the
 fact that they *differ*, and that choosing between them is a political act which
 the platform currently performs implicitly, by whichever ordering the interface
 happens to render first.
@@ -21,7 +22,9 @@ happens to render first.
 Rank by avoided person-hours per dollar and the money flows to large, dense,
 cheap-to-treat buildings. Weight the same person-hours by the Heat Vulnerability
 Index and it flows towards residents least able to cope, buying fewer avoided
-hours per dollar to buy them for people with fewer alternatives. Both answers are
+hours per dollar to buy them for people with fewer alternatives. Rank by tonnes
+and it flows somewhere else again, towards the fabric of buildings that burn gas
+all winter, and buys nobody any relief in August at all. All three answers are
 correct; they answer different questions. So the module returns the overlap at
 the budget line, the buildings that appear under one objective and not the other,
 and how far each moved — and states in prose that the reader is choosing, rather
@@ -43,6 +46,24 @@ you substitute ``person_hours = avoided * units``. ``tests/test_portfolio.py``
 holds a cross-check that runs the analyst's own ``allocate`` over equivalent rows
 and asserts the two agree on the ordering, so a change to one that is not made to
 the other fails a test rather than quietly producing a different politics.
+
+``carbon`` IS THE EXCEPTION, AND ON PURPOSE
+
+There are five objectives here and four in the analyst. That asymmetry is not the
+drift the paragraph above warns about, and the reason is structural rather than a
+matter of taste: ``agent/analysis.allocate`` scores BUILDINGS out of ``ranked``,
+from ``facade_kh35``, ``hours_above_35``, ``units``, ``hvi`` and
+``facade_peak_c``, against an assumed ``per_unit_effect_k`` that the caller
+supplies. Every one of its four objectives is computable from a building's own
+attributes. Tonnes of CO2e avoided is not: it is a property of a MEASURE on a
+building, it comes from ``economics.price``, and nothing in the analyst's
+building-level view carries it. So ``carbon`` cannot be mirrored there without
+first giving that function a priced candidate, at which point it would be this
+function.
+
+The cross-check accordingly runs over the objectives the two share and does not
+enumerate ``OBJECTIVES``. If you add a sixth that IS computable from building
+attributes, it belongs in both and in that test.
 
 WHY THE MONEY IS A RANGE AND THE PROVENANCE IS "assumed"
 
@@ -313,6 +334,30 @@ def _peak_relief(c: Candidate) -> float:
     return float(c.peak_relief_k or 0.0)
 
 
+def _carbon(c: Candidate) -> float:
+    """Tonnes of CO2e avoided a year, at the LOW end of the range.
+
+    The low end, not the midpoint, because every other objective here scores
+    against the reading the assumption table supports even at its most
+    favourable — ``severity_of`` and ``_exceedance_hours`` both do — and a
+    carbon objective is the one most likely to be quoted at a podium.
+
+    A NEGATIVE annual carbon is a real outcome here, not a guard against bad
+    data: a solar-control measure on a heating-dominated elevation rejects more
+    winter sun than it saves in summer cooling, and once the gas behind that is
+    counted its net can be a LOSS. This function returns that loss as a negative,
+    and ``benefit`` then clamps it to zero — the clamp it applies to every
+    objective — so ``unit_cost`` comes back ``inf`` and the measure sorts to the
+    end and is never bought under an objective called carbon. Which is the right
+    outcome by a slightly indirect route: the ordering cannot distinguish a
+    carbon loss from a carbon of exactly zero, and for ranking it does not need
+    to. The signed figure is still on ``Candidate.carbon_t`` for anything that
+    wants to SHOW it, and the brief does.
+    """
+    lo, hi = c.carbon_t
+    return float(min(lo, hi))
+
+
 #: The four objectives, as functions of a single candidate. Each is the analyst's
 #: definition written against ``Candidate`` fields instead of ``ranked.json``
 #: rows; the docstring at the top of this module explains why they are not
@@ -331,6 +376,27 @@ OBJECTIVES: dict[str, Callable[[Candidate], float]] = {
     # Reduction in event-day peak facade temperature: the acute objective rather
     # than the chronic one.
     "peak_relief": _peak_relief,
+    # Tonnes of CO2e avoided a year, on BOTH fuels.
+    #
+    # THE ONLY OBJECTIVE HERE THAT IS NOT A HEAT-EXPOSURE OBJECTIVE, AND IT
+    # EXISTS BECAUSE THE OTHER FOUR COULD NOT SEE A WHOLE MEASURE FAMILY.
+    #
+    # Exterior insulation earns its keep in January: it stops a building burning
+    # gas. Priced properly it is the largest annual saving in the catalogue, and
+    # under every objective above it ranked 281st to 700th of 769 while the
+    # budget bought the first 222 — so a measure that was correctly modelled,
+    # correctly priced and correctly ranked was still structurally unbuyable,
+    # because nothing the allocator could be asked was a question insulation
+    # answers. That is not a defect in the measure and it was not a defect in
+    # those four objectives; it was a missing question.
+    #
+    # It is deliberately CARBON and not net present value. An NPV objective would
+    # answer "what pays back best", which systematically prefers a large building
+    # with a large bill to a vulnerable one with a small bill — and `vulnerable`
+    # exists in this very dict to resist exactly that. Carbon is defensible on
+    # the same public-good footing as the other four and does not import a
+    # payback logic that argues against them.
+    "carbon": _carbon,
 }
 
 

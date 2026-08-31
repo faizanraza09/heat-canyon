@@ -1266,7 +1266,8 @@ def programme(d, *, objective: str = "person_hours", budget_usd: float = 2_000_0
     # very objects it was given, so identity is exact and cannot collide.
     ident = {id(c): i for i, c in enumerate(cands)}
     curves: dict[str, list[int]] = {}
-    for obj in ("person_hours", "degree_hours", "vulnerable", "peak_relief"):
+    for obj in ("person_hours", "degree_hours", "vulnerable", "peak_relief",
+                "carbon"):
         try:
             ordered = PF.curve(cands, objective=obj, constraint=constraint or None)
         except Exception:  # noqa: BLE001 — an objective this data cannot score

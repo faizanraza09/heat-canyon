@@ -443,6 +443,49 @@ CONSTANTS: dict[str, Constant] = {
         ),
     ),
 
+    # ---- the carbon of the heat, which was missing in both directions
+    #
+    # Until this constant existed, `carbon_t_yr` counted ELECTRICITY ONLY. That
+    # understated a fabric measure and OVERSTATED a solar-control one, by the same
+    # omission pointing opposite ways: exterior insulation stops the building
+    # burning gas and got no credit for it, while a low-SHGC unit makes it burn
+    # more and was charged nothing. On the worked insulation case the uncounted
+    # gas carbon was 2.7 to 16.4 t/yr against 0.6 to 2.0 t/yr of counted
+    # electricity carbon -- four to eight times the figure that was being
+    # reported as the whole of it.
+
+    "heating_kg_co2e_kwh_thermal": Constant(
+        value=(0.21, 0.25),
+        unit="kg CO2e per kWh of DELIVERED HEAT",
+        source=(
+            "NYC Administrative Code 28-320.3.1.1: natural gas combusted on the "
+            "premises of a covered building is 0.00005311 tCO2e per kBtu, i.e. "
+            "0.05311 kg CO2e/kBtu, i.e. 0.1812 kg CO2e per kWh of FUEL at 3.412 "
+            "kBtu/kWh. Read on 2026-08-31. Unchanged by statute through the "
+            "2030-2034 compliance period, unlike the electricity coefficient"
+        ),
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "THE FUEL COEFFICIENT IS STATUTORY AND EXACT; THE EFFICIENCY IS NOT, "
+            "WHICH IS THE ONLY REASON THIS IS FALSE.\n\n"
+            "0.1812 kg/kWh of fuel over a 0.75-0.85 seasonal plant efficiency "
+            "gives 0.213 to 0.242 kg per kWh of DELIVERED heat, and the band above "
+            "is that rounded outward. The denominator is delivered heat to match "
+            "`heating_usd_kwh_thermal`, so the two are multiplied by the same "
+            "quantity and cannot disagree about what a kilowatt-hour of heat is.\n\n"
+            "TODO: verify the efficiency against a boiler survey, and add the "
+            "district-steam coefficient, which the same section of the code "
+            "carries separately and which this band does NOT cover -- a "
+            "steam-heated Midtown office is priced here on a gas coefficient, "
+            "which is the wrong instrument for it even though the two are close. "
+            "Applied to BOTH the heating saving of a fabric measure and the "
+            "heating penalty of a solar-control one, and to the LL97 exposure of "
+            "each, because the statute counts fuel combustion on exactly the same "
+            "footing as purchased electricity."
+        ),
+    ),
+
     # ---- carbon
 
     "grid_kg_co2e_kwh": Constant(
@@ -1312,12 +1355,41 @@ def price(
     demand = _mul(_mul(kw, take("demand_usd_kw_month")),
                   take("demand_months_billed_yr"))
 
-    carbon_kg = _mul(kwh, take("grid_kg_co2e_kwh"))
-    carbon_t = (carbon_kg[0] / 1000.0, carbon_kg[1] / 1000.0)
+    # CARBON AND LL97, ON BOTH FUELS.
+    #
+    # These counted purchased ELECTRICITY only, which understated a fabric
+    # measure and overstated a solar-control one by the same omission pointing
+    # opposite ways: insulation stops the building burning gas and got no credit,
+    # a low-SHGC unit makes it burn more and was charged nothing. The statute
+    # counts on-premises combustion on exactly the same footing as electricity,
+    # so both lines now do too.
+    #
+    # Per corner, not crossed, for the same reason `saving` is: the heat term and
+    # the electricity term are driven by the same measure at the same corner of
+    # the assembly table, so pairing corner 0 of one against corner 1 of the
+    # other would price two different assemblies at once.
+    heat_c = take("heating_kg_co2e_kwh_thermal")
+    heat_kwh = (0.0, 0.0)
+    if heating_kwh_saved is not None:
+        hk = _pair(heating_kwh_saved)
+        heat_kwh = (abs(hk[0]), abs(hk[1]))
+    burn_kwh = (0.0, 0.0)
+    if winter_kwh_thermal is not None:
+        wk = _pair(winter_kwh_thermal)
+        util = take(_OCCUPANCY_HEATING_UTILISATION[occ_key])
+        burn_kwh = (abs(wk[0]) * util[0], abs(wk[1]) * util[1])
 
-    ll97_t = _mul(kwh, take("ll97_coefficient_kg_co2e_kwh"))
-    ll97 = _mul((ll97_t[0] / 1000.0, ll97_t[1] / 1000.0),
-                take("ll97_penalty_usd_tco2e"))
+    elec_kg = _mul(kwh, take("grid_kg_co2e_kwh"))
+    gas_kg = ((heat_kwh[0] - burn_kwh[0]) * heat_c[0],
+              (heat_kwh[1] - burn_kwh[1]) * heat_c[1])
+    _ct = ((elec_kg[0] + gas_kg[0]) / 1000.0,
+           (elec_kg[1] + gas_kg[1]) / 1000.0)
+    carbon_t = (min(_ct), max(_ct))
+
+    ll97_elec = _mul(kwh, take("ll97_coefficient_kg_co2e_kwh"))
+    _lt = ((ll97_elec[0] + gas_kg[0]) / 1000.0,
+           (ll97_elec[1] + gas_kg[1]) / 1000.0)
+    ll97 = _mul((min(_lt), max(_lt)), take("ll97_penalty_usd_tco2e"))
 
     cap_key = _OCCUPANCY_CAPS[occ_key]
     used.append(cap_key)
