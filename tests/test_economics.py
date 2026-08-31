@@ -131,6 +131,91 @@ def test_payback_is_none_when_the_saving_straddles_zero():
     assert m.payback_yr is None
 
 
+def test_every_interval_price_returns_is_ordered():
+    """No pair may come back with its high end below its low end.
+
+    Written because two separate bugs in the winter-penalty work produced
+    inverted pairs and nothing here noticed. `_mul` ends on `(min(c), max(c))`
+    and every other helper orders its result, but the net saving is built by
+    subtracting PER CORNER — the summer benefit and the winter penalty are
+    driven by the same solar figure at the same corner of the assembly table, so
+    crossing them prices two different assemblies at once — and a per-corner
+    subtraction does not preserve ordering on its own.
+    """
+    cases = [
+        {},
+        dict(winter_kwh_thermal=40_000.0),
+        # The pathological one: a winter penalty that grows faster between the
+        # corners than the benefit does, which inverts a naive per-corner net.
+        dict(kwh_saved_yr=(20_000.0, 24_000.0), kw_peak_saved=(30.0, 32.0),
+             winter_kwh_thermal=(1_000.0, 400_000.0)),
+        dict(kwh_saved_yr=(-3_000.0, 9_000.0), kw_peak_saved=0.0),
+    ]
+    for over in cases:
+        m = _money(**over)
+        for name in ("energy_usd_yr", "demand_usd_yr", "carbon_t_yr",
+                     "ll97_usd_yr", "capex_usd", "npv_usd", "winter_usd_yr",
+                     "annual_saving_usd", "measure_life_years", "discount_rate"):
+            lo, hi = getattr(m, name)
+            assert lo <= hi, f"{name} inverted on {over}: ({lo}, {hi})"
+        if m.payback_yr is not None:
+            lo, hi = m.payback_yr
+            assert 0.0 < lo <= hi, f"payback inverted or negative on {over}"
+
+
+def test_the_winter_penalty_is_not_crossed_against_the_summer_saving():
+    """A correlated term must be subtracted corner by corner, not crossed.
+
+    Both halves come from the same transmitted-solar figure at the same corner
+    of the assembly table, so the pessimistic net is the low corner's benefit
+    less the low corner's OWN penalty. Crossing them — lowest benefit against
+    highest penalty, which is what interval subtraction does for independent
+    quantities — pairs the low corner of an assembly with the high corner of the
+    same assembly, and reported that a glazing swap never pays back where the
+    per-corner arithmetic gives twelve to three hundred and forty years.
+    """
+    kwh = (200_000.0, 900_000.0)
+    kw = (500.0, 2_000.0)
+    win = (200_000.0, 700_000.0)
+    m = _money(kwh_saved_yr=kwh, kw_peak_saved=kw, winter_kwh_thermal=win)
+    corner_lo = (m.energy_usd_yr[0] + m.demand_usd_yr[0] + m.ll97_usd_yr[0]
+                 - m.winter_usd_yr[0])
+    corner_hi = (m.energy_usd_yr[1] + m.demand_usd_yr[1] + m.ll97_usd_yr[1]
+                 - m.winter_usd_yr[1])
+    assert m.annual_saving_usd == pytest.approx((min(corner_lo, corner_hi),
+                                                max(corner_lo, corner_hi)))
+    # And the crossed form, which is what this must NOT be.
+    crossed = m.energy_usd_yr[0] + m.demand_usd_yr[0] + m.ll97_usd_yr[0] \
+        - m.winter_usd_yr[1]
+    assert m.annual_saving_usd[0] > crossed
+
+
+def test_the_winter_penalty_is_only_charged_when_asked_for():
+    """A measure with no heating-season figure is priced on its summer side, and
+    its penalty reads zero rather than being invented."""
+    m = _money()
+    assert m.winter_usd_yr == (0.0, 0.0)
+    n = _money(winter_kwh_thermal=50_000.0)
+    assert n.winter_usd_yr[1] > 0
+    assert n.annual_saving_usd[1] < m.annual_saving_usd[1]
+
+
+def test_cooling_load_is_divided_by_the_cop_before_it_is_priced():
+    """`loads.py` reports heat moved; the tariff bills electricity.
+
+    Guards the division that was missing for the whole life of this table, and
+    guards its DIRECTION: a higher coefficient of performance means less
+    electricity for the same heat and therefore a smaller saving, so the
+    optimistic end of the benefit pairs the high thermal figure with the LOW COP.
+    """
+    m = _money(kwh_saved_yr=10_000.0, kw_peak_saved=0.0)
+    e_lo, e_hi = E.CONSTANTS["electricity_usd_kwh"].pair
+    cop_lo, cop_hi = E.CONSTANTS["cooling_cop"].pair
+    assert cop_lo > 1.0, "a COP at or below one would make the division a no-op"
+    assert m.energy_usd_yr == pytest.approx(
+        (10_000.0 / cop_hi * e_lo, 10_000.0 / cop_lo * e_hi))
+
+
 def test_payback_is_a_plausible_number_when_it_exists():
     """A payback under a year, or beyond three centuries, means the capex band or
     the tariff is wrong rather than the measure being remarkable.

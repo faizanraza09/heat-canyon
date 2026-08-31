@@ -290,6 +290,19 @@ class FaceLoad:
     peak_hour_edt: int
     conduction_w: tuple[float, float]     # lo-hi from the assembly range
     solar_gain_w: tuple[float, float]
+    #: The same two terms at the BUILDING's coincident peak hour rather than at
+    #: this face's own. Sizing a device wants the face's worst hour; pricing a
+    #: demand charge wants the hour the meter actually reads, and they are not
+    #: the same hour on any elevation that is not the one driving the building.
+    #: Both are carried because both questions get asked of this record.
+    conduction_coincident_w: tuple[float, float]
+    solar_gain_coincident_w: tuple[float, float]
+    #: Transmitted solar as a DAY MEAN rather than at any peak hour. The indoor
+    #: temperature a person actually sits in is solved from the daily mean plus a
+    #: damped swing about it (the CIBSE admittance procedure, see
+    #: ``_solve_corner``), so the mean is the term an exposure calculation needs
+    #: and a peak-hour figure would overstate it by the swing.
+    solar_gain_mean_w: tuple[float, float]
     annual_kwh: tuple[float, float]       # cooling season, see COOLING_SEASON_HOURS
     #: ``annual_kwh``, kept as the two terms it is the sum of, because a measure
     #: acts on one of them and not the other. ``cond_kwh + solar_kwh ==
@@ -333,7 +346,21 @@ class FloorLoad:
     night_recovery: str              # "good" | "limited" | "none"
     hours_indoor_over_threshold: float   # per year, free-running, ESTIMATE
     person_hours: float                  # residential only, 0 otherwise
-    severity: int                        # 0-4, for the interface stripe
+    severity: int
+    #: The two sensitivities that let a measure's effect on EXPOSURE be computed
+    #: without re-entering the solve, which nothing downstream can do — see
+    #: ``solar_control_delta`` for why.
+    #:
+    #: ``t_indoor_k_per_w`` is ``1 / den_mean``: kelvin off the free-running
+    #: indoor mean per watt of gain removed from this floor.
+    #: ``hours_over_per_kelvin`` is ``d(hours_indoor_over_threshold) / d(offset)``,
+    #: evaluated on the REAL annual air series rather than assumed — it is the
+    #: density of that series at the threshold, so it is large for a floor
+    #: sitting right at 28 degC and near zero for one far above or below it.
+    #: A local linearisation, which is honest for the fraction of a kelvin a
+    #: facade measure moves and would not be for a whole-building retrofit.
+    t_indoor_k_per_w: float = 0.0
+    hours_over_per_kelvin: float = 0.0                        # 0-4, for the interface stripe
 
 
 @dataclass
@@ -633,6 +660,29 @@ def building_floors(
     face_peak_hour = np.argmax(sol[1]["q_face"], axis=0)          # (n_panel, n_band)
     band_peak_hour = np.argmax(sol[1]["q_total"], axis=0)         # (n_band,)
 
+    # ---- the BUILDING's coincident hour, computed before the floors so a face
+    # can be reported at it as well as at its own worst hour.
+    #
+    # WHY THIS MOVED UP. It used to be computed after the floor loop, from the
+    # assembled FloorLoads, which meant a FaceLoad could only ever report itself
+    # at ITS OWN peak. That is the right hour for sizing a device and the wrong
+    # one for a demand charge: Con Edison bills the single highest half-hour the
+    # whole building sets in a month, and a north-west face peaking at 18:00
+    # contributes whatever it happens to be doing at the building's hour, not
+    # its own maximum. Summing per-face maxima across faces that peak at
+    # different hours overstates the demand saving of every facade measure, and
+    # the demand charge is the LARGER half of the saving on SC-9 -- 153k of a
+    # 251k annual total on the worked case -- so the error was in the biggest
+    # line. The roll-up below has always used this hour, and its comment has
+    # always said "at the coincident hour rather than the sum of peaks"; the
+    # faces simply had no way to honour it.
+    per_hour = np.zeros((n_hour, 2))
+    for f in range(floors):
+        b = band_of_floor(f, floors, n_band)
+        per_hour[:, 0] += sol[0]["q_total"][:, b]
+        per_hour[:, 1] += sol[1]["q_total"][:, b]
+    h_build = int(np.argmax(per_hour[:, 1]))
+
     out_floors: list[FloorLoad] = []
     for f in range(floors):
         b = band_of_floor(f, floors, n_band)
@@ -658,6 +708,12 @@ def building_floors(
                               float(sol[1]["q_cond"][hf, p, b])),
                 solar_gain_w=(float(sol[0]["q_sol"][hf, p, b]),
                               float(sol[1]["q_sol"][hf, p, b])),
+                conduction_coincident_w=(float(sol[0]["q_cond"][h_build, p, b]),
+                                         float(sol[1]["q_cond"][h_build, p, b])),
+                solar_gain_coincident_w=(float(sol[0]["q_sol"][h_build, p, b]),
+                                         float(sol[1]["q_sol"][h_build, p, b])),
+                solar_gain_mean_w=(float(sol[0]["qsol_mean"][p, b]),
+                                   float(sol[1]["qsol_mean"][p, b])),
                 annual_kwh=(float(sol[0]["face_kwh"][p, b]),
                             float(sol[1]["face_kwh"][p, b])),
                 cond_kwh=(float(sol[0]["face_cond_kwh"][p, b]),
@@ -679,6 +735,9 @@ def building_floors(
         ann = (float(sol[0]["floor_kwh"][b]), float(sol[1]["floor_kwh"][b]))
 
         hours_over = _exceedance_hours(sol, b, t_air_band, t_air_year)
+        hours_per_k = _exceedance_slope(sol, b, t_air_band, t_air_year)
+        den = float(sol[0]["den_mean"][b])
+        k_per_w = (1.0 / den) if den > 0.0 else 0.0
         persons = _persons_on_floor(plate_m2, occupancy)
         env_m2 = float(storey_face[:, b].sum())
 
@@ -702,16 +761,14 @@ def building_floors(
             night_recovery=_night_recovery(float(svf_b[b])),
             hours_indoor_over_threshold=hours_over,
             person_hours=persons * hours_over,
+            t_indoor_k_per_w=k_per_w,
+            hours_over_per_kelvin=hours_per_k,
             severity=severity_of(t_in, hours_over, peak_w, plate_m2),
         ))
 
-    # ---- building roll-up, at the coincident hour rather than the sum of peaks
-    per_hour = np.zeros((n_hour, 2))
-    for f_load in out_floors:
-        b = f_load.band
-        per_hour[:, 0] += sol[0]["q_total"][:, b]
-        per_hour[:, 1] += sol[1]["q_total"][:, b]
-    h_build = int(np.argmax(per_hour[:, 1]))
+    # ---- building roll-up, at the coincident hour rather than the sum of peaks.
+    # `per_hour` and `h_build` are computed above the floor loop now, so the
+    # faces can report themselves at this hour too; see the note there.
     peak_kw = (per_hour[h_build, 0] / 1000.0, per_hour[h_build, 1] / 1000.0)
     annual_mwh = (sum(fl.annual_kwh[0] for fl in out_floors) / 1000.0,
                   sum(fl.annual_kwh[1] for fl in out_floors) / 1000.0)
@@ -903,6 +960,14 @@ def _solve_corner(
             "face_cond_kwh": face_cond_kwh, "face_sol_kwh": face_sol_kwh,
             "face_cond_glazed_kwh": face_cond_glazed_kwh,
             "ua_glazed_frac": ua_gl / np.maximum(1e-9, ua),
+            # The two quantities an EXPOSURE delta needs, as against an energy
+            # one. `qsol_mean` is the day-mean transmitted gain per panel, which
+            # is what a solar-control measure reduces; `den_mean` is the
+            # free-running balance's denominator, so a watt of gain removed is
+            # `1 / den_mean` kelvin off the indoor mean. Together they turn a
+            # shading fraction into a real indoor temperature change instead of
+            # a load-fraction proxy.
+            "qsol_mean": qsol_mean, "den_mean": den_mean,
             "c_vent": np.asarray(c_vent), "q_int": np.asarray(q_int)}
 
 
@@ -999,20 +1064,13 @@ def solar_control_delta(
     ``winter_kwh`` is a PENALTY and also comes back positive. The caller applies
     the conventions its own contract states.
     """
-    shgc = assembly.shgc
     u_gl = assembly.u_glass
     out_kwh = [0.0, 0.0]
     out_w = [0.0, 0.0]
     out_winter = [0.0, 0.0]
 
     for i in (0, 1):
-        shgc_old = float(shgc[i])
-        if solar_cut is not None:
-            f_sol = max(0.0, min(1.0, float(solar_cut)))
-        elif shgc_new is not None and shgc_old > 0.0:
-            f_sol = max(0.0, 1.0 - min(float(shgc_new), shgc_old) / shgc_old)
-        else:
-            f_sol = 0.0
+        f_sol = _solar_fraction_at(assembly, i, shgc_new, solar_cut)
 
         # The conduction half, glass only. The pessimistic end of the saving
         # pairs the assembly's OWN low U with the new unit's HIGH one, so the
@@ -1028,13 +1086,18 @@ def solar_control_delta(
         out_kwh[i] = (face.solar_kwh[i] * f_sol
                       + face.cond_glazed_kwh[i] * f_con
                       + face.cond_kwh[i] * cf)
-        # Peak: the solve reports the face's gain and conduction AT ITS OWN
-        # worst hour, so this is a per-face peak reduction and NOT a building
-        # coincident peak. A caller summing these across faces that peak at
-        # different hours is overstating the demand saving, and the measure
-        # schedule says so where it does it.
-        cond_w = max(0.0, face.conduction_w[i])
-        out_w[i] = (face.solar_gain_w[i] * f_sol
+        # PEAK, AT THE HOUR THE METER READS.
+        #
+        # `solar_gain_w` and `conduction_w` are this face's own worst hour, which
+        # is what sizing a louvre needs and is the wrong hour to price a demand
+        # charge at: the bill is the single highest demand the WHOLE BUILDING
+        # sets, and a west elevation's 18:00 maximum is not when a building whose
+        # load peaks at 15:00 gets metered. Summing per-face maxima across faces
+        # with different peak hours produced a demand saving no meter would ever
+        # have recorded. So the coincident pair is used here, and the face's own
+        # pair stays on the record for the sizing question.
+        cond_w = max(0.0, face.conduction_coincident_w[i])
+        out_w[i] = (face.solar_gain_coincident_w[i] * f_sol
                     + cond_w * f_con * gl_share
                     + cond_w * cf)
         # The heating-season side of the solar term. `winter_sun_share` is the
@@ -1051,7 +1114,89 @@ def solar_control_delta(
         "kwh": (out_kwh[0], out_kwh[1]),
         "peak_w": (out_w[0], out_w[1]),
         "winter_kwh": (out_winter[0], out_winter[1]),
+        # The fraction of transmitted solar this measure actually removes, at the
+        # low corner. Reported so `exposure_delta` need not re-derive it from the
+        # assembly and risk deriving it differently.
+        "solar_fraction": _solar_fraction_at(assembly, 0, shgc_new, solar_cut),
     }
+
+
+def _solar_fraction_at(assembly: Assembly, i: int,
+                       shgc_new: float | None, solar_cut: float | None) -> float:
+    """The share of transmitted solar removed, at one corner of the assembly."""
+    if solar_cut is not None:
+        return max(0.0, min(1.0, float(solar_cut)))
+    shgc_old = float(assembly.shgc[i])
+    if shgc_new is not None and shgc_old > 0.0:
+        return max(0.0, 1.0 - min(float(shgc_new), shgc_old) / shgc_old)
+    return 0.0
+
+
+def exposure_delta(
+    floor: FloorLoad,
+    treated: Sequence[FaceLoad],
+    *,
+    solar_fraction: float,
+) -> dict[str, float]:
+    """How many person-hours of indoor heat a solar-control measure removes.
+
+    THE COMPANION TO ``solar_control_delta``, AND THE REASON IT IS SEPARATE
+
+    Energy is a per-face quantity and exposure is not. A person sits in a room,
+    and the room's temperature is solved per FLOOR from the sum of what every
+    face admits — so removing gain from one elevation moves the whole floor a
+    little, and doing the arithmetic per face and adding would count the same
+    room several times.
+
+    THE CHAIN, EACH LINK MEASURED RATHER THAN ASSUMED
+
+    A shading fraction removes ``solar_fraction`` of the treated faces' DAY-MEAN
+    transmitted gain. ``t_indoor_k_per_w`` turns those watts into kelvin off the
+    free-running indoor mean — it is ``1 / den_mean`` from the same balance that
+    produced ``t_indoor_free_c``, not a rule of thumb. ``hours_over_per_kelvin``
+    turns kelvin into hours using the density of the REAL annual air series at
+    the threshold. Person-hours is then hours times the people on the plate,
+    which is what ``person_hours`` already is.
+
+    WHAT THIS REPLACES
+
+    ``prescribe._derive_energy`` scaled a floor's person-hours by
+    ``|facade_dT| / (T_surface - setpoint)`` — the outdoor surface delta again,
+    the same ratio that was wrong for solar energy and is wrong here for the
+    same reason. It also made exposure proportional to a quantity a low-SHGC
+    unit barely moves. This is the indoor temperature, which is what exposure
+    actually is: the module's own docstring calls it "the quantity a resident
+    experiences and the only one on this schedule that is about a person rather
+    than about a building".
+
+    WHAT IT IS NOT
+
+    A local linearisation. It is honest for the fraction of a kelvin a facade
+    measure moves and it would not be for a whole-building retrofit, so the
+    result is clamped at the floor's own exceedance — a measure cannot remove
+    more hours than there are. It is also silent on the swing: the admittance
+    procedure damps the fluctuation about the mean, and only the mean is
+    differentiated here, so a measure that flattens a peak without moving a mean
+    gets no credit. Both limits are stated on the prescription.
+    """
+    k_per_w = float(getattr(floor, "t_indoor_k_per_w", 0.0) or 0.0)
+    h_per_k = float(getattr(floor, "hours_over_per_kelvin", 0.0) or 0.0)
+    hours_now = float(getattr(floor, "hours_indoor_over_threshold", 0.0) or 0.0)
+    ph_now = float(getattr(floor, "person_hours", 0.0) or 0.0)
+    f = max(0.0, min(1.0, float(solar_fraction)))
+    if k_per_w <= 0.0 or h_per_k <= 0.0 or f <= 0.0 or hours_now <= 0.0:
+        return {"d_t_indoor_k": 0.0, "d_hours": 0.0, "d_person_hours": 0.0}
+
+    # The LOW corner of the gain, matching `_exceedance_hours` and `severity_of`,
+    # which both score against the reading the assumption table supports even at
+    # its most favourable. Using the high corner here would make every measure's
+    # exposure benefit the most flattering number available.
+    watts = sum(max(0.0, fa.solar_gain_mean_w[0]) for fa in treated)
+    d_t = watts * f * k_per_w
+    d_hours = min(hours_now, d_t * h_per_k)
+    per_person = (ph_now / hours_now) if hours_now > 0.0 else 0.0
+    return {"d_t_indoor_k": d_t, "d_hours": d_hours,
+            "d_person_hours": d_hours * per_person}
 
 
 def _decremented(surface: np.ndarray, f: float, lag_slots: int) -> np.ndarray:
@@ -1156,6 +1301,33 @@ def _exceedance_hours(sol, band: int, t_air_band: np.ndarray,
     # of the assumption table.
     offset = float((sol[0]["t_indoor"][:, band] - t_air_band[:, band]).mean())
     return float(np.count_nonzero(t_air_year + offset > INDOOR_THRESHOLD_C))
+
+
+def _exceedance_slope(sol, band: int, t_air_band: np.ndarray,
+                      t_air_year: np.ndarray | None) -> float:
+    """How many exceedance hours a kelvin of indoor relief actually buys.
+
+    ``d(hours) / d(offset)`` for the count above, evaluated as a central
+    difference over one kelvin on the real annual air series. It is the density
+    of that series at the threshold, and the shape of that density is the whole
+    reason this is measured rather than assumed: a floor whose indoor estimate
+    sits at 28.2 degC has hundreds of hours within a kelvin of the threshold and
+    a fraction of a kelvin of shading moves a great many of them, while a floor
+    at 34 degC has almost none within a kelvin and the same shading moves almost
+    nothing there. A constant coefficient would get both cases wrong in opposite
+    directions, and it is the second case — the worst floors, where a measure
+    looks most attractive — that it would flatter.
+
+    Same corner as ``_exceedance_hours``: the low one, so a measure's exposure
+    benefit is the one the assumption table supports even at its most favourable
+    reading of the envelope.
+    """
+    if t_air_year is None or t_air_year.size == 0:
+        return 0.0
+    offset = float((sol[0]["t_indoor"][:, band] - t_air_band[:, band]).mean())
+    hi = np.count_nonzero(t_air_year + offset + 0.5 > INDOOR_THRESHOLD_C)
+    lo = np.count_nonzero(t_air_year + offset - 0.5 > INDOOR_THRESHOLD_C)
+    return float(max(0, hi - lo))
 
 
 def severity_of(t_indoor: tuple[float, float], hours_over: float,

@@ -213,6 +213,14 @@ _FALLBACK_LON = -73.9832
 _FALLBACK_DATE = (2026, 7, 2)
 _EDT_OFFSET = -4.0
 
+#: Winter design point for the seasonal selectivity of a fixed device: 21
+#: January, and EST rather than EDT because that is the clock New York keeps
+#: then. Getting the offset wrong shifts the sun an hour and would bias every
+#: overhang's winter figure in the same direction, which is worse than a wide
+#: band would be.
+_WINTER_DESIGN_DATE = (2026, 1, 21)
+_EST_OFFSET = -5.0
+
 
 # ------------------------------------------------------------------ shapes
 
@@ -699,6 +707,72 @@ def _wrap180(deg: float) -> float:
     return ((float(deg) + 180.0) % 360.0) - 180.0
 
 
+def winter_shaded_fraction(azimuth: float, projection_m: float,
+                           window_head_m: float, ctx: dict) -> float | None:
+    """How much of the window a summer-sized overhang still shades in January.
+
+    THE SEASONAL SELECTIVITY OF A HORIZONTAL DEVICE, COMPUTED RATHER THAN CLAIMED
+
+    This catalogue has always asserted, in prose, that "an overhang sized on the
+    summer profile angle passes most of the winter beam underneath it, because
+    the winter sun is lower" — and that this is "the one shading device whose
+    seasonal penalty is small by construction". Once the winter penalty was
+    priced, that sentence became a number, and the number was first written as a
+    flat 0.25 read out of the sentence. It does not need to be read out of a
+    sentence: every term is already here.
+
+    A projection ``P`` sized by ``P = h * cos(dg) / tan(alt)`` shades the full
+    window height at that sun position, so the summer fraction is 1.0 by
+    construction. Run the same geometry at a January sun and the shadow reaches
+    only ``P * tan(alt_w) / cos(dg_w)`` down the glass. That ratio, clamped to
+    one, is what the device still intercepts in the heating season, and it is
+    what the measure should be charged for.
+
+    The winter hour is chosen the way the summer one is: the hour with the most
+    beam actually landing on THIS wall, scanned rather than assumed, because
+    solar noon is the wrong hour for an east or west elevation and would report
+    a north-east facade as shaded in winter when it takes no winter beam at all.
+
+    Returns ``None`` where no winter beam reaches the wall — a north elevation in
+    January — which is a different statement from "the overhang blocks nothing"
+    and the caller distinguishes them.
+    """
+    if projection_m <= 0.0 or window_head_m <= 0.0:
+        return None
+    y, mo, dy = tuple(ctx.get("winter_date") or _WINTER_DESIGN_DATE)
+    lat = float(ctx.get("latitude", _FALLBACK_LAT))
+    lon = float(ctx.get("longitude", _FALLBACK_LON))
+
+    best = None
+    for hour in range(8, 17):
+        try:
+            sp = S.sun_position(lat, lon, int(y), int(mo), int(dy),
+                                float(hour), _EST_OFFSET)
+        except Exception:  # noqa: BLE001 — one hour, not the measure
+            continue
+        if not getattr(sp, "up", False) or sp.altitude <= _MIN_ALTITUDE_DEG:
+            continue
+        cosi = S.cos_incidence_vertical(sp, float(azimuth))
+        if cosi <= 0.0:
+            continue
+        # Beam on the wall, as a proxy for which winter hour matters most here.
+        on_wall = cosi
+        if best is None or on_wall > best[0]:
+            best = (on_wall, float(sp.altitude), float(sp.azimuth))
+    if best is None:
+        return None
+
+    _, alt_w, az_w = best
+    dg = abs(_wrap180(az_w - float(azimuth)))
+    if dg >= 90.0:
+        return None
+    cos_dg = math.cos(math.radians(dg))
+    if cos_dg <= 0.0:
+        return None
+    depth = projection_m * math.tan(math.radians(alt_w)) / cos_dg
+    return max(0.0, min(1.0, depth / float(window_head_m)))
+
+
 def shading_geometry(
     azimuth: float,
     peak_alt: float,
@@ -1156,6 +1230,14 @@ def _picks_for_floor(fl: Any, loads: Any, ctx: dict) -> list[_Pick]:
                 falt, faz = _sun_at(fh, ctx)
                 g = shading_geometry(_face_attr(f, "azimuth"), falt, faz)
                 g["peak_hour_edt"] = fh
+                # The seasonal selectivity of a horizontal overhang, per facade
+                # rather than as one number for the catalogue. It travels on the
+                # geometry so `economics` can charge this device for the January
+                # it actually costs; see `winter_shaded_fraction`.
+                if g.get("device") == "horizontal" and g.get("projection_m"):
+                    g["winter_shaded_fraction"] = winter_shaded_fraction(
+                        _face_attr(f, "azimuth"), float(g["projection_m"]),
+                        float(g.get("window_head_m") or 2.1), ctx)
                 dev = g["device"]
                 by_device.setdefault(dev, []).append(f)
                 # Keep the geometry that governs: the deepest projection, or the

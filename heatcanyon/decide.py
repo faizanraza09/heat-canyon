@@ -475,17 +475,34 @@ def floors_payload(bl) -> dict:
     }
 
 
-def _magnitude(v) -> tuple[float, float]:
-    """A signed change as a positive (lo, hi) magnitude.
+def _as_saving(v) -> tuple[float, float]:
+    """A signed CHANGE as a signed SAVING, which is a negation and not an abs().
 
-    An effect is signed as a CHANGE, so a saving is negative. `economics.price`
-    wants the magnitude saved. Passing the signed value through produces a
-    negative payback, which reads as a measure that costs energy — and some
-    measures genuinely do cost energy, so the two must never be confused.
+    THIS TOOK THE ABSOLUTE VALUE, AND ITS OWN DOCSTRING SAID WHY THAT WAS WRONG.
+
+    `prescribe.Effect` reports deltas: a measure that removes load reports
+    `d_annual_kwh` NEGATIVE. `economics.price` wants the amount SAVED, positive.
+    Between the two conventions the operation is a negation — which flips the
+    endpoints, so they are reordered.
+
+    It used to be `abs()`, under a docstring that ended "some measures genuinely
+    do cost energy, so the two must never be confused". Taking the absolute
+    value is exactly that confusion: it maps a penalty and a saving of the same
+    size onto the same input. Every one of the 29 `wall_insulation` measures in
+    the build reported a POSITIVE `d_annual_kwh` — the model's honest answer,
+    because dropping a wall's admittance makes its OUTER face run hotter, which
+    is what an insulated wall does — and each was priced as though it saved that
+    much cooling instead of costing it.
+
+    `price` needs no protecting from the sign: its docstring commits to pricing
+    a negative saving "as a loss rather than clamped to zero", and `payback_yr`
+    is already None wherever the low end of the saving is not positive. The only
+    thing standing between an honest penalty and an honest price was this
+    function.
     """
     lo, hi = (v if isinstance(v, (list, tuple)) else (v, v))
     lo, hi = float(lo), float(hi)
-    return (abs(min(lo, hi)), abs(max(lo, hi)))
+    return (-max(lo, hi), -min(lo, hi))
 
 
 #: `prescribe` names measures by the DEVICE it derived — three kinds of fixed
@@ -572,7 +589,14 @@ _SOLAR_LEVER: dict[str, dict] = {
     },
     "window_film":              {"where": "inside",  "winter": 1.00},
     "operable_shading":         {"where": "outside", "winter": 0.00},
-    "fixed_shading_horizontal": {"where": "outside", "winter": 0.25},
+    # The only entry whose winter figure is a FALLBACK. `prescribe` computes the
+    # real one per facade from the overhang's own projection against a January
+    # sun and puts it on the geometry as `winter_shaded_fraction`; it comes out
+    # 0.32 on a south elevation, 0.08 on an east one and None on a north one,
+    # which is a spread no single number covers. This 0.25 is what remains for a
+    # prescription whose geometry predates that and carries no fraction.
+    "fixed_shading_horizontal": {"where": "outside", "winter": 0.25,
+                                 "winter_from_geometry": True},
     "fixed_shading_vertical":   {"where": "outside", "winter": 1.00},
     "fixed_shading_eggcrate":   {"where": "outside", "winter": 1.00},
 }
@@ -632,7 +656,18 @@ def _rederive_solar_effects(prescriptions, loads) -> int:
         geo = getattr(p, "geometry", None) or {}
         where = lever["where"]
 
-        kw: dict = {"winter_scale": float(lever["winter"])}
+        winter_scale = float(lever["winter"])
+        winter_computed = False
+        if lever.get("winter_from_geometry"):
+            wsf = geo.get("winter_shaded_fraction")
+            if wsf is not None:
+                # A north elevation takes no winter beam at all, and `prescribe`
+                # returns None for that rather than 0.0 — a different statement,
+                # so it falls through to the fallback rather than being read as
+                # "this overhang costs nothing in January".
+                winter_scale = max(0.0, min(1.0, float(wsf)))
+                winter_computed = True
+        kw: dict = {"winter_scale": winter_scale}
         if where == "glass":
             kw["shgc_new"] = float(geo.get("shgc_target")
                                    or lever["default_shgc_target"])
@@ -657,13 +692,18 @@ def _rederive_solar_effects(prescriptions, loads) -> int:
         d_kwh = [0.0, 0.0]
         d_kw = [0.0, 0.0]
         d_win = [0.0, 0.0]
+        d_ph = 0.0
+        d_t_in = 0.0
         hours: set[int] = set()
         for fl in getattr(loads, "floors", None) or []:
             if not (lo_f <= int(getattr(fl, "floor", 0)) <= hi_f):
                 continue
+            treated_here: list = []
+            f_sol_here = 0.0
             for fa in getattr(fl, "faces", None) or []:
                 if getattr(fa, "compass", None) not in faces:
                     continue
+                treated_here.append(fa)
                 cf = 0.0
                 if where == "outside" and d_facade > 0.0:
                     drive = max(1.0, float(getattr(fl, "t_surface_peak_c", 0.0)) - setpoint)
@@ -676,7 +716,22 @@ def _rederive_solar_effects(prescriptions, loads) -> int:
                     d_kwh[i] += d["kwh"][i]
                     d_kw[i] += d["peak_w"][i] / 1000.0
                     d_win[i] += d["winter_kwh"][i]
+                f_sol_here = float(d.get("solar_fraction") or 0.0)
                 hours.add(int(getattr(fa, "peak_hour_edt", 0)))
+                # kept for the diagnostic below, not for the arithmetic
+
+            # EXPOSURE IS PER FLOOR, NOT PER FACE. A person sits in a room and
+            # the room's temperature is solved from what every face admits, so
+            # this is called once per storey with all of its treated faces —
+            # summing a per-face figure would count the same room repeatedly.
+            if treated_here and f_sol_here > 0.0:
+                try:
+                    x = LD.exposure_delta(fl, treated_here,
+                                          solar_fraction=f_sol_here)
+                    d_ph += x["d_person_hours"]
+                    d_t_in = max(d_t_in, x["d_t_indoor_k"])
+                except Exception:  # noqa: BLE001 — one floor, not the schedule
+                    pass
 
         if not any(d_kwh):
             continue
@@ -686,17 +741,22 @@ def _rederive_solar_effects(prescriptions, loads) -> int:
         eff.d_annual_kwh = (-abs(d_kwh[1]), -abs(d_kwh[0]))
         eff.d_peak_kw = (-abs(d_kw[1]), -abs(d_kw[0]))
         eff.d_winter_kwh = (abs(d_win[0]), abs(d_win[1]))
+        # Person-hours only where the exposure chain actually produced one. A
+        # floor whose indoor estimate sits far from the 28 degC threshold has a
+        # near-zero slope and legitimately returns nothing, and leaving the old
+        # outdoor-delta figure in place there would mix two methods in one
+        # column — which is exactly the inconsistency this replaces.
+        if d_ph > 0.0:
+            eff.d_person_hours = -abs(round(d_ph, 1))
         eff.source = "re-solved facade delta; energy from the solar lever"
 
         note = getattr(p, "effect_note", "") or ""
         coincidence = (
-            f"The peak figure sums {len(hours)} face"
-            f"{'s' if len(hours) != 1 else ''} at "
-            + ("their own worst hours, which are not the same hour, so it is an "
-               "over-estimate of the coincident demand saving"
-               if len(hours) > 1 else
-               "one shared worst hour, so it is coincident within this measure")
-            + "; it is not the building's coincident peak either way."
+            "The peak figure is taken at the hour the WHOLE BUILDING peaks, not "
+            "at each face's own worst hour, because a demand charge is billed on "
+            "the one highest reading the meter takes and a west elevation's "
+            "evening maximum is not when a building that peaks mid-afternoon "
+            "gets metered."
         )
         mechanism = {
             "glass": ("the new unit's solar heat gain coefficient and U-value. "
@@ -719,15 +779,31 @@ def _rederive_solar_effects(prescriptions, loads) -> int:
             "winter beam is still available."
             if lever["winter"] <= 0.0 else
             f"The heating-season penalty is the same solar term over the winter "
-            f"share of the annual dose at {lever['winter']:.0%} of the summer "
-            f"cut — this device's seasonal selectivity, stated in the catalogue "
-            f"— priced as delivered heat rather than inferred from a ratio."
+            f"share of the annual dose at {winter_scale:.0%} of the summer cut, "
+            + ("computed from this overhang's own projection against a 21 "
+               "January sun on this facade's orientation rather than taken from "
+               "the catalogue" if winter_computed else
+               "this device's seasonal selectivity as the catalogue states it")
+            + ", priced as delivered heat rather than inferred from a ratio."
         )
         p.effect_note = (note + " " if note else "") + (
             "Energy is not scaled from the facade temperature delta alone for "
             "this measure. It is the cooling-season expression in loads.py "
             "re-evaluated against " + mechanism + ". " + coincidence + " "
             + winter_says
+            + (f" Person-hours are the same lever carried through to exposure: "
+               f"{d_t_in:.2f} K off the free-running indoor mean on the worst "
+               f"treated storey, converted to hours by the density of this "
+               f"building's own annual air series at the 28 °C threshold, so a "
+               f"floor already far above it is credited with little and a floor "
+               f"sitting on it with a great deal. Linearised about the current "
+               f"offset and silent on the daily swing, which the admittance "
+               f"procedure damps and this does not differentiate."
+               if d_ph > 0.0 else
+               " Person-hours are unchanged from the facade-delta scaling: this "
+               "measure's treated storeys sit far enough from the 28 °C "
+               "threshold that the exposure slope is zero there, so the "
+               "exposure chain returns nothing to replace it with.")
         )
         p.confidence = "assumed"
         n += 1
@@ -828,8 +904,8 @@ def _price_all(prescriptions, loads) -> int:
                 # not. A measure without one is priced on its summer side alone
                 # and `effect_note` already says the penalty is unquantified.
                 winter_kwh_thermal=_winter_heat(p),
-                kwh_saved_yr=_magnitude(kwh),
-                kw_peak_saved=_magnitude(kw),
+                kwh_saved_yr=_as_saving(kwh),
+                kw_peak_saved=_as_saving(kw),
                 occupancy=loads.occupancy,
                 gross_floor_m2=gross,
             )

@@ -1261,7 +1261,17 @@ def price(
     # price are independent of the envelope and of each other, so each corner
     # already carries its own worst tariff.
     summer = _add(energy, demand, ll97)
-    saving = (summer[0] - winter[0], summer[1] - winter[1])
+    _net = (summer[0] - winter[0], summer[1] - winter[1])
+    # ORDERED, like every other interval this module builds -- `_mul` ends on
+    # `(min(c), max(c))` for the same reason. Subtracting per corner does NOT
+    # preserve ordering: where the winter penalty grows faster between the two
+    # corners than the summer benefit does, the high corner's net comes out
+    # BELOW the low corner's and the interval inverts. An inverted interval then
+    # divides into `capex[0] / saving[1]` and produces a NEGATIVE payback, which
+    # is what a glazing measure on one of 560 3 Avenue's smaller elevations
+    # reported: -114 to 1,715 years. A payback cannot be negative; the pair was
+    # simply the wrong way round.
+    saving = (min(_net), max(_net))
 
     # Payback is None unless the measure pays back at BOTH ends of its range.
     # The alternative — reporting the optimistic end and letting the pessimistic
