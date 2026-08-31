@@ -375,8 +375,12 @@ MEASURES: dict[str, MeasureFamily] = {
         resolvable=True,
         winter_cost=(
             "A low-SHGC unit rejects the January beam as efficiently as the July "
-            "one, so a heating-dominated floor pays for this all winter. The "
-            "modern units also raise the U-value, which partly repays it."),
+            "one, so a heating-dominated floor pays for this all winter, and "
+            "that penalty is priced here as delivered heat rather than "
+            "described. The modern unit's U-value is two to four times LOWER "
+            "than the glass it replaces, which repays part of it — the reason a "
+            "film, which lowers no U-value at all, is the worse bargain on a "
+            "cold elevation even though it costs a fraction as much."),
         programme=("NYC Accelerator building-performance advice",
                    "Local Law 97 compliance pathway",
                    "NYSERDA Empire Building Challenge"),
@@ -478,7 +482,10 @@ MEASURES: dict[str, MeasureFamily] = {
         winter_cost=(
             "Permanent and unselective: it rejects the January beam too, and it "
             "cannot be retracted. On a heating-dominated floor that is a genuine "
-            "annual cost against a summer benefit."),
+            "annual cost against a summer benefit, and it is priced as one. A "
+            "film takes the whole winter penalty of a glazing swap and none of "
+            "its U-value repayment, so where the heating season governs, the "
+            "cheaper measure is the one that pays back later."),
         programme=("NYC Accelerator", "Utility custom-measure rebate"),
         also_consider=("blinds_policy", "operable_shading"),
         note=("Weeks of lead time and no structural work — the reason it is in "

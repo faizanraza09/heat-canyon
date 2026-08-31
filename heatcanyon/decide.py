@@ -362,6 +362,9 @@ def prescriptions_for(d, bin_: str, *, measures: list[str] | None = None,
         "land_use": attrs.get("use"),
     }
     pres = PR.for_building(bl, resolve=resolve, context=context)
+    # Before pricing, not after: `_price_all` reads `effect.d_annual_kwh`, so a
+    # re-derivation that ran afterwards would price the figure it replaced.
+    _rederive_solar_effects(pres, bl)
     priced = _price_all(pres, bl)
     return {
         "bin": str(bin_),
@@ -523,6 +526,241 @@ _NOT_A_BUILDING_COST = {
 }
 
 
+#: Every measure whose lever is the SUN, and the two facts that decide how it
+#: is priced: where the device sits relative to the glass, and whether it is
+#: seasonally selective.
+#:
+#: ``where`` — the physical distinction the old arrangement collapsed:
+#:
+#:   ``outside``  A louvre, fin or awning. Intercepts the beam BEFORE the wall,
+#:                so it takes the transmitted-solar term AND cools the wall,
+#:                which takes part of the conduction term too. Both are real and
+#:                they are different terms of the same sum, so crediting both is
+#:                not double-counting — the conduction half is exactly what the
+#:                canyon engine's -18 to -6 K facade delta measures, and it is
+#:                the one place that delta belongs.
+#:   ``glass``    A new insulated unit. Takes the solar term through its SHGC and
+#:                the GLAZED SHARE of the conduction term through its U-value.
+#:                Gets no credit from the outdoor delta: it rejects the beam at
+#:                the glass line, so the wall outside barely cools at all — 0.727
+#:                K on 560 3 Avenue, which is what made scaling by it absurd.
+#:   ``inside``   A film or a blind. Solar term only. The wall outside does not
+#:                know it is there, so no conduction credit of either kind.
+#:
+#: ``winter`` — how much of the summer solar cut also lands in the heating
+#: season, which is the device's seasonal selectivity and NOT a fudge factor.
+#: Each value is what this catalogue's own ``winter_cost`` prose already claims,
+#: now carried as a number so it reaches the money instead of only the page:
+#:
+#:   operable 0.00   "the point of an operable device is that it retracts, so the
+#:                    winter beam is available when it is wanted"
+#:   horizontal 0.25 "an overhang sized on the summer profile angle passes most of
+#:                    the winter beam underneath it ... the one shading device
+#:                    whose seasonal penalty is small by construction". ASSUMED:
+#:                    "most" is read as three quarters. The geometry to compute
+#:                    it properly is on the prescription — projection, window
+#:                    head, and the winter sun altitude — and doing so is the
+#:                    obvious next refinement.
+#:   fins/eggcrate 1 A fin intercepts the low, near-normal beam, which is
+#:                    precisely the winter one. No selectivity at all.
+#:   film 1.00       "permanent and unselective ... it cannot be retracted"
+#:   glazing 1.00    "rejects the January beam as efficiently as the July one"
+_SOLAR_LEVER: dict[str, dict] = {
+    "glazing_retrofit": {
+        "where": "glass", "winter": 1.00,
+        "replaces_unit": True, "default_shgc_target": 0.25,
+    },
+    "window_film":              {"where": "inside",  "winter": 1.00},
+    "operable_shading":         {"where": "outside", "winter": 0.00},
+    "fixed_shading_horizontal": {"where": "outside", "winter": 0.25},
+    "fixed_shading_vertical":   {"where": "outside", "winter": 1.00},
+    "fixed_shading_eggcrate":   {"where": "outside", "winter": 1.00},
+}
+
+
+def _rederive_solar_effects(prescriptions, loads) -> int:
+    """Re-derive the energy of a glass-lever measure from the glass, not the wall.
+
+    WHAT THIS REPLACES, AND WHY IT WAS WRONG
+    ----------------------------------------
+
+    `prescribe._derive_energy` converts a re-solved facade delta into energy by
+    scaling the building's own load by `|dT| / (T_surface - setpoint)`. That is
+    exact for conduction through an opaque wall and it is the wrong lever
+    entirely for glass. The canyon engine has no glass in its vocabulary — its
+    levers are `wall_albedo`, `ground_albedo`, `roof_albedo`, `tree_cover`,
+    `facade_shade` and `wall_admittance` — so a glazing swap was being asked for
+    as `facade_shade`, "the fraction of the beam intercepted OUTSIDE the
+    envelope". A brise-soleil does that. A low-SHGC unit does not: it lets the
+    beam reach the glass and rejects it AT the glass line, so the outdoor
+    surface barely moves, and on 560 3 Avenue the model reported 0.727 K and
+    scaled the whole benefit down to 2.2% of the facade's cooling load. Measured
+    across all 91 glazing measures in the build, the understatement ran from
+    3.9x to 544x, median 18.6x — worst exactly where the outdoor delta was
+    smallest, which is the signature of a category error and not a calibration
+    one.
+
+    The outdoor delta is not discarded and is not wrong. It is a different
+    quantity: the urban-heat co-benefit of a cooler facade, which the canyon
+    engine is the right thing to ask and which stays on the effect as
+    `d_facade_peak_k`. What changes is that the INDOOR energy is no longer
+    derived from it by a ratio.
+
+    WHY HERE
+    --------
+
+    `prescribe` imports its siblings for type checking only and calls nothing in
+    them at runtime, which is what lets its tests run against synthetic
+    fixtures; `loads` owns the expression and cannot see a measure. This module
+    already holds both and already prices, so the composition belongs here. The
+    arithmetic itself is `loads.glass_retrofit_delta`, fifteen lines below the
+    expression it differentiates, so the two cannot drift.
+    """
+    u_new = EC.CONSTANTS["u_glass_retrofit_w_m2k"].pair
+    asm = getattr(loads, "assembly", None)
+    if asm is None:
+        return 0
+    setpoint = float(getattr(getattr(loads, "occupancy", None), "setpoint_c", 24.0) or 24.0)
+    n = 0
+    for p in prescriptions:
+        lever = _SOLAR_LEVER.get(getattr(p, "key", ""))
+        eff = getattr(p, "effect", None)
+        if lever is None or eff is None:
+            continue
+        faces = set(getattr(p, "faces", None) or [])
+        lo_f, hi_f = getattr(p, "floors", (0, 0))
+        geo = getattr(p, "geometry", None) or {}
+        where = lever["where"]
+
+        kw: dict = {"winter_scale": float(lever["winter"])}
+        if where == "glass":
+            kw["shgc_new"] = float(geo.get("shgc_target")
+                                   or lever["default_shgc_target"])
+            kw["u_glass_new"] = u_new
+        else:
+            # `facade_shade` is the catalogue's own figure for the fraction of
+            # the beam this device stops. For an external device that is what it
+            # has always meant. For a film it is the same fraction read at the
+            # glass line instead of outside it, which is where a film is.
+            spec = PR.MEASURES[p.key].spec or {}
+            kw["solar_cut"] = float(spec.get("facade_shade", 0.0))
+            if not kw["solar_cut"]:
+                continue
+
+        # The conduction half of an EXTERNAL device, and the only place the
+        # re-solved outdoor delta is the right lever. It is the same ratio
+        # `_derive_energy` applies — the delta over the driving temperature
+        # difference — and it is exact for conduction, which is what it is used
+        # for here and is not what it was used for before.
+        d_facade = abs(float(getattr(eff, "d_facade_peak_k", 0.0) or 0.0))
+
+        d_kwh = [0.0, 0.0]
+        d_kw = [0.0, 0.0]
+        d_win = [0.0, 0.0]
+        hours: set[int] = set()
+        for fl in getattr(loads, "floors", None) or []:
+            if not (lo_f <= int(getattr(fl, "floor", 0)) <= hi_f):
+                continue
+            for fa in getattr(fl, "faces", None) or []:
+                if getattr(fa, "compass", None) not in faces:
+                    continue
+                cf = 0.0
+                if where == "outside" and d_facade > 0.0:
+                    drive = max(1.0, float(getattr(fl, "t_surface_peak_c", 0.0)) - setpoint)
+                    cf = min(1.0, d_facade / drive)
+                try:
+                    d = LD.solar_control_delta(fa, asm, cond_frac=cf, **kw)
+                except Exception:  # noqa: BLE001 — one face, not the schedule
+                    continue
+                for i in (0, 1):
+                    d_kwh[i] += d["kwh"][i]
+                    d_kw[i] += d["peak_w"][i] / 1000.0
+                    d_win[i] += d["winter_kwh"][i]
+                hours.add(int(getattr(fa, "peak_hour_edt", 0)))
+
+        if not any(d_kwh):
+            continue
+
+        # Deltas, so a saving is NEGATIVE — `prescribe.Effect`'s convention, and
+        # `_as_benefit` downstream depends on it.
+        eff.d_annual_kwh = (-abs(d_kwh[1]), -abs(d_kwh[0]))
+        eff.d_peak_kw = (-abs(d_kw[1]), -abs(d_kw[0]))
+        eff.d_winter_kwh = (abs(d_win[0]), abs(d_win[1]))
+        eff.source = "re-solved facade delta; energy from the solar lever"
+
+        note = getattr(p, "effect_note", "") or ""
+        coincidence = (
+            f"The peak figure sums {len(hours)} face"
+            f"{'s' if len(hours) != 1 else ''} at "
+            + ("their own worst hours, which are not the same hour, so it is an "
+               "over-estimate of the coincident demand saving"
+               if len(hours) > 1 else
+               "one shared worst hour, so it is coincident within this measure")
+            + "; it is not the building's coincident peak either way."
+        )
+        mechanism = {
+            "glass": ("the new unit's solar heat gain coefficient and U-value. "
+                      "The facade kelvin figure beside it earns this measure "
+                      "nothing: a low-SHGC unit rejects the beam at the glass "
+                      "line, so the wall outside barely cools, and that delta "
+                      "is the urban co-benefit rather than a saving here"),
+            "outside": ("this device's own shading fraction on the transmitted "
+                        "beam, and the re-solved facade delta on the conducted "
+                        "skin load. Both terms are real for a device fitted "
+                        "outside the glass and they are different halves of the "
+                        "same sum, so neither is double-counted"),
+            "inside": ("this device's shading fraction on the transmitted beam "
+                       "alone. It sits behind the glass, so the wall outside "
+                       "does not run cooler and no part of the conduction term "
+                       "is credited to it"),
+        }[where]
+        winter_says = (
+            "It takes no heating-season penalty: this device retracts, so the "
+            "winter beam is still available."
+            if lever["winter"] <= 0.0 else
+            f"The heating-season penalty is the same solar term over the winter "
+            f"share of the annual dose at {lever['winter']:.0%} of the summer "
+            f"cut — this device's seasonal selectivity, stated in the catalogue "
+            f"— priced as delivered heat rather than inferred from a ratio."
+        )
+        p.effect_note = (note + " " if note else "") + (
+            "Energy is not scaled from the facade temperature delta alone for "
+            "this measure. It is the cooling-season expression in loads.py "
+            "re-evaluated against " + mechanism + ". " + coincidence + " "
+            + winter_says
+        )
+        p.confidence = "assumed"
+        n += 1
+    return n
+
+
+def _winter_heat(p) -> tuple[float, float] | None:
+    """The heating-season penalty to price, or None if it was only inferred.
+
+    ``d_winter_kwh`` reaches this two ways. Where ``_rederive_solar_effects``
+    computed it, it is the measure's own solar term over the winter share of the
+    annual dose — a heat quantity, priced. Where ``prescribe`` inferred it from
+    ``|winter_facade_dT| / |summer_facade_dT| * 0.5`` applied to a cooling
+    figure, it is a ratio of a ratio that ``prescribe`` itself calls the least
+    certain number on the prescription, and putting a dollar sign on that would
+    dress a guess as a cost. So only the computed one is priced, and the
+    difference is legible in ``effect.source``.
+    """
+    eff = getattr(p, "effect", None)
+    if eff is None:
+        return None
+    if "solar lever" not in str(getattr(eff, "source", "") or ""):
+        return None
+    w = getattr(eff, "d_winter_kwh", None)
+    if not w:
+        return None
+    try:
+        lo, hi = float(w[0]), float(w[1])
+    except Exception:  # noqa: BLE001
+        return None
+    return (abs(lo), abs(hi)) if (lo or hi) else None
+
+
 def _price_all(prescriptions, loads) -> int:
     """Put a price on every measure that has an effect. Returns how many.
 
@@ -583,6 +821,13 @@ def _price_all(prescriptions, loads) -> int:
                 # not of wall; price() picks the denominator and says so in
                 # `basis` when this comes back zero.
                 glazed_m2=float(getattr(p, "glazed_m2", 0.0) or 0.0),
+                # The heating-season penalty, as DELIVERED HEAT. Only where it
+                # was computed from the measure's own lever — the inferred
+                # figure `_derive_energy` leaves behind is a ratio of a ratio
+                # and pricing it would give a number that looks costed and is
+                # not. A measure without one is priced on its summer side alone
+                # and `effect_note` already says the penalty is unquantified.
+                winter_kwh_thermal=_winter_heat(p),
                 kwh_saved_yr=_magnitude(kwh),
                 kw_peak_saved=_magnitude(kw),
                 occupancy=loads.occupancy,

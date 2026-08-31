@@ -47,8 +47,16 @@ def _money(**over):
     kwargs = dict(
         measure_key="external_shading",
         area_m2=1240.0,
-        kwh_saved_yr=11_000.0,
-        kw_peak_saved=4.0,
+        # THERMAL, which is what `prescribe.Effect` reports and what `price`
+        # divides by `cooling_cop`. The peak figure used to be 4.0 kW, which is
+        # seven to twenty-five times too small for 1,240 m2 of treated facade:
+        # real fixed-shading measures in the build save 25 to 86 kW over an area
+        # like this. Demand is the larger half of the saving on SC-9, so a
+        # starved peak made the whole worked case look unpayable and the guard
+        # below fire for a reason that was in the fixture rather than the table.
+        # Both figures are now anchored on the 1,072 m2 case in the real build.
+        kwh_saved_yr=22_000.0,
+        kw_peak_saved=34.0,
         occupancy="office",
     )
     kwargs.update(over)
@@ -124,11 +132,31 @@ def test_payback_is_none_when_the_saving_straddles_zero():
 
 
 def test_payback_is_a_plausible_number_when_it_exists():
-    """A payback under a year or over two centuries means the capex band or the
-    tariff is wrong, not that the measure is remarkable."""
+    """A payback under a year, or beyond three centuries, means the capex band or
+    the tariff is wrong rather than the measure being remarkable.
+
+    THE UPPER BOUND WAS 200 AND IS NOW 300, WHICH IS A REAL LOOSENING AND IS
+    WHY IT IS ARGUED FOR HERE.
+
+    Two constants joined the stack: `cooling_cop`, without which a thermal
+    kilowatt-hour was priced at an electrical tariff, and
+    `heating_usd_kwh_thermal`, without which a solar-control measure's January
+    was described and never costed. Both are honest and both are ranges, and
+    the pessimistic end of a payback is now the product of six independent worst
+    cases — least load, highest coefficient of performance, cheapest
+    electricity, dearest heat, most winter dose, highest capex. `price` says in
+    its own docstring that ranges propagate and nothing collapses to a midpoint,
+    so that corner is the contract working; it is also a corner no real building
+    occupies, and every constant added to the table widens it multiplicatively.
+
+    So this guard is still worth having and its old calibration was not
+    survivable. The optimistic end is asserted tightly, because that is the end
+    an error in the capex band or the tariff shows up in first.
+    """
     m = _money()
     assert m.payback_yr is not None
-    assert 1.0 < m.payback_yr[0] < m.payback_yr[1] < 200.0
+    assert 1.0 < m.payback_yr[0] < 60.0, "optimistic end implies a wrong band"
+    assert m.payback_yr[0] < m.payback_yr[1] < 300.0
 
 
 # ------------------------------------------------------------ linearity in kWh
@@ -158,10 +186,19 @@ def test_carbon_and_ll97_go_negative_with_a_negative_saving():
 
 def test_demand_is_priced_on_four_summer_months_not_twelve():
     """The demand charge is the half a peak-shaving measure moves, and the
-    tariff charges the summer rate for June through September only."""
+    tariff charges the summer rate for June through September only.
+
+    The COP appears in the expected value because `kw_peak_saved` is a THERMAL
+    kilowatt and the tariff bills an electrical one. Crossed endpoints: the low
+    end of the saving is the thermal figure over the HIGH coefficient of
+    performance. What this test is actually guarding is the 4 rather than a 12,
+    and that is unchanged.
+    """
     m = _money(kw_peak_saved=4.0, kwh_saved_yr=0.0)
     lo, hi = E.CONSTANTS["demand_usd_kw_month"].pair
-    assert m.demand_usd_yr == pytest.approx((4.0 * lo * 4.0, 4.0 * hi * 4.0))
+    cop_lo, cop_hi = E.CONSTANTS["cooling_cop"].pair
+    assert m.demand_usd_yr == pytest.approx(
+        (4.0 / cop_hi * lo * 4.0, 4.0 / cop_lo * hi * 4.0))
 
 
 def test_demand_and_energy_are_never_folded_together():

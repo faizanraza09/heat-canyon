@@ -1309,6 +1309,18 @@ export class Brief {
     if (dm) cash.push(['PEAK DEMAND AVOIDED, PER YEAR', this._rng(dm[0], dm[1], '$'), 'money']);
     const ll = pair(mo.ll97_usd_yr);
     if (ll) cash.push(['LL97 PENALTY AVOIDED', this._rng(ll[0], ll[1], '$'), 'money']);
+    // The heating-season penalty, in the COST colour, sitting with the three
+    // lines it is subtracted from rather than under the January prose below.
+    // A solar-control measure rejects January's beam as efficiently as July's,
+    // and the prose has always said so while the money silently did not: simple
+    // payback was computed on the summer side alone. Priced only where it was
+    // computed from the measure's own lever -- economics.py returns (0, 0) for
+    // an inferred one, so a zero here means unquantified, not free, and the
+    // caveat column says which.
+    const wi = pair(mo.winter_usd_yr);
+    if (wi && (wi[0] || wi[1])) {
+      cash.push(['WINTER HEAT PENALTY', this._rng(wi[0], wi[1], '$'), 'cost']);
+    }
     const co2 = pair(mo.carbon_t_yr);
     if (co2) cash.push(['CARBON AVOIDED', this._rng(co2[0], co2[1], 't/yr'), 'money']);
     const pb = pair(mo.payback_yr);

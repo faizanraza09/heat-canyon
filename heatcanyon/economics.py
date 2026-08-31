@@ -218,6 +218,178 @@ CONSTANTS: dict[str, Constant] = {
         ),
     ),
 
+    # ---- the load-to-bill conversion
+    #
+    # THE ONE CONSTANT WITHOUT WHICH EVERY FIGURE BELOW IS WRONG BY ITS OWN
+    # VALUE.
+    #
+    # `loads.py` reports a THERMAL cooling load: `q_cond` is U*A*dT and `q_sol`
+    # is SHGC*I*A, both heat flows in watts, and its own comment says the figure
+    # is "what a machine would have to remove to hold the setpoint". A chiller
+    # removing a kilowatt-hour of heat does not buy a kilowatt-hour of
+    # electricity to do it; it buys one over its coefficient of performance.
+    # Nothing in this module or in `loads.py` performed that division, so every
+    # dollar, every tonne and every LL97 figure this table has ever produced was
+    # a thermal quantity priced at an electrical tariff -- too generous by the
+    # whole COP. It surfaced only when the heating side was priced, because heat
+    # delivered by a boiler IS about one for one with its fuel and the two
+    # halves stopped agreeing.
+
+    "cooling_cop": Constant(
+        value=(2.5, 4.0),
+        unit="kWh of heat removed per kWh of electricity",
+        source="No citable figure found for this stock; reasoned from equipment class",
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify against the LL84 benchmarking disclosure for these BINs, "
+            "which reports electricity and floor area and would bound the system "
+            "COP directly. This is a SEASONAL SYSTEM COP, not an equipment rating: "
+            "a centrifugal chiller is rated 4.5-6.0 at design conditions and a "
+            "building does not run at design conditions, so pumps, cooling-tower "
+            "fans, distribution and part-load operation are all inside this band "
+            "and are why its top end is well below any nameplate. The low end is "
+            "packaged direct-expansion, which much of the smaller stock in this "
+            "AOI actually has. The band is deliberately wide and it is "
+            "MONOTONE THE OTHER WAY from most of this table: a HIGHER COP means "
+            "LESS electricity per unit of heat and therefore a SMALLER saving, so "
+            "the pessimistic end of every priced benefit pairs the low thermal "
+            "figure with the HIGH COP. Applied to the energy, demand, carbon and "
+            "LL97 terms alike, because all four are billed or counted on "
+            "electricity and none of them on heat."
+        ),
+    ),
+
+    # ---- heat, for the winter side of a solar-control measure
+    #
+    # Every other price in this table is electricity, because everything else
+    # this project costs is a cooling load. A solar-control measure is the one
+    # family with a heating-season COST — it rejects January's beam as
+    # efficiently as July's — and until now that cost was reported in prose and
+    # never priced, which let a measure whose winter penalty outweighs its
+    # summer benefit show a positive net saving.
+
+    "heating_usd_kwh_thermal": Constant(
+        value=(0.040, 0.160),
+        unit="USD per kWh of DELIVERED HEAT",
+        source="No citable figure found; reasoned from two published fuel prices",
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify against the Con Edison steam tariff (PSC No. 4 Steam) "
+            "for the rate class, and against the firm gas rate for the "
+            "building's own service classification. THE DENOMINATOR IS DELIVERED "
+            "HEAT, not fuel: the plant's seasonal efficiency is folded into this "
+            "band deliberately, because splitting it would need a second "
+            "unverified constant and the product of two guesses is not more "
+            "trustworthy than one wide band. The band spans the two fuels the "
+            "Midtown stock actually uses and it is wide because which one a "
+            "given building burns is NOT KNOWN to this model. A gas boiler at "
+            "1.00-1.80 USD/therm and 0.75-0.85 seasonal efficiency is 0.040 to "
+            "0.082 USD per delivered kWh; Con Edison district steam at 30-45 USD "
+            "per Mlb, where an Mlb is about 293 kWh of heat, is 0.10 to 0.15 and "
+            "is the reason the upper end is where it is. An all-electric "
+            "building on a heat pump would sit BELOW this band at a COP above "
+            "two, so a measure priced here is penalised harder than an "
+            "electrified building would actually be — which is the conservative "
+            "direction for a measure whose winter cost is the argument against "
+            "it. THE CARBON OF THAT HEAT IS NOT NETTED: burning gas to replace "
+            "rejected solar gain emits, and LL97 prices fuel combustion on its "
+            "own coefficients, neither of which is in this table. The dollar "
+            "penalty is priced; the carbon penalty is stated and not priced."
+        ),
+    ),
+
+    # ---- how much of the rejected winter sun the boiler actually has to replace
+    #
+    # NOT ALL OF IT, AND ASSUMING ALL OF IT IS WHAT MADE EVERY GLAZING MEASURE
+    # READ "NEVER".
+    #
+    # `loads.py` can say how much solar a measure stops admitting in the heating
+    # season. It cannot say how much of that the building WANTED. A deep-plan
+    # Midtown office at 09:00 in January is already rejecting heat from its
+    # lighting, its people and its equipment; sun landing on a sunlit perimeter
+    # is partly surplus and on the wrong day is a cooling load. Charging the
+    # heating plant for every kilowatt-hour of it is the pessimistic extreme, and
+    # it is the assumption that was silently in force: a low-SHGC unit came back
+    # as never paying back, on a penalty computed as though a boiler made good
+    # every joule the glass turned away.
+    #
+    # Split by occupancy because the two ends of the stock genuinely differ. An
+    # office has large internal gains and daytime-only occupancy, so its
+    # utilisation is low. A dwelling has small gains, and its heating hours run
+    # into the evening when there is no sun to have rejected, but its perimeter
+    # IS its habitable room, so more of what does arrive is wanted.
+    #
+    # This constant can only make a solar-control measure look BETTER, which is
+    # exactly why it is flagged hard: it was added after the winter penalty made
+    # the catalogue look unpayable, and a reader is entitled to know that a
+    # number which relieves the answer arrived after the answer.
+
+    "heating_utilisation_residential": Constant(
+        value=(0.50, 0.90),
+        unit="fraction of rejected heating-season solar that raises heating demand",
+        source="No citable figure found",
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify against a dynamic simulation, which is the only thing "
+            "that can answer it properly — the quantity is the overlap between "
+            "hours with solar on the facade and hours with the heating plant "
+            "actually calling, and no static rule recovers that. High end of the "
+            "stock's range because a dwelling's internal gains are small and its "
+            "perimeter is its living space; short of 1.0 because residential "
+            "heating demand peaks in the evening and overnight, when there is no "
+            "solar gain to have rejected."
+        ),
+    ),
+
+    "heating_utilisation_office": Constant(
+        value=(0.20, 0.60),
+        unit="fraction of rejected heating-season solar that raises heating demand",
+        source="No citable figure found",
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify by simulation; see the residential note. Lowest in the "
+            "table because this is the internally-load-dominated case: lighting, "
+            "occupants and equipment over a deep plate mean a Midtown office is "
+            "frequently in cooling on a sunny January afternoon, and solar "
+            "rejected then costs the heating plant nothing at all. The band stays "
+            "wide because the perimeter zone of the same building, on the same "
+            "afternoon, may well be heating."
+        ),
+    ),
+
+    "heating_utilisation_retail": Constant(
+        value=(0.15, 0.55),
+        unit="fraction of rejected heating-season solar that raises heating demand",
+        source="No citable figure found",
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify by simulation; see the residential note. Below office: "
+            "retail lighting power density is the highest in the stock and much "
+            "of the floor area is in cooling year-round. Ground-floor retail in "
+            "this AOI is also the most shaded part of any elevation, so the "
+            "quantity being scaled is small before this is applied."
+        ),
+    ),
+
+    "heating_utilisation_other": Constant(
+        value=(0.25, 0.85),
+        unit="fraction of rejected heating-season solar that raises heating demand",
+        source="No citable figure found",
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify by simulation; see the residential note. The widest "
+            "band in this group and deliberately so: 'other' is where an "
+            "unclassified use lands, and the honest answer for a building whose "
+            "use is unknown is a band that spans the two cases either side of it."
+        ),
+    ),
+
     # ---- carbon
 
     "grid_kg_co2e_kwh": Constant(
@@ -635,6 +807,41 @@ CONSTANTS: dict[str, Constant] = {
         ),
     ),
 
+    # ---- measure performance, as against measure cost
+    #
+    # The only constant in this table that is a PROPERTY of a specified retrofit
+    # rather than a price. It sits here because `price` is not where it is used
+    # — `prescribe` needs it to compute the effect — but it is dated, banded and
+    # flagged on exactly the same terms as everything else, and this is the
+    # module whose whole job is that nothing of the sort lives as a literal.
+
+    "u_glass_retrofit_w_m2k": Constant(
+        value=(1.3, 2.0),
+        unit="W/m2K, glass element",
+        source=(
+            "Trade press and manufacturer data: double-glazed low-e argon units "
+            "quoted at 1.1-1.4 W/m2K centre-of-glass, rising toward 2.0 for the "
+            "whole glazed element once the spacer and sight line are included"
+        ),
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify against NFRC-rated whole-window U-factors for a "
+            "curtain-wall unit, not centre-of-glass. Compare against the "
+            "assemblies in `loads.py`, which carry 3.0-5.9 W/m2K for an early "
+            "aluminium curtain wall — so this is a two- to four-fold "
+            "improvement, and the conduction saving it implies is roughly half "
+            "the total benefit of a glazing swap on a high window-to-wall "
+            "elevation. The band is the GLASS ELEMENT to match the assembly's "
+            "own `u_glass`, which is why it does not reach the 0.8-1.1 a triple "
+            "unit would give: a triple-glazed curtain-wall retrofit is a "
+            "different measure at a different price and is not what "
+            "`capex_usd_m2_glazing_retrofit` was priced for. A thermally broken "
+            "frame is assumed and not verified; an unbroken aluminium frame "
+            "would sit at the top of this band or above it."
+        ),
+    ),
+
     # ---- measure lifetimes
     #
     # Lifetimes matter as much as capex for anything discounted, and the whole
@@ -784,6 +991,16 @@ PROGRAMMES: dict[str, tuple[str, ...]] = {
 
 #: LL97 occupancy keys accepted by :func:`price`, mapped onto the CONSTANTS key
 #: holding that occupancy's cap. Mirrors ``envelope.Occupancy.key``.
+#: Heating utilisation by occupancy, keyed exactly as ``_OCCUPANCY_CAPS`` is so
+#: the two cannot disagree about what an occupancy key is.
+_OCCUPANCY_HEATING_UTILISATION: dict[str, str] = {
+    "residential": "heating_utilisation_residential",
+    "office": "heating_utilisation_office",
+    "retail": "heating_utilisation_retail",
+    "other": "heating_utilisation_other",
+}
+
+
 _OCCUPANCY_CAPS: dict[str, str] = {
     "residential": "ll97_cap_kg_co2e_sf_residential",
     "office": "ll97_cap_kg_co2e_sf_office",
@@ -869,6 +1086,12 @@ class Money:
     npv_usd: tuple[float, float]
     basis: str
 
+    #: The heating-season COST of a solar-control measure, positive, already
+    #: subtracted from ``annual_saving_usd``. Its own line because a measure
+    #: whose January outweighs its July is a finding, and folding it into a net
+    #: figure is how that finding disappears.
+    winter_usd_yr: tuple[float, float] = (0.0, 0.0)
+
     #: Everything above, restated so the caller can show the arithmetic.
     annual_saving_usd: tuple[float, float] = (0.0, 0.0)
     measure_life_years: tuple[float, float] = (0.0, 0.0)
@@ -888,12 +1111,19 @@ def price(
     occupancy: str | object,
     gross_floor_m2: float | None = None,
     glazed_m2: float | None = None,
+    winter_kwh_thermal: float | tuple[float, float] | None = None,
 ) -> Money:
     """Put a price on one measure on one building.
 
     ``kwh_saved_yr`` and ``kw_peak_saved`` come from ``prescribe.Effect``, which
-    gets them from a re-solve rather than from a coefficient; this function adds
-    no physics and takes them as given, including their ranges. A negative
+    gets them from a re-solve rather than from a coefficient. They are THERMAL
+    quantities — a cooling load, the heat a plant has to move — and they are
+    divided by ``cooling_cop`` here to get the electricity that is actually
+    billed. That division is the one piece of physics this function does, and it
+    is here because it was missing everywhere: for as long as this table has
+    existed it priced a thermal kilowatt-hour at an electrical tariff, which
+    overstated every saving by the whole coefficient of performance. Ranges are
+    taken as given otherwise. A negative
     ``kwh_saved_yr`` — a measure whose winter heating penalty outweighs its
     summer benefit — is a legitimate input and is priced as a loss rather than
     clamped to zero.
@@ -935,8 +1165,25 @@ def price(
         used.append(key)
         return CONSTANTS[key].pair
 
-    kwh = _pair(kwh_saved_yr)
-    kw = _pair(kw_peak_saved)
+    # THERMAL IN, ELECTRICAL OUT. See `cooling_cop`.
+    #
+    # Everything this function is handed by `prescribe.Effect` is a cooling LOAD
+    # -- heat the plant has to move -- and everything below prices ELECTRICITY.
+    # The division is here rather than in the caller because this is the module
+    # whose job is that no conversion constant lives as a literal, and because
+    # three callers reach `price` and only one arrangement stops them each
+    # dividing by a different number.
+    #
+    # Crossed endpoints, deliberately: a HIGH coefficient of performance means
+    # LESS electricity for the same heat and therefore a SMALLER saving, so the
+    # pessimistic corner is the low thermal figure over the high COP. Writing
+    # this the obvious way round would narrow every band by pairing each
+    # extreme with its own favourable partner.
+    cop = take("cooling_cop")
+    th_kwh = _pair(kwh_saved_yr)
+    th_kw = _pair(kw_peak_saved)
+    kwh = (th_kwh[0] / cop[1], th_kwh[1] / cop[0])
+    kw = (th_kw[0] / cop[1], th_kw[1] / cop[0])
     area = _pair(area_m2)
 
     energy = _mul(kwh, take("electricity_usd_kwh"))
@@ -974,7 +1221,47 @@ def price(
     life = take(f"measure_life_years_{measure_key}")
     rate = take("discount_rate")
 
-    saving = _add(energy, demand, ll97)
+    # The heating-season penalty, netted OFF the saving and reported separately.
+    #
+    # A solar-control measure rejects January's beam as efficiently as July's,
+    # and on a heating-dominated elevation that can outweigh the summer benefit
+    # outright. Reporting only a net figure would hide the one fact a reader
+    # needs; reporting only the summer side, which is what this did before,
+    # produced a saving no owner would actually see. The pessimistic corner
+    # pairs the largest heat loss with the dearest heat.
+    winter = (0.0, 0.0)
+    if winter_kwh_thermal is not None:
+        wk = _pair(winter_kwh_thermal)
+        heat = take("heating_usd_kwh_thermal")
+        # Not all of the rejected sun was wanted. See the constant.
+        util = take(_OCCUPANCY_HEATING_UTILISATION[occ_key])
+        winter = (abs(wk[0]) * heat[0] * util[0],
+                  abs(wk[1]) * heat[1] * util[1])
+
+    # STRAIGHT SUBTRACTION, NOT `_sub`, AND THE REASON IS CORRELATION.
+    #
+    # `_sub` crosses its endpoints — lowest `a` against highest `b` — which is
+    # right whenever the two intervals move independently, and it is how `npv`
+    # below subtracts a capex band from a saving band. It is WRONG here. Both
+    # halves of this expression are driven by the SAME transmitted-solar figure
+    # at the SAME corner of the assembly table: index 0 of the summer saving and
+    # index 0 of the winter penalty are both the low-SHGC, low-U reading. A
+    # crossed pairing therefore prices the smallest summer benefit against the
+    # largest winter cost, which is the low corner of the assembly and the high
+    # corner of the same assembly at once, and no building is both.
+    #
+    # It is not a small difference. On the worked case at 560 3 Avenue the
+    # crossed form gave -41,340 USD/yr and reported that a glazing swap never
+    # pays back; per corner it gives +22,853 to +185,451 and a payback of twelve
+    # to three hundred and forty years. The first of those is not a pessimistic
+    # reading, it is an arithmetically impossible one, and it had every glazing
+    # measure in the build saying "never" for a reason that was in this line.
+    #
+    # The tariff constants still cross, and should: heat price and electricity
+    # price are independent of the envelope and of each other, so each corner
+    # already carries its own worst tariff.
+    summer = _add(energy, demand, ll97)
+    saving = (summer[0] - winter[0], summer[1] - winter[1])
 
     # Payback is None unless the measure pays back at BOTH ends of its range.
     # The alternative — reporting the optimistic end and letting the pessimistic
@@ -1004,6 +1291,7 @@ def price(
         demand_usd_yr=demand,
         carbon_t_yr=carbon_t,
         ll97_usd_yr=ll97,
+        winter_usd_yr=winter,
         capex_usd=capex,
         payback_yr=payback,
         npv_usd=npv,

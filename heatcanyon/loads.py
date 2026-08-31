@@ -291,6 +291,14 @@ class FaceLoad:
     conduction_w: tuple[float, float]     # lo-hi from the assembly range
     solar_gain_w: tuple[float, float]
     annual_kwh: tuple[float, float]       # cooling season, see COOLING_SEASON_HOURS
+    #: ``annual_kwh``, kept as the two terms it is the sum of, because a measure
+    #: acts on one of them and not the other. ``cond_kwh + solar_kwh ==
+    #: annual_kwh`` at both ends of the range, by construction rather than by
+    #: rounding. ``cond_glazed_kwh`` is the glass's share of ``cond_kwh`` — what
+    #: a new unit replaces, as against the spandrel it leaves alone.
+    cond_kwh: tuple[float, float]
+    solar_kwh: tuple[float, float]
+    cond_glazed_kwh: tuple[float, float]
     dt_solar: float
     dt_trap: float
     dt_sky: float
@@ -652,6 +660,12 @@ def building_floors(
                               float(sol[1]["q_sol"][hf, p, b])),
                 annual_kwh=(float(sol[0]["face_kwh"][p, b]),
                             float(sol[1]["face_kwh"][p, b])),
+                cond_kwh=(float(sol[0]["face_cond_kwh"][p, b]),
+                          float(sol[1]["face_cond_kwh"][p, b])),
+                solar_kwh=(float(sol[0]["face_sol_kwh"][p, b]),
+                           float(sol[1]["face_sol_kwh"][p, b])),
+                cond_glazed_kwh=(float(sol[0]["face_cond_glazed_kwh"][p, b]),
+                                 float(sol[1]["face_cond_glazed_kwh"][p, b])),
                 dt_solar=float(dt_solar_p[p, b]),
                 dt_trap=float(dt_trap_p[p, b]),
                 dt_sky=float(dt_sky_p[p, b]),
@@ -829,27 +843,215 @@ def _solve_corner(
     q_total = q_face.sum(axis=1) + q_vent + q_int
 
     # ---- cooling-season energy
+    #
+    # KEPT AS TWO TERMS, NOT ONE.
+    #
+    # `face_kwh` is what the schedule reports and it is the sum of these two,
+    # but the two are what a measure acts on and they are not interchangeable.
+    # A glazing swap moves `shgc` and `u_glass`; a louvre moves the transmitted
+    # beam and nothing else; insulation moves `u_wall` alone. Reporting only the
+    # sum forced `prescribe` to infer the split from the peak-hour ratio of
+    # `solar_gain_w` to `conduction_w`, which weights a dose against
+    # degree-hours and is not the same number — and before that, to skip the
+    # split entirely and scale the whole load by an outdoor kelvin, which
+    # credited a low-SHGC unit with 2.2% of its own effect. The split exists in
+    # this expression already; it costs nothing to carry it out.
+    #
+    # `face_cond_glazed_kwh` is the glass's share of the conduction term, which
+    # is the only part of it a glazing unit replaces. On an early curtain wall
+    # that share is about 0.9 — 0.75 of the area at three to six W/m2K against
+    # 0.25 of it at one to two — so treating the whole conduction term as
+    # replaceable would overstate the measure, and treating none of it as
+    # replaceable understates it by more.
     share = SUMMER_DOSE_SHARE[share_i]
     if dose_p is not None and summer_p is not None:
         # A seasonal mean carries no fluctuation, so the decrement factor does
         # not apply to it: the mean passes through a heavy wall undamped, and
         # that is exactly why mass moves the load in time without removing it.
-        face_kwh = (ua * np.maximum(0.0, summer_p - t_set) * COOLING_SEASON_HOURS
-                    + c.shgc * a_glazed * dose_p * share * 1000.0) / 1000.0
+        driving = np.maximum(0.0, summer_p - t_set) * COOLING_SEASON_HOURS
+        face_cond_kwh = ua * driving / 1000.0
+        face_cond_glazed_kwh = ua_gl * driving / 1000.0
+        face_sol_kwh = c.shgc * a_glazed * dose_p * share
+        face_kwh = face_cond_kwh + face_sol_kwh
         vent_kwh = 0.0
         if summer_air is not None:
             vent_kwh = c_vent * max(0.0, summer_air - t_set) * COOLING_SEASON_HOURS / 1000.0
         int_kwh = q_int * COOLING_SEASON_HOURS / 1000.0
         floor_kwh = face_kwh.sum(axis=0) + vent_kwh + int_kwh
     else:
+        # The scaled-event-day fallback. Clipping at zero is NOT linear, so
+        # max(0, q_cond) + max(0, q_sol) does not equal max(0, q_face) and
+        # splitting the clipped total by the components' magnitude shares is the
+        # only apportionment that preserves the sum. It matters because an hour
+        # whose conduction runs backwards — a wall cooler than the room, giving
+        # the room's heat away while the sun still pours through the glass — is
+        # a real hour on an east elevation in the morning.
         days = EQUIVALENT_EVENT_DAYS[share_i]
-        face_kwh = np.maximum(0.0, q_face).sum(axis=0) * hour_span * days / 1000.0
+        pos = np.maximum(0.0, q_face) * hour_span * days / 1000.0
+        w_cond, w_sol = np.abs(q_cond), np.abs(q_sol)
+        denom = np.maximum(1e-9, w_cond + w_sol)
+        face_cond_kwh = (pos * w_cond / denom).sum(axis=0)
+        face_sol_kwh = (pos * w_sol / denom).sum(axis=0)
+        face_kwh = face_cond_kwh + face_sol_kwh
+        gl_share = ua_gl / np.maximum(1e-9, ua)
+        face_cond_glazed_kwh = face_cond_kwh * gl_share
         floor_kwh = np.maximum(0.0, q_total).sum(axis=0) * hour_span * days / 1000.0
 
     return {"q_cond": q_cond, "q_sol": q_sol, "q_face": q_face,
             "q_total": q_total, "t_indoor": t_indoor,
             "face_kwh": face_kwh, "floor_kwh": floor_kwh,
+            "face_cond_kwh": face_cond_kwh, "face_sol_kwh": face_sol_kwh,
+            "face_cond_glazed_kwh": face_cond_glazed_kwh,
+            "ua_glazed_frac": ua_gl / np.maximum(1e-9, ua),
             "c_vent": np.asarray(c_vent), "q_int": np.asarray(q_int)}
+
+
+def solar_control_delta(
+    face: FaceLoad,
+    assembly: Assembly,
+    *,
+    shgc_new: float | None = None,
+    u_glass_new: tuple[float, float] | None = None,
+    solar_cut: float | None = None,
+    cond_frac: float = 0.0,
+    winter_scale: float = 1.0,
+) -> dict[str, tuple[float, float]]:
+    """What a solar-control measure does, from the terms the solve already reported.
+
+    WHY THIS IS HERE AND NOT IN ``prescribe.py``
+    --------------------------------------------
+
+    This is the analytic derivative of ``_solve_corner``'s own cooling-season
+    expression with respect to ``shgc`` and ``u_glass``, and it is fifteen lines
+    below that expression so the two cannot drift. The alternative was to re-run
+    the solve with an overridden assembly, which is the arrangement this module
+    would prefer — one expression, evaluated twice — and it is not available:
+    ``BuildingLoads`` carries the solve's *outputs*, not the surface,
+    irradiance, dose and summer-mean planes it needs as inputs, so nothing
+    downstream of ``building_floors`` can re-enter it. Threading those arrays
+    through the decision layer to make a re-solve possible would put four
+    hundred megabytes of plane into a prescription's argument list.
+
+    So: the derivative, next to the function it differentiates, with the terms
+    it needs carried on ``FaceLoad`` rather than inferred. The thing this
+    replaces inferred them from an OUTDOOR surface temperature delta, which is
+    the wrong quantity — a low-SHGC unit rejects the beam at the glass line, so
+    it barely moves the outdoor surface at all, and scaling by that delta
+    credited a full curtain-wall replacement with about 2% of its own effect.
+
+    TWO LEVERS, AND A MEASURE MAY PULL EITHER OR BOTH
+    ------------------------------------------------
+
+    ``shgc_new`` — a new unit's solar heat gain coefficient. Capped at the
+    assembly's existing value, because a retrofit that would RAISE the SHGC is
+    not this measure and must not be reported as a saving.
+
+    ``solar_cut`` — the fraction of transmitted solar removed, for a measure
+    specified that way rather than by a target coefficient. A film is 0.35 of
+    what is already there; a target of 0.25 on glass already at 0.50 is 0.50 of
+    it. Give one or the other, never both.
+
+    ``u_glass_new`` — the new unit's U-value, as a (lo, hi) band. Applies to
+    ``cond_glazed_kwh`` only, which is the glass's share of the conduction term:
+    a new window does nothing for the spandrel beside it. A film leaves this
+    ``None``, because a film changes no U-value — that is exactly why it is the
+    cheap measure and exactly why it is the weaker one.
+
+    ``cond_frac`` — the fraction of the WHOLE conduction term removed by the
+    wall running cooler, for a device fitted OUTSIDE the glass. This is the one
+    place the canyon engine's outdoor delta belongs: a louvre intercepts the
+    beam before it reaches the wall, so the wall genuinely runs cooler and
+    ``U*A*(T_surface - T_indoor)`` genuinely falls, which is what
+    ``facade_surface_dT`` of -18 to -6 K is measuring. The caller computes the
+    fraction from that delta over the driving temperature difference — exactly
+    the arithmetic that was wrong when applied to the SOLAR term and is right
+    here. An internal device (a film, a blind) leaves this at zero: it sits
+    behind the glass and the wall outside it does not know it is there.
+
+    Giving a measure BOTH a solar cut and a ``cond_frac`` is not
+    double-counting. They are different terms of the same sum — the transmitted
+    beam and the conducted skin load — and ``FaceLoad`` reports them separately
+    for this reason. Giving one measure ``u_glass_new`` and ``cond_frac``
+    together WOULD double-count, and no caller in this project does; a device is
+    either replacing the glass or standing outside it.
+
+    ``winter_scale`` — how much of the summer solar cut also applies in the
+    heating season, 0 to 1. Not a fudge: it is the seasonal selectivity of the
+    device, and the catalogue states it per measure. An operable device retracts,
+    so it is 0. A film cannot, so it is 1. A horizontal overhang sized on the
+    summer profile angle passes most of the low winter beam underneath itself,
+    so it is small but not nothing. Vertical fins intercept the low, near-normal
+    beam, which is precisely the winter one, so they are 1.
+
+    THE WINTER SIDE IS RETURNED, NOT INFERRED
+    -----------------------------------------
+
+    ``winter_kwh`` is the heat this measure stops letting in during the heating
+    season: the same solar term, taken over the winter share of the annual dose
+    instead of the summer share. It is a HEAT quantity and a COST, and it is
+    returned positive. What it replaces was ``|winter_facade_delta| /
+    |summer_facade_delta| * 0.5`` applied to the cooling figure, which
+    ``prescribe`` itself labelled the least certain number on the prescription.
+    This is not certain either — the dose split is a plane, not a measurement —
+    but it is the right quantity computed the right way round.
+
+    Signs: ``kwh`` and ``peak_w`` are SAVINGS and come back positive;
+    ``winter_kwh`` is a PENALTY and also comes back positive. The caller applies
+    the conventions its own contract states.
+    """
+    shgc = assembly.shgc
+    u_gl = assembly.u_glass
+    out_kwh = [0.0, 0.0]
+    out_w = [0.0, 0.0]
+    out_winter = [0.0, 0.0]
+
+    for i in (0, 1):
+        shgc_old = float(shgc[i])
+        if solar_cut is not None:
+            f_sol = max(0.0, min(1.0, float(solar_cut)))
+        elif shgc_new is not None and shgc_old > 0.0:
+            f_sol = max(0.0, 1.0 - min(float(shgc_new), shgc_old) / shgc_old)
+        else:
+            f_sol = 0.0
+
+        # The conduction half, glass only. The pessimistic end of the saving
+        # pairs the assembly's OWN low U with the new unit's HIGH one, so the
+        # band cannot be narrowed by picking favourable corners at both ends.
+        f_con = 0.0
+        if u_glass_new is not None and float(u_gl[i]) > 0.0:
+            u_new = float(u_glass_new[1 - i])
+            f_con = max(0.0, 1.0 - u_new / float(u_gl[i]))
+
+        cf = max(0.0, min(1.0, float(cond_frac)))
+        gl_share = (face.cond_glazed_kwh[i] / face.cond_kwh[i]
+                    if face.cond_kwh[i] > 0.0 else 0.0)
+        out_kwh[i] = (face.solar_kwh[i] * f_sol
+                      + face.cond_glazed_kwh[i] * f_con
+                      + face.cond_kwh[i] * cf)
+        # Peak: the solve reports the face's gain and conduction AT ITS OWN
+        # worst hour, so this is a per-face peak reduction and NOT a building
+        # coincident peak. A caller summing these across faces that peak at
+        # different hours is overstating the demand saving, and the measure
+        # schedule says so where it does it.
+        cond_w = max(0.0, face.conduction_w[i])
+        out_w[i] = (face.solar_gain_w[i] * f_sol
+                    + cond_w * f_con * gl_share
+                    + cond_w * cf)
+        # The heating-season side of the solar term. `winter_sun_share` is the
+        # fraction of the face's ANNUAL sun that arrives in the heating season,
+        # and `solar_kwh` is the cooling-season share of the same dose, so the
+        # winter quantity is the cooling one rescaled between the two shares.
+        summer_share = SUMMER_DOSE_SHARE[i]
+        ws = max(0.0, min(1.0, float(winter_scale)))
+        if summer_share > 0.0 and ws > 0.0:
+            annual_sol = face.solar_kwh[i] / summer_share
+            out_winter[i] = annual_sol * float(face.winter_sun_share) * f_sol * ws
+
+    return {
+        "kwh": (out_kwh[0], out_kwh[1]),
+        "peak_w": (out_w[0], out_w[1]),
+        "winter_kwh": (out_winter[0], out_winter[1]),
+    }
 
 
 def _decremented(surface: np.ndarray, f: float, lag_slots: int) -> np.ndarray:
