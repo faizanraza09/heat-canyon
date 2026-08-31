@@ -57,8 +57,12 @@ API = "https://api.elevenlabs.io/v1"
 
 CACHE = Path("web") / "data" / "vo"
 
-# Adam. Overridable with HEATCANYON_VOICE_ID, and `heatcanyon voice --voices`
-# prints the ids on the account.
+# George — `JBFqnCBsd6RMkjVDRZzb`, the id set below, and what the film is
+# actually read by. This line said "Adam" long after the constant stopped being
+# Adam, which is worse than saying nothing: the paragraph that follows works
+# through why Adam was rejected and lands on George, so the two halves of the
+# same comment disagreed. Overridable with HEATCANYON_VOICE_ID, and
+# `heatcanyon voice --voices` prints the ids on the account.
 #
 # CHANGING THIS RETIRES THE WHOLE CACHE, and that is by design rather than by
 # accident: `key_for` hashes the voice id along with the sentence, so every

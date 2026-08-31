@@ -65,13 +65,22 @@ await page.route('**/api/voice/lines', async (route) => {
   lines = body.lines || [];
   linesAt = Date.now();
   reply = null;      // this request's verdict, not the previous one's
-  // A dry run is not a request that never happens — it is the film's own
-  // request, unmodified. That costs nothing (the endpoint reads the cache unless
-  // told otherwise) and it is the only way to find out which lines are actually
-  // missing, as opposed to guessing from the text. Dropping --dry adds the one
-  // flag in the project that is allowed to spend.
-  const post = DRY ? body : { ...body, synthesise: true };
-  return route.continue({ postData: JSON.stringify(post) });
+  /* PASSED THROUGH UNTOUCHED, EVEN ON A REAL RUN, AND THAT IS THE FIX.
+   *
+   * This used to add `synthesise: true` here, to every request the film made.
+   * The film makes two — the fallback script while the title card is up, then
+   * the real one when the decision layer lands — so a bake bought BOTH, and the
+   * first one is a script the film never says. Measured on the current script:
+   * 2,413 characters against the 2,219 that are actually needed, with the
+   * difference spent on sentences that exist only until floors.json arrives. It
+   * has been much worse than that; the note below this route is a whole
+   * paragraph about the same two passes causing a different bug.
+   *
+   * The film's own request costs nothing (the endpoint reads the cache unless
+   * told otherwise) and it is still the only way to learn which lines are
+   * genuinely missing rather than guessing from the text. So observe here, and
+   * spend once, below, on the script that settled. */
+  return route.continue();
 });
 
 page.on('response', async (r) => {
@@ -114,6 +123,26 @@ await browser.close();
 if (!lines) {
   console.error('The film never asked for its script — is the opening film disabled?');
   process.exit(1);
+}
+
+/* And now, once, on the settled script.
+ *
+ * Everything above this line is observation: the page has closed, `lines` is
+ * the last thing the film asked for, and nothing has been synthesised. This is
+ * the only request in the project that spends, and it is made by hand rather
+ * than by the page so that it can be made exactly once.
+ */
+if (!DRY) {
+  const res = await fetch(`${BASE}/api/voice/lines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lines, synthesise: true }),
+  });
+  if (!res.ok) {
+    console.error(`Baking the script failed: ${res.status} ${await res.text()}`);
+    process.exit(1);
+  }
+  reply = await res.json();
 }
 
 // Positional the whole way: the reply is indexed by the request, so a line and

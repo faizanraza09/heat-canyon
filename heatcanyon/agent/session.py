@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator
 
-from . import knobs
+from . import gate, knobs
 from . import tools as tool_registry
 from .events import frame, is_cut_off, to_frames
 from .options import available, build_options
@@ -90,6 +90,10 @@ _PENDING: list[str] = []
 
 class BudgetExceeded(RuntimeError):
     pass
+
+
+class Busy(RuntimeError):
+    """Too many turns already waiting. A 429, not a failure — see gate.py."""
 
 
 class Unavailable(RuntimeError):
@@ -178,15 +182,35 @@ def session_cost_so_far() -> float:
     return round(total, 6)
 
 
-def list_runs(limit: int = 40) -> list[dict]:
+def list_runs(limit: int = 40, *, client: str | None = None) -> list[dict]:
+    """This client's runs, newest first.
+
+    Unscoped, this returned every question this server had ever been asked, to
+    anybody who asked for the list. The demo question names a building and a
+    contractor; people type their own into that box. A run recorded before runs
+    had owners has no `client` and is shown to nobody rather than to everybody —
+    the operator can still read them off disk, and the alternative is a leak that
+    survives the fix.
+    """
     out = []
     for p in runs_dir().glob("*/status.json"):
         try:
-            out.append(json.loads(p.read_text(encoding="utf-8")))
+            rec = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        if client is not None and rec.get("client") != client:
+            continue
+        out.append(rec)
     out.sort(key=lambda s: s.get("started_at") or 0, reverse=True)
     return out[:limit]
+
+
+def owns(run_id: str, client: str | None) -> bool:
+    """May this client see this run? Unowned runs are nobody's; see `list_runs`."""
+    if client is None:
+        return True                     # an operator-side caller, not a request
+    st = read_status(run_id)
+    return bool(st) and st.get("client") == client
 
 
 # ------------------------------------------------------- the live action sink
@@ -330,8 +354,13 @@ def _launch(run_id: str, question: str, resume: str | None) -> None:
 
 
 def start_turn(question: str, *, resume: str | None = None,
-               title: str | None = None) -> dict:
-    """Admit a turn and start or queue it. Returns immediately."""
+               title: str | None = None, client: str | None = None) -> dict:
+    """Admit a turn and start or queue it. Returns immediately.
+
+    ``client`` is recorded on the run so a transcript can be shown to the person
+    who asked for it and not to everybody else. It is scoping, not identity —
+    see ``gate.py``.
+    """
     ok, why = available()
     if not ok:
         raise Unavailable(why)
@@ -344,10 +373,22 @@ def start_turn(question: str, *, resume: str | None = None,
             f"the analyst. Raise HEATCANYON_AGENT_SESSION_BUDGET_USD and restart, or "
             f"clear {runs_dir()}. Everything else in the application still works.")
 
+    # BEFORE anything is written to disk. The queue check used to come after the
+    # status file and the frame log had been created, so a request that was never
+    # going to be served still cost two files — which made a loop against this
+    # endpoint a disk-filler as well as a budget-drainer. Nothing is created for
+    # a turn that is being refused.
+    if len(_PENDING) >= gate.max_queue():
+        raise Busy(
+            f"{len(_PENDING)} questions are already waiting and that is the queue "
+            f"limit. The analyst answers {knobs.max_concurrent()} at a time and "
+            f"each one takes minutes; joining a queue this long would be a worse "
+            f"answer than being told to come back.")
+
     run_id = f"r{int(time.time())}{uuid.uuid4().hex[:6]}"
     _write_status(run_id, question=question, title=title or question[:80],
                   state="queued", queued_at=time.time(), resume=resume,
-                  model=knobs.model(), cost_usd=0.0,
+                  model=knobs.model(), cost_usd=0.0, client=client,
                   session_budget_usd=cap, session_spent_usd=spent)
     _frames_path(run_id).touch()
 
@@ -378,8 +419,9 @@ def interrupt(run_id: str) -> dict:
     return {"run_id": run_id, "stopped": True, "was": "running"}
 
 
-def interrupt_all() -> dict:
-    ids = list(_RUNNING) + list(_PENDING)
+def interrupt_all(*, client: str | None = None) -> dict:
+    """Stop this client's work. Unscoped, one POST cancelled everybody's."""
+    ids = [r for r in list(_RUNNING) + list(_PENDING) if owns(r, client)]
     for rid in ids:
         interrupt(rid)
     return {"stopped": len(ids), "run_ids": ids}

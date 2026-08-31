@@ -96,13 +96,31 @@ const N_BUCKETS = 8;
  * even three ghosted layers deep. Nothing equivalent is affordable here: the
  * subject's surface arrives inside several hundred streamed tile meshes with
  * their own textures, so a second pass means re-drawing the whole tileset. The
- * ghost therefore has to carry the guarantee on its own, and pixels compound —
- * at 0.42 a tower behind two ghosted neighbours reaches the screen through 34%
- * of their holes, which is less than the nearest neighbour keeps for itself. At
- * 0.30 it reaches through 49%, so the subject is the densest thing along that
- * line of sight, which is the whole claim a selection makes.
+ * ghost therefore has to carry the guarantee on its own.
+ *
+ * It was 0.30, picked on the compounding argument alone: pixels multiply down a
+ * line of sight, and at 0.30 a tower behind two ghosted neighbours reaches the
+ * screen through 49% of their holes, so the subject is the densest thing along
+ * that ray. That is true, and it is not what anybody sees. Two layers is the
+ * wrong model for this camera. An oblique view over Midtown is ten or fifteen
+ * buildings deep, and 30% of each of them, accumulated over that depth, still
+ * covers the frame edge to edge — so the subject wins the density comparison
+ * and loses the picture. A solid patch cannot read as solid when nothing around
+ * it is anywhere near empty.
+ *
+ * So the dissolve is spent on emptiness rather than on a margin. At 0.12 the
+ * surroundings are a dusting rather than a surface, three layers of them still
+ * pass 68% of the subject through, and the selection is the only place in the
+ * frame carrying continuous colour. It is exposed as a slider as well (see
+ * `setLook`), because the right value genuinely depends on the camera: at
+ * street level there are two buildings in the way, from the air there are
+ * fifteen.
+ *
+ * Thinning cannot finish the job on its own, which is what PR_GHOST_DRAIN in
+ * the shader is for — 12% of a sunlit white parapet is still 12% of the
+ * brightest thing on screen.
  */
-const PR_GHOST = 0.30;
+const PR_GHOST = 0.12;
 
 /* Screen-space error target, in pixels: how much geometric error, projected to
  * the screen, is acceptable before a tile is refined.
@@ -474,6 +492,9 @@ export class Photoreal {
      * state the rest of the frame is already in. */
     this.subject = null;
     this.ghost = 1;
+    // The setting, as opposed to `ghost`, which is what the shader is running:
+    // 1 whenever nothing is selected and there is nothing to dissolve.
+    this.ghostAmt = PR_GHOST;
     this._credits = [];
     this._mats = new Set();
 
@@ -1194,6 +1215,30 @@ export class Photoreal {
               * the thing the chapter blames for the shaded wall. */
              const float PR_GHOST_PAINT = 0.2;
 
+             /* What a fragment that SURVIVED the dissolve gives up, and what it
+              * gives it up to.
+              *
+              * The dissolve removes pixels and does nothing whatever to the
+              * ones it keeps, so a ghosted building is a stipple cut out of
+              * full-contrast photograph: white parapets, black windows, red
+              * brick, sunlit glass. A sparse stipple of high-contrast marks
+              * catches the eye harder per pixel than the same area of
+              * continuous mid-tone, which is why thinning alone hits a floor —
+              * past a point the surroundings stop being a surface and become
+              * glitter, and glitter competes with the subject as effectively as
+              * the surface did.
+              *
+              * So what survives is drained most of the way to neutral and
+              * lifted toward the haze value a distant building would take under
+              * aerial perspective anyway. The subject keeps its photograph and
+              * its heat, and colour is then the whole of what separates the two
+              * — one channel doing one job, instead of density fighting
+              * contrast for the same job. Not all the way to flat grey: the
+              * surroundings are still evidence, and a neighbouring tower has to
+              * stay recognisable as a tower. */
+             const float PR_GHOST_DRAIN = 0.75;
+             const float PR_GHOST_HAZE = 0.60;
+
              float prHash2D( vec2 v ) {
                return fract( 1.0e4 * sin( 17.0 * v.x + 0.1 * v.y )
                              * ( 0.1 + abs( sin( 13.0 * v.y + v.x ) ) ) );
@@ -1299,6 +1344,12 @@ export class Photoreal {
                 * keeps the default and is treated as subject, which leaves the
                 * street exactly as it was. */
                float prSubj = 1.0;
+               /* Where the dissolve actually took hold, so the drain further
+                * down finds the same fragments. It cannot just test prSubj: the
+                * two-metre sill leaves a solid skirt at the foot of every
+                * ghosted tower on purpose, and draining that would grey out the
+                * pavement the sill was there to protect. */
+               float prFade = 0.0;
 
                if ( uHasGrid > 0.5 ) {
                  vec2 cellF = prCell( vWorldPR );
@@ -1357,6 +1408,7 @@ export class Photoreal {
                     * see. */
                    if ( uGhost < 0.999 && bp.b < 0.5 && above > 2.0 ) {
                      if ( uGhost < prHashThreshold( vWorldPR ) ) discard;
+                     prFade = 1.0;
                    }
 
                    /* ---- far: the city as marks rather than surfaces
@@ -1673,6 +1725,24 @@ export class Photoreal {
                float desatW = uDesat * mix( 0.35, 1.0, clamp( paint * 1.5, 0.0, 1.0 ) );
                c = mix( c, vec3( l ), desatW );
 
+               /* Drain whatever survived the dissolve — the PHOTOGRAPH only,
+                * which is why this sits here and not at the end of the shader.
+                *
+                * After the desaturate, so it is not fighting a term that has
+                * just been applied to the same pixel; before the glow, so the
+                * fifth of a wash PR_GHOST_PAINT deliberately leaves on the
+                * surroundings lands on top of the drain at its full strength
+                * rather than under it. Draining last was the first version and
+                * it quietly repealed that decision: 20% of a wash, then 75% of
+                * the way to neutral, is 5% of a wash, and the neighbouring
+                * tower stopped being able to read as the warm thing the chapter
+                * blames. The photograph recedes; the measurement does not. */
+               if ( prFade > 0.5 ) {
+                 float lg = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+                 c = mix( c, vec3( mix( lg, PR_GHOST_HAZE, 0.5 ) ),
+                          PR_GHOST_DRAIN );
+               }
+
                /* Mixed, where this was a screen — forced by the ramp turning
                 * round, and worth being straight about.
                 *
@@ -1785,11 +1855,22 @@ export class Photoreal {
     }
   }
 
-  /** Live-adjust the two look controls without rebuilding the tileset. */
-  setLook({ desaturate, fieldWash, threshold }) {
+  /** Live-adjust the look controls without rebuilding the tileset. */
+  setLook({ desaturate, fieldWash, threshold, ghost }) {
     if (desaturate !== undefined) this.desaturate = desaturate;
     if (fieldWash !== undefined) this.fieldWash = fieldWash;
     if (threshold !== undefined) this.threshold = threshold;
+    /* The dissolve belongs in this panel for the reason given at PR_GHOST: it
+     * is the one setting here whose right value depends on how many buildings
+     * happen to stand between the eye and the selection, and that is a property
+     * of the shot rather than of the layer. Zero is a legal setting and is not
+     * a bug — the unselected city vanishes above the sill and the chosen tower
+     * stands alone on a street plan, which is a reasonable thing to want from a
+     * still. */
+    if (ghost !== undefined) {
+      this.ghostAmt = ghost;
+      if (this.subject) this.ghost = ghost;
+    }
     // Iterate the materials we patched rather than the scene graph: tiles are
     // streamed in and out constantly, and a material can be alive in the LRU
     // cache while detached from the group.
@@ -1799,6 +1880,7 @@ export class Photoreal {
       if (desaturate !== undefined) u.uDesat.value = desaturate;
       if (fieldWash !== undefined) u.uWash.value = fieldWash;
       if (threshold !== undefined) u.uThreshold.value = threshold;
+      if (ghost !== undefined && u.uGhost) u.uGhost.value = this.ghost;
     }
   }
 
@@ -1818,7 +1900,7 @@ export class Photoreal {
     // happens on every hour tick.
     if (!next && !this.subject) return;
     this.subject = next;
-    this.ghost = next ? PR_GHOST : 1;
+    this.ghost = next ? this.ghostAmt : 1;
     this._writeSubjects();
     for (const mat of this._mats) {
       const u = mat.userData.uniforms;

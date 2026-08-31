@@ -33,7 +33,7 @@
  * answered rather than pretending the capability is there.
  */
 
-import { api } from './api.js';
+import { agentHeaders, agentUrl, api } from './api.js';
 /* What each call is called on the record.
  *
  * The transcript is the evidence for an answer, so it stays: a figure you cannot
@@ -421,7 +421,7 @@ export class AgentConsole {
 
   async _loadEnvelope() {
     try {
-      const r = await fetch(api('/api/agent/envelope'));
+      const r = await fetch(api('/api/agent/envelope'), { headers: agentHeaders() });
       this.envelope = await r.json();
     } catch (e) {
       this.envelope = { available: false, unavailable_because: 'Server not reachable.' };
@@ -534,7 +534,7 @@ export class AgentConsole {
     const status = this._status('Reading the question');
     try {
       const r = await fetch(api('/api/agent/ask'), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: agentHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ question, resume: this.sessionId }),
       });
       // A body that is not JSON is a real case here — a proxy timing out in
@@ -593,7 +593,10 @@ export class AgentConsole {
     // the server replays from the run's JSONL on reconnect, so a dropped
     // connection costs nothing. The one thing it cannot do is stop by itself, so
     // the terminal frame closes it explicitly.
-    const es = new EventSource(api(`/api/agent/runs/${runId}/events`));
+    // `agentUrl`, not `api`: EventSource sends no headers, so the client id
+    // and any deployment token travel as query parameters or the server has no
+    // way to tell whose transcript this is. See api.js.
+    const es = new EventSource(agentUrl(`/api/agent/runs/${runId}/events`));
     this.stream = es;
     let sawText = false;
     let live = false;
@@ -710,7 +713,9 @@ export class AgentConsole {
   async interrupt() {
     if (!this.runId) return;
     try {
-      await fetch(api(`/api/agent/runs/${this.runId}/interrupt`), { method: 'POST' });
+      await fetch(api(`/api/agent/runs/${this.runId}/interrupt`), {
+        method: 'POST', headers: agentHeaders(),
+      });
     } catch { /* the stream will report the state */ }
   }
 

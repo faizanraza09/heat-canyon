@@ -234,6 +234,16 @@
                 <span class="lrow"><span>FIELD ON STREETS</span><output id="pr-wash-out"></output></span>
                 <input id="pr-wash" type="range" min="0" max="100" value="40" />
               </label>
+              <!-- How much of the unselected city survives once something is
+                   selected. Exposed because the number of buildings standing
+                   between the eye and the subject is a property of the shot,
+                   not of the layer: a street-level view needs far less
+                   dissolving than an oblique one over Midtown. Does nothing
+                   until a building is picked. -->
+              <label>
+                <span class="lrow"><span>CITY AROUND SELECTION</span><output id="pr-ghost-out"></output></span>
+                <input id="pr-ghost" type="range" min="0" max="60" value="12" />
+              </label>
               <label class="prcheck">
                 <input id="pr-solids" type="checkbox" />
                 Also draw our own blocks, for comparing alignment

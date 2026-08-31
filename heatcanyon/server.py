@@ -30,7 +30,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -207,13 +207,36 @@ def voice_lines(body: VoiceLines) -> dict:
 # ------------------------------------------------------------------ the agent
 
 
+def _gate(request: Request, *, rate: bool = False) -> str:
+    """Admit a request to the agent surface and say whose it is.
+
+    Every `/api/agent/*` route goes through here. The token is checked on all of
+    them — a deployment that is not open to the public should not leak its
+    envelope or its transcripts either — and the rate bucket is spent only where
+    work is actually started, because refusing somebody's reconnecting event
+    stream because they asked four questions is a bug, not a limit.
+    """
+    from .agent import gate as agent_gate
+    try:
+        agent_gate.check_token(request)
+        if rate:
+            agent_gate.check_rate(request)
+    except agent_gate.Refused as exc:
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
+        raise HTTPException(exc.status, str(exc), headers=headers) from exc
+    return agent_gate.client_id(request)
+
+
 @app.get("/api/agent/envelope")
-async def agent_envelope() -> dict:
+async def agent_envelope(request: Request) -> dict:
     """Model, budgets, tools, subagents. What the console shows in its header."""
+    from .agent import gate as agent_gate
     from .agent import options as agent_options
     from .agent import session as agent_session
+    _gate(request)
     return {
         **agent_options.describe_envelope(),
+        **agent_gate.describe(),
         "spent_usd": agent_session.session_cost_so_far(),
         "suggestions": agent_session.SUGGESTED,
         "running": len(agent_session._RUNNING),
@@ -221,7 +244,7 @@ async def agent_envelope() -> dict:
 
 
 @app.post("/api/agent/ask")
-async def agent_ask(q: Question) -> JSONResponse:
+async def agent_ask(q: Question, request: Request) -> JSONResponse:
     """Start a turn. Returns a run_id immediately; stream it from /events.
 
     ASYNC, and it has to be. FastAPI runs a `def` endpoint in a worker thread
@@ -232,11 +255,14 @@ async def agent_ask(q: Question) -> JSONResponse:
     keyword four characters long.
     """
     from .agent import session as agent_session
+    client = _gate(request, rate=True)
     dataset()          # fail fast and clearly if the pipeline has not been run
     try:
-        started = agent_session.start_turn(q.question, resume=q.resume)
+        started = agent_session.start_turn(q.question, resume=q.resume, client=client)
     except agent_session.Unavailable as exc:
         raise HTTPException(503, str(exc)) from exc
+    except agent_session.Busy as exc:
+        raise HTTPException(429, str(exc), headers={"Retry-After": "60"}) from exc
     except agent_session.BudgetExceeded as exc:
         raise HTTPException(402, str(exc)) from exc
     except Exception as exc:      # noqa: BLE001
@@ -246,22 +272,28 @@ async def agent_ask(q: Question) -> JSONResponse:
 
 
 @app.get("/api/agent/runs")
-async def agent_runs(limit: int = 40) -> dict:
+async def agent_runs(request: Request, limit: int = 40) -> dict:
     from .agent import knobs, session as agent_session
+    client = _gate(request)
     agent_session.reconcile_orphans()
     return {
-        "runs": agent_session.list_runs(limit),
+        "runs": agent_session.list_runs(limit, client=client),
         "spent_usd": agent_session.session_cost_so_far(),
         "budget_usd": knobs.session_budget_usd(),
     }
 
 
 @app.get("/api/agent/runs/{run_id}/events")
-async def agent_events(run_id: str) -> StreamingResponse:
-    """Replay this run's frames, then tail it live. Reconnect freely."""
+async def agent_events(run_id: str, request: Request) -> StreamingResponse:
+    """Replay this run's frames, then tail it live. Reconnect freely.
+
+    Scoped like the listing, and the client arrives as `?client=` rather than a
+    header because EventSource cannot send one.
+    """
     from .agent import session as agent_session
     from .agent.events import sse
-    if agent_session.read_status(run_id) is None:
+    client = _gate(request)
+    if agent_session.read_status(run_id) is None or not agent_session.owns(run_id, client):
         raise HTTPException(404, f"no such run: {run_id}")
 
     async def gen():
@@ -278,34 +310,43 @@ async def agent_events(run_id: str) -> StreamingResponse:
 
 
 @app.get("/api/agent/runs/{run_id}/frames")
-def agent_frames(run_id: str) -> dict:
+def agent_frames(run_id: str, request: Request) -> dict:
     """One run's frames in full, for a console reopening a finished answer."""
     from .agent import session as agent_session
-    if agent_session.read_status(run_id) is None:
+    client = _gate(request)
+    if agent_session.read_status(run_id) is None or not agent_session.owns(run_id, client):
         raise HTTPException(404, f"no such run: {run_id}")
     return {"run_id": run_id, "status": agent_session.read_status(run_id),
             "frames": agent_session.read_frames(run_id)}
 
 
 @app.post("/api/agent/runs/{run_id}/interrupt")
-async def agent_interrupt(run_id: str) -> dict:
+async def agent_interrupt(run_id: str, request: Request) -> dict:
     """Async for the same reason as `ask`, plus one of its own: `Task.cancel` is
     not thread-safe, so it must be called from the loop that owns the task."""
     from .agent import session as agent_session
+    client = _gate(request)
+    if not agent_session.owns(run_id, client):
+        raise HTTPException(404, f"no such run: {run_id}")
     return agent_session.interrupt(run_id)
 
 
 @app.post("/api/agent/interrupt-all")
-async def agent_interrupt_all() -> dict:
-    """Stop everything this server is doing. Never an error."""
+async def agent_interrupt_all(request: Request) -> dict:
+    """Stop everything THIS CLIENT is doing. Never an error.
+
+    It used to stop everything the server was doing, from an unauthenticated
+    POST, which is a one-request denial of service on every other visitor.
+    """
     from .agent import session as agent_session
-    return agent_session.interrupt_all()
+    return agent_session.interrupt_all(client=_gate(request))
 
 
 @app.get("/api/agent/artifact/{path:path}")
-def agent_artifact(path: str) -> FileResponse:
+def agent_artifact(path: str, request: Request) -> FileResponse:
     """A chart or file the agent produced. Confined to the workspace root."""
     from .agent import knobs
+    _gate(request)
     root = knobs.workspace_root().resolve()
     target = (root / path).resolve()
     if root not in target.parents or not target.is_file():

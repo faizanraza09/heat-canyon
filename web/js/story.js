@@ -100,23 +100,91 @@ export function words(n) {
 /** The same, capitalised, for a number that opens a sentence. */
 const Words = (n) => { const w = words(n); return w[0].toUpperCase() + w.slice(1); };
 
-/* A large count as the narrator says it.
+/* Above a thousand, in full, because the caption and the read now have to be
+ * the same sentence.
  *
- * `words` stops at a thousand on purpose and hands back digits above it, which
- * is right for a caption and useless for a voice: a synthesiser given
- * "1,880,578" reads it out a digit at a time. The programme's person-hours
- * moved from six figures to seven when the film started narrating the panel
- * instead of the stored allocation, so the spoken form has to carry both. */
-function spokenCount(n) {
+ * `words` stops at a thousand and hands back digits, which was fine while a
+ * `say` string was allowed to quote a different, shorter figure than the
+ * caption under it — the film said "twenty-nine thousand four hundred" over a
+ * caption reading "29,415 of them, on 5,329 buildings", and dropped the second
+ * number entirely. Watched with the captions on, every one of those divergences
+ * reads as the voice skipping words, which is exactly what it was reported as.
+ *
+ * So the script has one text now and `say` is its pronunciation. That needs a
+ * speller that does not give up at a thousand.
+ *
+ * Comma before a hundreds group and "and" before a bare tens group, which is
+ * how the read scans: "twenty-nine thousand, four hundred and fifteen", but
+ * "eight thousand and sixty" rather than "eight thousand, sixty". */
+export function spell(n) {
   const v = Math.round(n);
-  if (v >= 1e6) {
-    const tenths = Math.round(v / 1e5);
-    const whole = Math.floor(tenths / 10);
-    const rest = tenths % 10;
-    return rest ? `${words(whole)} point ${words(rest)} million` : `${words(whole)} million`;
+  if (!isFinite(v) || v < 0) return String(n);
+  if (v < 1000) return words(v);
+  if (v < 1e6) {
+    const th = Math.floor(v / 1000);
+    const r = v % 1000;
+    const head = `${spell(th)} thousand`;
+    if (!r) return head;
+    return r < 100 ? `${head} and ${words(r)}` : `${head}, ${words(r)}`;
   }
-  return `${words(Math.round(v / 1000))} thousand`;
+  const mi = Math.floor(v / 1e6);
+  const r = v % 1e6;
+  const head = `${words(mi)} million`;
+  return r ? `${head}, ${spell(r)}` : head;
 }
+
+/** The same, capitalised, for a number that opens a sentence. */
+const Spell = (n) => { const w = spell(n); return w[0].toUpperCase() + w.slice(1); };
+
+/** A year as a year: 1975 is "nineteen seventy-five", not "one thousand, nine
+ *  hundred and seventy-five". Only ever used on a building's date of
+ *  construction, which is the only year the script quotes as a bare number. */
+const spellYear = (y) => {
+  const v = Math.round(y);
+  if (!isFinite(v) || v < 1100 || v > 2099) return spell(v);
+  const hi = Math.floor(v / 100);
+  const lo = v % 100;
+  if (!lo) return `${words(hi)} hundred`;
+  return lo < 10 ? `${words(hi)} oh ${words(lo)}` : `${words(hi)} ${words(lo)}`;
+};
+
+/** "4.1" as "four point one". One decimal place, which is all the script has —
+ *  the overhang depth in the shading beat. */
+const spellDec = (x, dp = 1) => {
+  const [a, b] = Number(x).toFixed(dp).split('.');
+  return `${words(Number(a))} point ${[...b].map((d) => ONES[Number(d)]).join(' ')}`;
+};
+
+/* Past a million, both the caption and the read round.
+ *
+ * `spell` says 2,272,818 as "two million, two hundred and seventy-two thousand,
+ * eight hundred and eighteen". That is five seconds, and it is five seconds of
+ * a listener waiting for a sentence to end rather than taking a figure in. A
+ * seven-digit person-hour count is not a quantity anybody holds in their head
+ * exactly; the magnitude is the whole content.
+ *
+ * So the CAPTION rounds too, and that is what makes this different from the old
+ * arrangement: the film prints "2.3 million hours" and says "two point three
+ * million hours". Rounding only the read is the bug that started all of this.
+ * Below a million everything stays exact, because those figures are short
+ * enough to say and their exactness is the model's credibility. */
+const millions = (n) => `${Math.round(n / 1e5) / 10} million`;
+const spellMillions = (n) => {
+  const tenths = Math.round(n / 1e5);
+  const whole = Math.floor(tenths / 10);
+  const rest = tenths % 10;
+  return rest ? `${words(whole)} point ${words(rest)} million` : `${words(whole)} million`;
+};
+const Millions = (n) => { const w = spellMillions(n); return w[0].toUpperCase() + w.slice(1); };
+
+/* `spokenCount` used to live here: a large count rounded for the mouth, "two
+ * point three million" for 2,272,818. It was the right answer while the read
+ * was allowed to be a shorter paraphrase of the caption, and it is the wrong
+ * one now that they have to be the same sentence — a rounded read under an
+ * exact caption is the film disagreeing with itself, on the last figure in the
+ * argument. `spell` above says the whole number; it costs about two seconds.
+ * Deleted rather than left unused, because the next person to want a rounded
+ * figure should have to think about the caption beside it. */
 const r0 = (x) => Math.round(x);
 
 const ORDINALS = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh',
@@ -515,7 +583,7 @@ export function buildStory(data, globe, getUI = () => null) {
       stage: { alt: 29000, fov: 28, turn: 0.2, heat: 0.45, tilt: 0.13, counter: 0.5 },
     },
     {
-      chapter: 'I', seconds: 6.04,
+      chapter: 'I', seconds: 5.2,
       /* THE FILM OPENS ON THE GAP, not on the physics.
        *
        * It used to open with how a city stores heat — true, and the wrong first
@@ -537,7 +605,7 @@ export function buildStory(data, globe, getUI = () => null) {
                tilt: 0.1, counter: 1 },
     },
     {
-      chapter: 'I', seconds: 6.09,
+      chapter: 'I', seconds: 8.27,
       /* The full label here, and only here. This is the first time the film
        * names the place, over a shot of the planet — "Midtown" on its own is a
        * word the viewer has no way to locate, and the beat's whole job is to
@@ -558,22 +626,24 @@ export function buildStory(data, globe, getUI = () => null) {
       text: `So we did. A year over ${m.aoi.label}, `
         + `${(year.hours || 8760).toLocaleString('en-US')} hours, `
         + `${words(daysOver)} days past ${words(m.event.threshold_c)} degrees.`,
-      /* The caption keeps the hour count; the read does not.
+      /* The hour count is spoken now, and the three and a half seconds it costs
+       * are worth more than they save.
        *
-       * "Eight thousand seven hundred and sixty" takes three and a half seconds
-       * to say and reads in a glance, and this film is against a hard three
-       * minutes. The figure stays on screen — which is where the test for it
-       * looks, and where a viewer takes it in faster than any voice can deliver
-       * it — and the read spends those seconds in chapter five instead, on what
-       * the analyst actually concluded. */
+       * It used to be caption-only, on the argument that the figure reads in a
+       * glance and the film is against a hard three minutes. What that missed
+       * is that the caption is ON SCREEN while the line is spoken: a viewer
+       * reading "8,760 hours" and not hearing it does not conclude that the
+       * edit was tight, they conclude the voice-over dropped a word. Reported as
+       * exactly that. Every figure the caption shows is now said. */
       say: `So we did. A year over ${m.aoi.label}, `
+        + `${spell(year.hours || 8760)} hours, `
         + `${words(daysOver)} days past ${words(m.event.threshold_c)} degrees.`,
       altEase: 'out', turnEase: 'out',
       stage: { alt: 5200, fov: 30, turn: 1, heat: 1, cities: 0.6, bloom: 0.4,
                lock: 1, pin: 1, aim: 0, phi: 0.05, clouds: 0.6, tilt: 0 },
     },
     {
-      chapter: 'I', seconds: 4.78,
+      chapter: 'I', seconds: 4.21,
       /* WHOSE MAP THIS IS, which the new opening made load-bearing.
        *
        * The line read "From up here it's one number per block" — written when
@@ -644,7 +714,7 @@ export function buildStory(data, globe, getUI = () => null) {
        * film is the other kind. The picture is still doing the work; the line
        * just stops the viewer wondering whether the film has stalled.
        */
-      chapter: 'II', title: 'Going in', seconds: 3.53,
+      chapter: 'II', title: 'Going in', seconds: 2.74,
       text: 'Averages hide a lot. Let’s go down.',
       /* FOUR HUNDRED, NOT SIX HUNDRED AND FORTY, and the line above is why.
        *
@@ -670,12 +740,16 @@ export function buildStory(data, globe, getUI = () => null) {
                clouds: 1, lock: 1, pin: 1, aim: 0, tilt: 0 },
     },
     {
-      chapter: 'II', phase: 'handoff', seconds: 6.01,
+      chapter: 'II', phase: 'handoff', seconds: 7.51,
       text: `Down here it’s walls. `
         + `${m.counts.facade_panels.toLocaleString('en-US')} of them, `
         + `on ${m.counts.buildings.toLocaleString('en-US')} buildings.`,
-      say: 'Down here it’s walls. Twenty-nine thousand four hundred, '
-        + 'each solved on its own.',
+      // Both counts, and the real one rather than a round one: the caption says
+      // 29,415 on 5,329 buildings and the read used to say "twenty-nine
+      // thousand four hundred, each solved on its own" — a different figure and
+      // one number short of the sentence beside it.
+      say: `Down here it’s walls. ${Spell(m.counts.facade_panels)} of them, `
+        + `on ${spell(m.counts.buildings)} buildings.`,
       altEase: 'land',
       stage: { alt: 3.265, fov: 46, phi: 0.334, dust: 1, pin: 0, clouds: 1,
                lock: 1, aim: 0, tilt: 0 },
@@ -694,7 +768,7 @@ export function buildStory(data, globe, getUI = () => null) {
      * anyone would have guessed.
      */
     {
-      chapter: 'III', title: 'One building', phase: 'city', seconds: 5.72,
+      chapter: 'III', title: 'One building', phase: 'city', seconds: 8.69,
       /* NO SPOTLIGHT ON THIS BEAT, and that is the fourth reason it was dull.
        *
        * The walkthrough's highlight paints a 58%-black scrim over everything
@@ -708,11 +782,12 @@ export function buildStory(data, globe, getUI = () => null) {
        * highlight and its own colour; it does not need a hole cut in a scrim.
        */
       text: `Take this one as an example. ${hero.addr}, ${hero.floors} floors, `
-        + `${hero.year}, ${hero.units} homes.`,
+        + `built in ${hero.year}, ${hero.units} homes.`,
       // Hand-spelled because a street number is not a quantity: 560 has to be
       // read as "five sixty", which no number-to-words helper will do for you.
       say: `Take this one as an example. Five sixty Third Avenue, `
-        + `${words(hero.floors)} floors.`,
+        + `${words(hero.floors)} floors, built in ${spellYear(hero.year)}, `
+        + `${spell(hero.units)} homes.`,
       /* THE ARRIVAL, and it was the dullest frame in the film.
        *
        * The descent ends on lit cloud, satellite imagery and a city coming up
@@ -808,7 +883,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 4.65,
+      chapter: 'III', phase: 'city', seconds: 3.91,
       text: 'On the flat map it’s one shade of orange. '
         + 'It’s nowhere near that even.',
       // Still turning. The line is that one flat colour on a map is four
@@ -817,7 +892,7 @@ export function buildStory(data, globe, getUI = () => null) {
       act: ({ ui }) => { ui.setHour(m.peak_index); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.66,
+      chapter: 'III', phase: 'city', seconds: 8.4,
       // The subject is the building's banding, which is geometry in the model
       // rather than a control — so there is nothing on a panel to light, and
       // pointing at the colour legend instead would be a highlight on the wrong
@@ -845,11 +920,14 @@ export function buildStory(data, globe, getUI = () => null) {
           return `So the model breaks it up. ${Words(m.bands)} height bands, `
             + 'every face worked out separately.';
         }
-        // "every face apart" comes out: the next two beats walk round to two
-        // of those faces and read a number off each, which makes the point
-        // better than a clause does and costs the line 1.3 seconds it needs.
-        return `So it breaks the building up. ${Words(m.bands)} bands. `
-          + `${Words(bs[0].t)} at the bottom, ${words(bs[1].t)} just above.`;
+        // Word for word with the caption above. "every face apart" used to be
+        // cut here, on the argument that the next two beats walk round to two
+        // of those faces and make the point better than a clause does. They do
+        // — and the clause is still on screen while this line is spoken, so
+        // cutting it bought 1.3 seconds and sounded like a dropped phrase.
+        return `So the model breaks it up. ${Words(m.bands)} bands up the building, `
+          + `every face apart: ${words(bs[0].t)} degrees Celsius at the bottom, `
+          + `${words(bs[1].t)} just above it.`;
       })(); },
       act: ({ ui }) => { ui.focusFloors(); },
       cues: (() => {
@@ -871,19 +949,19 @@ export function buildStory(data, globe, getUI = () => null) {
       })(),
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.41,
+      chapter: 'III', phase: 'city', seconds: 5.87,
       get text() { return (() => {
         const f = heroFloor();
         return f?.sun
           ? `The north-west face catches the late sun. Floor ${f.it.worst_floor} `
-            + `hits ${r0(f.sun.t)}.`
+            + `hits ${r0(f.sun.t)} °C.`
           : 'The north-west face catches the late sun. It is the hottest wall here.';
       })(); },
       get say() { return (() => {
         const f = heroFloor();
         return f?.sun
           ? `The north-west face catches the late sun. Floor ${words(f.it.worst_floor)} `
-            + `hits ${words(f.sun.t)}.`
+            + `hits ${words(f.sun.t)} degrees Celsius.`
           : 'The north-west face catches the late sun. It is the hottest wall here.';
       })(); },
       // The clock moves to the low sun here, and the flat sheet of yellow the
@@ -917,18 +995,18 @@ export function buildStory(data, globe, getUI = () => null) {
       cues: [{ at: 0.42, do: ({ scene }) => scene.zoomBy(0.84) }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.54,
+      chapter: 'III', phase: 'city', seconds: 5.6,
       get text() { return (() => {
         const f = heroFloor();
         return f?.shade
-          ? `Now round to the north-east. Same floor, no sun at all. Still ${r0(f.shade.t)}.`
+          ? `Now round to the north-east. Same floor, no sun at all. Still ${r0(f.shade.t)} °C.`
           : 'Now round to the north-east. Same floor, no sun at all. Still hot.';
       })(); },
       get say() { return (() => {
         const f = heroFloor();
         return f?.shade
-          ? `Now round to the north-east. Same floor, no sun, still ${words(f.shade.t)}.`
-          : 'Now round to the north-east. Same floor, no sun, and still hot.';
+          ? `Now round to the north-east. Same floor, no sun at all. Still ${words(f.shade.t)} degrees Celsius.`
+          : 'Now round to the north-east. Same floor, no sun at all. Still hot.';
       })(); },
       /* The turn the whole chapter rests on, and it is a camera move rather
        * than a sentence.
@@ -958,7 +1036,7 @@ export function buildStory(data, globe, getUI = () => null) {
       cues: [{ at: 0.42, do: ({ scene }) => scene.zoomBy(0.84) }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 6.98,
+      chapter: 'III', phase: 'city', seconds: 5.75,
       /* THE CLAIM MOVED WITH THE BUILDING, and it had to.
        *
        * On the old hero the wall opposite the shaded face was 145 m of tower,
@@ -1025,7 +1103,7 @@ export function buildStory(data, globe, getUI = () => null) {
       }],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 4.7,
+      chapter: 'III', phase: 'city', seconds: 4.1,
       /* Section two is "The three findings", and it does not contain the
        * three-way attribution — that is the chart's legend, one beat later.
        * This line described the attribution while the highlight sat on
@@ -1067,7 +1145,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.54,
+      chapter: 'III', phase: 'city', seconds: 6.22,
       /* The heading, and then whatever the scroll moves on to. Pointing at the
        * heading for the whole beat is what put a sliver of highlight along the
        * top of the frame while the chart being described sat unlit below it. */
@@ -1083,8 +1161,8 @@ export function buildStory(data, globe, getUI = () => null) {
       spot: '#brief-doc .brf-sec:nth-of-type(3) .brf-h',
       text: 'Then floor by floor, every storey split three ways: '
         + 'the sun, the neighbours, and what it sheds.',
-      say: 'Then floor by floor, split three ways: '
-        + 'sun, neighbours, and what it sheds.',
+      say: 'Then floor by floor, every storey split three ways: '
+        + 'the sun, the neighbours, and what it sheds.',
       act: ({ ui }) => { ui.briefSection(3); },     // The floor schedule
       cues: [
         { at: 0.38, spot: '#brief-doc .brf-sec:nth-of-type(3) .brf-fig',
@@ -1092,7 +1170,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.11,
+      chapter: 'III', phase: 'city', seconds: 9.81,
       get text() { return (() => {
         const f = heroFloor();
         if (!f) return 'One floor is the worst of them, and the schedule names it.';
@@ -1120,13 +1198,17 @@ export function buildStory(data, globe, getUI = () => null) {
         const f = heroFloor();
         if (!f) return 'One floor is the worst of them, and the schedule names it.';
         const t = f.row.t_in || [];
-        return `Floor ${words(f.it.worst_floor)} is worst. ${Words(f.row.t_surf)} outside, `
-          + `${words(t[1])} inside, `
-          + `${words(Math.round((f.row.hrs || 0) / 100))} hundred hours.`;
+        // The whole indoor range, and the hour count as the caption prints it
+        // rather than rounded to the nearest hundred. "Thirteen hundred hours"
+        // under a caption reading 1,269 is the film disagreeing with itself.
+        return `Floor ${words(f.it.worst_floor)} is worst. `
+          + `${Words(f.row.t_surf)} degrees Celsius outside, `
+          + `${words(t[0])} to ${words(t[1])} inside, `
+          + `${spell(f.row.hrs || 0)} hours a year.`;
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.86,
+      chapter: 'III', phase: 'city', seconds: 9.69,
       get text() { return (() => {
         const g = heroRx()?.geometry;
         if (!g) return 'Shading will not work here, and the model says why.';
@@ -1139,12 +1221,12 @@ export function buildStory(data, globe, getUI = () => null) {
          * for it in the read at three minutes, and a caption costs no runtime,
          * so it goes where it fits. */
         return `Shading is the obvious answer, and it fails. The sun is `
-          + `${r0(g.peak_altitude_deg)}° up, almost level with the wall. `
+          + `${r0(g.peak_altitude_deg)}° above the horizon, almost level with the wall. `
           + `An overhang would need ${g.projection_uncapped_m.toFixed(1)} m.`;
       })(); },
       /* `.brf-wpart` is the block headed "Why not something simpler", and it is
        * word for word what this line says: no fixed device works on this wall,
-       * the sun is 26° up, the overhang would have to be four metres. Arrived at
+       * the sun is 26° above the horizon, the overhang would have to be four metres. Arrived at
        * in the act rather than on a cue half way through, because there is
        * nothing else in section four this sentence is about and a beat that
        * spends its first half travelling is a beat with no picture. */
@@ -1174,12 +1256,18 @@ export function buildStory(data, globe, getUI = () => null) {
       get say() { return (() => {
         const g = heroRx()?.geometry;
         if (!g) return 'Shading will not work here, and the model says why.';
+        // The overhang depth is spoken. It is the most concrete thing in the
+        // beat — what makes "shading fails" a finding rather than an assertion
+        // — and the comment above the caption spent a paragraph saying so
+        // before cutting it from the read for length. Being on screen and not
+        // in the mouth is the worst of the three options.
         return `Shading is the obvious answer, and it fails. The sun is `
-          + `${words(g.peak_altitude_deg)} degrees up, almost level with the wall.`;
+          + `${words(g.peak_altitude_deg)} degrees above the horizon, almost level with the wall. `
+          + `An overhang would need ${spellDec(g.projection_uncapped_m)} metres.`;
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.11,
+      chapter: 'III', phase: 'city', seconds: 6.07,
       get text() { return (() => {
         const rx = heroRx();
         if (!rx) return 'So it prescribes the glass instead.';
@@ -1209,7 +1297,7 @@ export function buildStory(data, globe, getUI = () => null) {
       },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.03,
+      chapter: 'III', phase: 'city', seconds: 6.13,
       /* THE STOREY COUNT IS IN THIS LINE BECAUSE THE NUMBER BESIDE IT IS SEVEN
        * FIGURES.
        *
@@ -1298,7 +1386,7 @@ export function buildStory(data, globe, getUI = () => null) {
      * are all seen working rather than described.
      */
     {
-      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 4.76,
+      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 4.39,
       text: `Now scale it up. Every wall in ${place} has had the same treatment.`,
       act: ({ ui, scene }) => {
         ui.closeBrief();
@@ -1317,7 +1405,7 @@ export function buildStory(data, globe, getUI = () => null) {
       },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 7.94,
+      chapter: 'IV', phase: 'city', seconds: 6.94,
       spot: '#layers',
       text: `${Words(LAYERS.length)} layers to read it by. Surface temperature, sun `
         + `and shade, hours above ${r0(m.event.threshold_c)}, where to act first.`,
@@ -1350,11 +1438,12 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.54,
+      chapter: 'IV', phase: 'city', seconds: 5.91,
       spot: '#time',
       text: 'And it moves through time. Any hour, any day, a month, a season, '
         + 'the whole year.',
-      say: 'And it moves through time. Any hour, any day, or the whole year.',
+      say: 'And it moves through time. Any hour, any day, a month, a season, '
+        + 'the whole year.',
       // Back to facade temperature before the clock is started, and that is not
       // a preference. `exceedance` is a total over the whole heat wave: it has
       // no hour in it, so the time controls go quiet and running the clock over
@@ -1363,7 +1452,7 @@ export function buildStory(data, globe, getUI = () => null) {
       act: ({ ui }) => { ui.setLayer('surface'); ui.play?.(); },
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6.74,
+      chapter: 'IV', phase: 'city', seconds: 5.92,
       /* "The hottest day", not "that day". The film last mentioned a specific
        * day nineteen beats earlier, so the pronoun pointed at nothing a viewer
        * still had in mind — and the whole claim is a comparison between two
@@ -1389,7 +1478,7 @@ export function buildStory(data, globe, getUI = () => null) {
       }],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.54,
+      chapter: 'IV', phase: 'city', seconds: 4.75,
       spot: '#tab-whatif',
       text: 'Change something and it solves again. Cool roofs, trees, a coating.',
       act: ({ ui }) => {
@@ -1419,7 +1508,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6.14,
+      chapter: 'IV', phase: 'city', seconds: 6.64,
       /* These figures come off the panel this beat opens, not out of
        * portfolio.json. See Portfolio.programme(): the stored allocation and the
        * panel's own solver disagree by design, and quoting the first over a
@@ -1442,7 +1531,8 @@ export function buildStory(data, globe, getUI = () => null) {
         const a = programme();
         if (!a) return 'Then it spends a budget, and says where it went.';
         return `Give it a budget and it spends it. `
-          + `${Words(a.budget_usd / 1e6)} million dollars, ${words(a.buildings)} buildings.`;
+          + `${Words(a.budget_usd / 1e6)} million dollars, ${words(a.buildings)} buildings, `
+          + `${spell(a.measures)} measures.`;
       })(); },
       /* The portfolio's three beats used to carry one spot between them, on the
        * last of the three, and it lit the whole window. So the panel opened
@@ -1456,12 +1546,12 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.54,
+      chapter: 'IV', phase: 'city', seconds: 4.91,
       get text() { return (() => {
         const a = programme();
         return a
           ? `And what that bought. `
-            + `${Math.round(a.person_hours_avoided).toLocaleString('en-US')} hours of heat `
+            + `${millions(a.person_hours_avoided)} hours of heat `
             + `nobody sits through.`
           : 'And what that bought.';
       })(); },
@@ -1471,11 +1561,13 @@ export function buildStory(data, globe, getUI = () => null) {
         // Spelled, never handed over as digits: a synthesiser reads "1,880,578"
         // out one numeral at a time. Deriving it is what stops the film saying
         // "a hundred and fifty thousand" for a week after the programme moved.
-        // Capitalised: `spokenCount` returns "one point nine million", and this
-        // is the head of its own sentence. Inaudible, but the say strings are
-        // read by people as often as by synthesisers.
-        const n = spokenCount(a.person_hours_avoided);
-        return `And what that bought. ${n[0].toUpperCase()}${n.slice(1)} `
+        //
+        // IN FULL, not rounded to "two point three million". The caption
+        // beside it prints 2,272,818 — the exact person-hours the allocator
+        // accounts for — and a rounded read under an exact caption is the film
+        // quoting itself wrong. It costs about two seconds and it is the last
+        // figure in the argument, which is the one place worth spending them.
+        return `And what that bought. ${Millions(a.person_hours_avoided)} `
           + `hours of heat nobody sits through.`;
       },
       // To the outcome, not back to the curve. This beat says what the money
@@ -1515,7 +1607,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 3.40,
+      chapter: 'IV', phase: 'city', seconds: 2.89,
       /* Straight to the table. This beat used to stop at `.pf-phase` on the way
        * and it was never once lit across a whole playthrough — the act scrolled
        * to it and the cue moved on before the scroll arrived, so the first half
@@ -1565,7 +1657,7 @@ export function buildStory(data, globe, getUI = () => null) {
        *
        * `.agentform` fixed the geometry and missed the subject. It is the box
        * you type in, which is the right answer to "where do I ask" and the
-       * wrong one to "you can just ask": at this moment the box is empty, so
+       * wrong one to "you can just ask the analyst": at this moment the box is empty, so
        * the one lit thing in the frame is a placeholder and two buttons while
        * the actual question sits dimmed above it.
        *
@@ -1576,9 +1668,17 @@ export function buildStory(data, globe, getUI = () => null) {
        * the furniture. The two beats after it light the working and then the
        * answer, so the chapter reads question, method, verdict.
        */
-      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 5.77,
+      chapter: 'V', title: 'Ask it', phase: 'city', seconds: 5.87,
       spot: '#agent-scroll .you',
-      text: 'And if the panels don’t cover it, you can just ask. '
+      /* "ask the analyst", not "ask".
+       *
+       * This is the first sentence in the film that offers the viewer something
+       * to do, and "you can just ask" leaves the object of the verb to be
+       * guessed from a panel that is still sliding into frame. Naming it costs
+       * about seven tenths of a second and is the difference between an
+       * invitation and a shrug. The chapter title above it is "Ask it", which
+       * has the same problem and no room to fix it. */
+      text: 'And if the panels don’t cover it, you can just ask the analyst. '
         + 'This owner wants to insulate his wall.',
       act: ({ ui }) => {
         ui.closePortfolio();
@@ -1586,7 +1686,7 @@ export function buildStory(data, globe, getUI = () => null) {
       },
     },
     {
-      chapter: 'V', phase: 'city', seconds: 4.99,
+      chapter: 'V', phase: 'city', seconds: 3.78,
       text: 'It has the model behind it and twenty tools, and shows its working.',
       // A recorded turn replays off disk in a second or two, so by the time this
       // line is read the transcript is already at its end and sitting still.
@@ -1630,7 +1730,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'V', phase: 'city', seconds: 5.43,
+      chapter: 'V', phase: 'city', seconds: 4.43,
       // What this beat says has to be what the recording above it actually did.
       // The previous run wrote nineteen scripts and re-solved the canyon six
       // times, and this line said so. This one went to the building's own
@@ -1681,7 +1781,7 @@ export function buildStory(data, globe, getUI = () => null) {
        * worth paying for. The table is the evidence: absorbed shortwave against
        * longwave trapped, by floor band, with the dominant driver flipping
        * between the ground floors and everything above them. */
-      chapter: 'V', phase: 'city', seconds: 2.85,
+      chapter: 'V', phase: 'city', seconds: 2.34,
       text: 'Which is the answer worth paying for.',
       spot: '#agent-scroll .atable',
       act: ({ ui }) => { ui.scrollSurface('agent-scroll', '.atable'); },

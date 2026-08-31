@@ -1478,6 +1478,12 @@ export class UI {
       (v) => this.scene.photoreal?.setLook({ threshold: v / 100 }));
     slider('pr-wash', 'pr-wash-out', (v) => `${Math.round(v)}%`,
       (v) => this.scene.photoreal?.setLook({ fieldWash: v / 100 }));
+    // Read out as what is kept rather than as what is taken away, because that
+    // is the direction the eye judges it in: the question being answered at
+    // this slider is "can I still tell the neighbours are buildings", not "how
+    // hard is the dissolve".
+    slider('pr-ghost', 'pr-ghost-out', (v) => `${Math.round(v)}% KEPT`,
+      (v) => this.scene.photoreal?.setLook({ ghost: v / 100 }));
     /* The reach cap. Read out in kilometres, and the top stop reads NO LIMIT
      * rather than 12.5 km because that is what it is: the cull stands down and
      * the frustum is the only bound again, which is the right picture for a

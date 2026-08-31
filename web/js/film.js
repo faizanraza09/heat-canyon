@@ -296,12 +296,37 @@ const HANDOVER_S = 2.0;
  * voice needs. See `_startScore` for the table. */
 const SCORE_LEVEL = 0.45;
 
+/** The whole film's output trim, applied after the limiter so it moves the score
+ *  and the voice together and changes no balance. Measured: the mix peaks at
+ *  0.806 without it, and anything that adds gain downstream clips it. See the
+ *  long note in `_startScore`. */
+const OUTPUT_LEVEL = 0.62;
+
 /** How far the score drops under a spoken line. Not silence: the bed is what
  *  holds the shots together, and one that vanishes whenever anyone talks makes
  *  every caption sound like a different film. Shallower than it was, because the
  *  spectral notch below is now doing most of the work of getting out of the
  *  voice's way and the level no longer has to do it alone. */
 const DUCK = 0.55;
+
+/** How long a gap has to be before the score is allowed back up, in seconds.
+ *
+ * Measured on the finished film rather than chosen: the silence between the
+ * last word of one line and the first of the next runs 0.56 s to 1.36 s (the
+ * beat's own 0.55 s of tail and slack, plus whatever dead air ElevenLabs left
+ * on the end of the clip, which averages 0.39 s and reaches 0.77 s). Without a
+ * hold, every one of those gaps got a 0.7 s ramp up toward SCORE_LEVEL and then
+ * a 0.4 s ramp back down as the next line started — the drone rising four and a
+ * half decibels and falling again, once per sentence, for twenty-nine
+ * sentences. `_duck` always claimed to be "slow enough that the drone does not
+ * pump between beats"; against gaps this short it was not, and the swell is
+ * audible as a soft "oo" between lines.
+ *
+ * 1.6 s clears the longest of those gaps and still releases on the two beats
+ * that are genuinely wordless — the descent at the top and the hold at the end
+ * — which are the only places in the film where the bed coming back up means
+ * anything. */
+const DUCK_HOLD = 1.6;
 
 /** How warm the planet is behind the title card, before the film starts. */
 const IDLE_HEAT = 0.45;
@@ -1238,7 +1263,39 @@ export class Film {
     limiter.attack.value = 0.004;
     limiter.release.value = 0.25;
     master.connect(limiter);
-    limiter.connect(ac.destination);
+
+    /* HEADROOM, because the limiter above does not give any.
+     *
+     * Measured on the finished film with a ScriptProcessor tapped on the
+     * limiter's output, so this is every sample the page produces rather than a
+     * poll that might miss one: peak 0.806, which is -1.9 dBFS, and the limiter
+     * reporting 0.16 dB of reduction while it happened. It is not broken — it is
+     * doing the job it was tuned for. A DynamicsCompressor detects program
+     * level, and the narration's RMS is around -24 dBFS while its peaks reach
+     * -2.5, so a threshold of -8 with a 4 ms attack never sees the transients.
+     * It holds the score's sum down; it is not a peak limiter and cannot be
+     * made into one without changing how the bed sounds.
+     *
+     * Two decibels of headroom is not enough for a mix that leaves the browser.
+     * The recording that started this — a screen capture of the film — is
+     * clipped in 3,129 places with its peak pinned at exactly 1.0, and
+     * regressing the captured voice against web/data/vo/*.mp3 (which peak
+     * between -7.8 and -2.5 dBFS and clip nowhere) puts the gain the capture
+     * chain added at 2x or more. Clipped speech is what "a weird cutting-off
+     * sound" is, and it smears consonants badly enough that words read as
+     * skipped. Anything downstream can do this: Windows loudness equalisation, a
+     * screen recorder, a Bluetooth headset's DSP, a laptop speaker's boost.
+     *
+     * 0.62 puts the peak at about -6 dBFS, which survives a doubling. The score
+     * and the voice both pass through here, so the balance between them is
+     * exactly what it was — the film is quieter by three decibels and nothing
+     * else about it moved.
+     */
+    const out = ac.createGain();
+    out.gain.value = OUTPUT_LEVEL;
+    limiter.connect(out);
+    out.connect(ac.destination);
+    this.out = out;
     this.master = master;
     // The voice goes into the same limiter but NOT through `master`: the score's
     // level is a knob on the music, and the narration is not music. Attached
@@ -1383,6 +1440,15 @@ export class Film {
    * drone does not pump between beats. */
   _duck(on) {
     if (!this.ac || !this.master) return;
+    clearTimeout(this._duckUp);
+    // Down immediately, up only after the gap has proved itself long enough to
+    // be a pause rather than a breath between two lines. See DUCK_HOLD.
+    if (!on) { this._duckUp = setTimeout(() => this._duckTo(false), DUCK_HOLD * 1000); return; }
+    this._duckTo(true);
+  }
+
+  _duckTo(on) {
+    if (!this.ac || !this.master) return;
     const t = this.ac.currentTime;
     const level = this.sound ? SCORE_LEVEL * (on ? DUCK : 1) : 0;
     try {
@@ -1393,6 +1459,9 @@ export class Film {
   }
 
   _stopScore(fade = 2.2) {
+    // A duck release still pending would ramp the master back up in the middle
+    // of the fade-out below, which reads as the score refusing to end.
+    clearTimeout(this._duckUp);
     if (!this.ac || !this.master) return;
     const t = this.ac.currentTime;
     try {
