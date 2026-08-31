@@ -1389,7 +1389,7 @@ export function buildStory(data, globe, getUI = () => null) {
       }],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.17,
+      chapter: 'IV', phase: 'city', seconds: 5.54,
       spot: '#tab-whatif',
       text: 'Change something and it solves again. Cool roofs, trees, a coating.',
       act: ({ ui }) => {
@@ -1419,7 +1419,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 6.04,
+      chapter: 'IV', phase: 'city', seconds: 6.14,
       /* These figures come off the panel this beat opens, not out of
        * portfolio.json. See Portfolio.programme(): the stored allocation and the
        * panel's own solver disagree by design, and quoting the first over a
@@ -1456,7 +1456,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 5.62,
+      chapter: 'IV', phase: 'city', seconds: 5.54,
       get text() { return (() => {
         const a = programme();
         return a
@@ -1515,7 +1515,7 @@ export function buildStory(data, globe, getUI = () => null) {
       ],
     },
     {
-      chapter: 'IV', phase: 'city', seconds: 3.63,
+      chapter: 'IV', phase: 'city', seconds: 3.40,
       /* Straight to the table. This beat used to stop at `.pf-phase` on the way
        * and it was never once lit across a whole playthrough — the act scrolled
        * to it and the cue moved on before the scroll arrived, so the first half
