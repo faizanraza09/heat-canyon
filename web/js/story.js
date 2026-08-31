@@ -1179,7 +1179,7 @@ export function buildStory(data, globe, getUI = () => null) {
       })(); },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 7.45,
+      chapter: 'III', phase: 'city', seconds: 7.11,
       get text() { return (() => {
         const rx = heroRx();
         if (!rx) return 'So it prescribes the glass instead.';
@@ -1209,8 +1209,43 @@ export function buildStory(data, globe, getUI = () => null) {
       },
     },
     {
-      chapter: 'III', phase: 'city', seconds: 5.67,
-      text: 'It prices the job too. That’s one wall, on one building, on one street.',
+      chapter: 'III', phase: 'city', seconds: 7.03,
+      /* THE STOREY COUNT IS IN THIS LINE BECAUSE THE NUMBER BESIDE IT IS SEVEN
+       * FIGURES.
+       *
+       * "One wall" is not loose wording, it is this film's unit of account:
+       * chapter II establishes "twenty-nine thousand four hundred, each solved
+       * on its own" and chapter IV opens on "every wall in Midtown", so the
+       * phrase has to survive. What did not survive contact with a reader is
+       * the pairing. The beat before this one gives the scope as a RANGE —
+       * "floors five to thirty-five, that face only" — and this beat compressed
+       * it back to a single object at the exact moment the capital cost lands
+       * on screen. A viewer hearing "one wall" and reading $2.3M-$7.8M
+       * concludes the costing is broken, and the first person to look at this
+       * screen did.
+       *
+       * The wall is 4,591 m2 of glass over thirty-one storeys. So the range
+       * becomes a magnitude here, which is the one thing that makes the figure
+       * legible, and the wall/building/street triple carries the hand-off into
+       * "now scale it up" unchanged.
+       *
+       * Derived, not spelled into the string, for the reason the floors beat
+       * above derives its own: a hard-coded thirty-one is wrong the first time
+       * the prescription's storey range moves, and it would be wrong quietly.
+       * Digits in `text` and words in `say`, which is the convention every
+       * other counted beat in this script follows. */
+      get text() { return (() => {
+        const rx = heroRx();
+        if (!rx) return 'It prices the job too. One wall, on one building, on one street.';
+        return `It prices the job too. One wall, `
+          + `${rx.floors[1] - rx.floors[0] + 1} storeys, on one building, on one street.`;
+      })(); },
+      get say() { return (() => {
+        const rx = heroRx();
+        if (!rx) return 'It prices the job too. One wall, on one building, on one street.';
+        return `It prices the job too. One wall, `
+          + `${words(rx.floors[1] - rx.floors[0] + 1)} storeys, on one building, on one street.`;
+      })(); },
       // Section five is the one that says what the whole document rests on, and
       // it is the reason the film can print a dollar figure at all. The brief
       // closes on the next beat, which is where the chapter does.
@@ -1263,7 +1298,7 @@ export function buildStory(data, globe, getUI = () => null) {
      * are all seen working rather than described.
      */
     {
-      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 4.99,
+      chapter: 'IV', title: 'All of them', phase: 'city', seconds: 4.76,
       text: `Now scale it up. Every wall in ${place} has had the same treatment.`,
       act: ({ ui, scene }) => {
         ui.closeBrief();

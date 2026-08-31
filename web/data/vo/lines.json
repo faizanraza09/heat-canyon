@@ -159,6 +159,14 @@
   "made": "2026-08-30",
   "seconds": 8.333
  },
+ "153772d6dc474f45032b": {
+  "text": "So it prescribes the glass instead.",
+  "chars": 35,
+  "seconds": 2.299,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-31"
+ },
  "164644632bf100f1fc79": {
   "text": "Every building on the list is there for a reason.",
   "chars": 49,
@@ -166,6 +174,14 @@
   "voice_id": "pNInz6obpgDQGcFmaJgB",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
+ },
+ "164844a4036ca4e2d427": {
+  "text": "Now scale it up. Every wall in Midtown has had the same treatment.",
+  "chars": 66,
+  "seconds": 4.206,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-31"
  },
  "1648e4743a4f285c3a24": {
   "text": "The north-west face catches the late sun. Floor fifteen hits fifty-six.",
@@ -823,6 +839,14 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "6012965d3c39b55c620f": {
+  "text": "So it recommends glass. Low solar-gain units, floors five to thirty-five, that face only.",
+  "chars": 89,
+  "seconds": 6.557,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-31"
+ },
  "605e46e57000a0e12f2f": {
   "text": "This is one year over Midtown Manhattan. Eight thousand seven hundred and sixty hours. Five days over thirty-five degrees. Four nights that never dropped below twenty-six.",
   "chars": 171,
@@ -1062,6 +1086,14 @@
   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
+ },
+ "82d6464ea3b02d713eb7": {
+  "text": "It prices the job too. One wall, thirty-one storeys, on one building, on one street.",
+  "chars": 84,
+  "seconds": 6.478,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-31"
  },
  "82ed3fd24805b05c1e1e": {
   "text": "So we measured a year of it over Midtown. Eight thousand seven hundred and sixty hours.",
@@ -1559,6 +1591,14 @@
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
  },
+ "c72413753c03972f36a2": {
+  "text": "It prices the job too. One wall, on one building, on one street.",
+  "chars": 64,
+  "seconds": 5.277,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-31"
+ },
  "c780e8f4f42a66a2f259": {
   "text": "It prices the job too. That's one wall, on one building, on one street.",
   "chars": 71,
@@ -1910,6 +1950,14 @@
   "voice_id": "pNInz6obpgDQGcFmaJgB",
   "model_id": "eleven_multilingual_v2",
   "made": "2026-08-30"
+ },
+ "fdccdf9cc402eb628078": {
+  "text": "Now scale it up. Every wall in Midtown has had the same treatment.",
+  "chars": 66,
+  "seconds": 4.101,
+  "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+  "model_id": "eleven_multilingual_v2",
+  "made": "2026-08-31"
  },
  "fe003de34363ba293711": {
   "text": "Eight ways to read it. Surface temperature, sun and shade, hours above thirty-five, where to act first.",
