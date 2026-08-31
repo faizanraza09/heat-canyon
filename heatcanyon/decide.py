@@ -668,11 +668,14 @@ def _rederive_fabric_effects(prescriptions, loads) -> int:
 
         d_kwh = [0.0, 0.0]
         d_heat = [0.0, 0.0]
+        d_ph = 0.0
+        d_t_in = 0.0
         for fl in getattr(loads, "floors", None) or []:
             if not (lo_f <= int(getattr(fl, "floor", 0)) <= hi_f):
                 continue
             drive = max(1.0, float(getattr(fl, "t_surface_peak_c", 0.0)) - setpoint)
             pen = max(0.0, d_facade / drive) if d_facade > 0.0 else 0.0
+            watts_here = 0.0
             for fa in getattr(fl, "faces", None) or []:
                 # `faces` is ("all",) on this family — the trap branch names no
                 # single elevation, because longwave arrives from everywhere.
@@ -688,6 +691,27 @@ def _rederive_fabric_effects(prescriptions, loads) -> int:
                 for i in (0, 1):
                     d_kwh[i] += d["kwh"][i]
                     d_heat[i] += d["heating_kwh"][i]
+                # Day-mean conduction removed from THIS room, for the exposure
+                # chain. `cond_kwh` is a cooling-season energy, so the day-mean
+                # watts behind it are that over the season's hours. Low corner,
+                # matching the solar path and `_exceedance_hours`.
+                if float(getattr(fa, "cond_kwh", (0.0, 0.0))[0]) > 0.0:
+                    mean_w = (float(fa.cond_kwh[0]) * 1000.0
+                              / LD.COOLING_SEASON_HOURS)
+                    frac = (d["kwh"][0] / fa.cond_kwh[0]
+                            if fa.cond_kwh[0] > 0.0 else 0.0)
+                    watts_here += max(0.0, mean_w * max(0.0, min(1.0, frac)))
+
+            # EXPOSURE IS PER FLOOR. Insulating a wall lowers the conduction INTO
+            # the room; that it also warms the face outside does not reverse the
+            # sign of what a person indoors feels, and the old scaling said it did.
+            if watts_here > 0.0:
+                try:
+                    x = LD.exposure_delta(fl, watts_removed=watts_here)
+                    d_ph += x["d_person_hours"]
+                    d_t_in = max(d_t_in, x["d_t_indoor_k"])
+                except Exception:  # noqa: BLE001 — one floor, not the schedule
+                    pass
 
         if not any(d_kwh) and not any(d_heat):
             continue
@@ -697,6 +721,12 @@ def _rederive_fabric_effects(prescriptions, loads) -> int:
         # rather than clamped away.
         eff.d_annual_kwh = (-abs(max(d_kwh)), -abs(min(d_kwh)))
         eff.d_heating_kwh = (abs(min(d_heat)), abs(max(d_heat)))
+        # Negative is a benefit, and this one used to come back POSITIVE for the
+        # whole family: the old scaling read the hotter outer face as more indoor
+        # exposure, so 28 of 29 insulation measures claimed to make heat exposure
+        # worse and could never be bought at any budget.
+        if d_ph > 0.0:
+            eff.d_person_hours = -abs(round(d_ph, 1))
         eff.source = "re-solved facade delta; energy from the fabric lever"
 
         note = getattr(p, "effect_note", "") or ""
@@ -716,6 +746,14 @@ def _rederive_fabric_effects(prescriptions, loads) -> int:
             f"losses, which is why this measure is prescribed on masonry. The "
             f"carbon of the heat it saves is not netted — no fuel-combustion "
             f"coefficient is in the constants table."
+            + (f" Person-hours run through the same indoor-temperature chain the "
+               f"solar measures use, {d_t_in:.2f} K off the free-running indoor "
+               f"mean on the worst treated storey: lowering the conduction into "
+               f"the room lowers what a person in it feels, and the hotter face "
+               f"outside does not reverse that."
+               if d_ph > 0.0 else
+               " Person-hours are unchanged: the treated storeys sit far enough "
+               "from the 28 °C threshold that the exposure slope is zero there.")
         )
         p.confidence = "assumed"
         n += 1
@@ -845,9 +883,14 @@ def _rederive_solar_effects(prescriptions, loads) -> int:
             # this is called once per storey with all of its treated faces —
             # summing a per-face figure would count the same room repeatedly.
             if treated_here and f_sol_here > 0.0:
+                # Day-mean transmitted gain removed, at the LOW corner — the same
+                # corner `_exceedance_hours` and `severity_of` score against, so a
+                # measure's exposure benefit is the one the assumption table
+                # supports even at its most favourable reading.
+                watts = f_sol_here * sum(
+                    max(0.0, fa.solar_gain_mean_w[0]) for fa in treated_here)
                 try:
-                    x = LD.exposure_delta(fl, treated_here,
-                                          solar_fraction=f_sol_here)
+                    x = LD.exposure_delta(fl, watts_removed=watts)
                     d_ph += x["d_person_hours"]
                     d_t_in = max(d_t_in, x["d_t_indoor_k"])
                 except Exception:  # noqa: BLE001 — one floor, not the schedule

@@ -111,10 +111,40 @@ class Constant:
 #     LL97 page and the DOB LL97 page the same day.
 #
 # The capex bands are the weak half of this table and are labelled as such. None
-# of them came from a primary cost database; RSMeans and the NYSERDA programme
-# cost data are the two sources that would settle them, and neither is openly
-# accessible. Everything below them is trade-press or contractor pricing, mostly
-# national rather than New York, which understates New York labour.
+# of them came from a primary cost database. Everything below them is trade-press
+# or contractor pricing, mostly national rather than New York, which understates
+# New York labour.
+#
+# WHAT WAS SEARCHED, ON 2026-08-31, SO THE NEXT PERSON DOES NOT REPEAT IT
+#
+# The two sources that would settle these are RSMeans with the New York City cost
+# index, and the NYSERDA programme cost data. Neither is openly accessible. The
+# openly accessible candidates were checked and none carries commercial retrofit
+# unit costs:
+#
+#   * NREL ComStock, the DOE commercial building stock model. Has a dedicated
+#     measure document for window replacement, window film, exterior wall
+#     insulation, roof insulation and secondary windows -- and NO COST DATA in
+#     any of them. Each says the outputs support an economic analysis "if cost
+#     information ... is available", and the window-film document goes further:
+#     "it is unclear what exact format the cost information will be". ComStock
+#     is an energy model, not a cost model. It did settle two PERFORMANCE
+#     constants, which is why it is cited on `u_wall_retrofit_w_m2k` and
+#     `u_glass_retrofit_w_m2k`.
+#   * New York State Technical Reference Manual v11. A SAVINGS manual: it gives
+#     kWh, kW and therms per 100 square feet by facility type and city, plus
+#     coincidence factors, and its only cost content is methodology for how a
+#     programme administrator should treat incremental cost. No unit costs. It
+#     did independently corroborate the heating penalty; see
+#     `heating_usd_kwh_thermal`.
+#   * NREL's National Residential Efficiency Measures Database gives window
+#     replacement at 46.00 USD/sf, 495 USD/m2, broken out as labour plus material
+#     -- but RESIDENTIAL, and for a punched window rather than a curtain-wall
+#     unit. It brackets the bottom of `capex_usd_m2_glazing_retrofit` and says
+#     nothing about the top, which is where curtain-wall work lives.
+#
+# So these bands stay unverified on purpose, and the honest summary is that free
+# sources can settle what a retrofit ACHIEVES and cannot settle what it COSTS.
 
 
 CONSTANTS: dict[str, Constant] = {
@@ -272,10 +302,33 @@ CONSTANTS: dict[str, Constant] = {
     "heating_usd_kwh_thermal": Constant(
         value=(0.040, 0.160),
         unit="USD per kWh of DELIVERED HEAT",
-        source="No citable figure found; reasoned from two published fuel prices",
+        source=(
+            "No citable PRICE found; reasoned from two published fuel prices. The "
+            "GAS BASIS is confirmed: New York State Technical Reference Manual "
+            "v11 (Joint Utilities, filed 2023-10-06) prices the window-film "
+            "measure's heating penalty in THERMS and restricts the measure to "
+            "buildings with gas heat, so gas is the fuel a New York solar-control "
+            "penalty is actually charged against"
+        ),
         as_of="2026-08-31",
         verified=False,
         note=(
+            "THAT THIS PENALTY EXISTS AND IS LARGE IS NOW EXTERNALLY CONFIRMED; "
+            "only the price per kilowatt-hour is not.\n\n"
+            "The New York State TRM's Window-Film measure is applicable, in its "
+            "own words, to 'buildings with electric AC and gas heat only', 'due "
+            "to negative impacts on space heating'. The State's own regulator "
+            "restricts the measure because of the effect this constant prices. "
+            "Its worked example -- a small office in New York City, film on "
+            "single-pane clear glass -- gives +592 kWh of electricity and MINUS "
+            "58.3 therms per 100 square feet of glazing per year. That is 184 kWh "
+            "of extra heat per square metre of glass against 64 kWh of "
+            "electricity saved, so in thermal terms the penalty is 0.72 to 1.15 "
+            "times the cooling benefit across a 2.5-4.0 coefficient of "
+            "performance. This project's own model, by a completely independent "
+            "route, gives 0.72 to 1.09 for the same ratio. Two methods agreeing "
+            "to that degree is the strongest corroboration anything in this table "
+            "has, and it also brackets `cooling_cop`.\n\n"
             "TODO: verify against the Con Edison steam tariff (PSC No. 4 Steam) "
             "for the rate class, and against the firm gas rate for the "
             "building's own service classification. THE DENOMINATOR IS DELIVERED "
@@ -819,19 +872,34 @@ CONSTANTS: dict[str, Constant] = {
         value=(0.25, 0.45),
         unit="W/m2K, opaque build-up",
         source=(
-            "Trade press and product data: 100-150 mm of external mineral wool or "
-            "EPS over solid masonry quoted at 0.20-0.35 W/m2K, rising toward 0.45 "
-            "where the insulation is thinner or the substrate is uninsulated "
-            "cavity"
+            "ASHRAE, Achieving Zero Energy: Advanced Energy Design Guide for Small "
+            "to Medium Office Buildings, overall assembly target for climate zone "
+            "4, which is New York City: R-16 hr-ft2-F/Btu, i.e. 0.355 W/m2K. Read "
+            "on 2026-08-31 off NREL ComStock's exterior-wall-insulation measure "
+            "documentation, Table 2, at "
+            "github.com/NatLabRockies/ComStock.github.io "
+            "docs/upgrade_measures/env_ext_wall_insulation.md"
         ),
         as_of="2026-08-31",
         verified=False,
         note=(
-            "TODO: verify against a NYSERDA or NYC Accelerator retrofit case "
-            "study with a stated build-up, and against what the landmarks "
-            "process will actually permit on a street-facing elevation -- which "
-            "is the binding constraint on this measure in this AOI far more often "
-            "than the physics is. Compare against `loads.py`'s assemblies, which "
+            "THE ANCHOR IS SOURCED AND THE WIDTH IS NOT, WHICH IS WHY THIS IS "
+            "STILL FALSE. ASHRAE's zone-4 target of R-16 is 0.355 W/m2K and lands "
+            "almost exactly at this band's midpoint, from a DOE national-lab "
+            "publication that is openly readable -- so the centre of this band is "
+            "no longer a guess. The width still is: a real build-up varies with "
+            "substrate, thickness and thermal bridging, and 0.25 to 0.45 is a "
+            "judgment about that spread rather than a figure read off anything. "
+            "ComStock's own measure adds XPS at R-5 per inch to reach the target, "
+            "so zone 4 needs of the order of an inch over an already-insulated "
+            "wall and appreciably more over uninsulated masonry.\n\n"
+            "TODO: verify the BAND, not the anchor -- a set of real New York "
+            "build-ups with stated substrates and thicknesses would replace a "
+            "judgment about spread with a measured one. And note what nothing "
+            "here models: the binding constraint on this measure in this AOI is "
+            "not the physics but whether the landmarks process will permit a "
+            "build-up on a street-facing elevation at all. "
+            "Compare against `loads.py`'s assemblies, which "
             "carry 1.0-2.2 W/m2K for the opaque wall, so this is a three- to "
             "eight-fold improvement and the largest single fabric change in the "
             "catalogue. It applies to the SPANDREL ONLY: exterior insulation "
@@ -846,17 +914,32 @@ CONSTANTS: dict[str, Constant] = {
         value=(1.3, 2.0),
         unit="W/m2K, glass element",
         source=(
-            "Trade press and manufacturer data: double-glazed low-e argon units "
-            "quoted at 1.1-1.4 W/m2K centre-of-glass, rising toward 2.0 for the "
-            "whole glazed element once the spacer and sight line are included"
+            "ASHRAE Advanced Energy Design Guide target assembly U-factor for "
+            "climate zone 4A, which is New York City: 0.34 Btu/h-ft2-F, i.e. 1.93 "
+            "W/m2K. Read on 2026-08-31 off NREL ComStock's window-replacement "
+            "measure documentation, Table 6, at "
+            "github.com/NatLabRockies/ComStock.github.io "
+            "docs/upgrade_measures/env_ext_window_replacement.md"
         ),
         as_of="2026-08-31",
         verified=False,
         note=(
-            "TODO: verify against NFRC-rated whole-window U-factors for a "
-            "curtain-wall unit, not centre-of-glass. Compare against the "
-            "assemblies in `loads.py`, which carry 3.0-5.9 W/m2K for an early "
-            "aluminium curtain wall — so this is a two- to four-fold "
+            "SAME STANDING AS THE WALL BAND ABOVE: the anchor is sourced, the "
+            "width is judgment. ASHRAE's zone-4A target is 1.93 W/m2K and sits "
+            "just inside the top of this band -- and it is an ASSEMBLY U-factor, "
+            "frame included, where this constant is the GLASS ELEMENT to match "
+            "the assembly's own `u_glass`. On an aluminium-framed commercial unit "
+            "the frame is the weak point, so the glass behind a 1.93 assembly is "
+            "better than 1.93, which is why the band reaches down to 1.3 rather "
+            "than sitting on the published figure.\n\n"
+            "TODO: verify the band against NFRC-rated whole-window U-factors "
+            "for a curtain-wall unit, which would pin the frame contribution "
+            "this band currently spans by judgment. The same ComStock table gives "
+            "the zone-4A stock BASELINE at 0.81 Btu/h-ft2-F, 4.60 W/m2K, which "
+            "falls inside `loads.py`'s 3.0-5.9 for an early aluminium curtain "
+            "wall and is the only independent check that table has had. "
+            "Compare against the assemblies in `loads.py`, which carry 3.0-5.9 "
+            "W/m2K for an early aluminium curtain wall — so this is a two- to four-fold "
             "improvement, and the conduction saving it implies is roughly half "
             "the total benefit of a glazing swap on a high window-to-wall "
             "elevation. The band is the GLASS ELEMENT to match the assembly's "

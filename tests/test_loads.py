@@ -537,3 +537,54 @@ def test_a_solar_measure_and_a_fabric_measure_never_share_a_winter_field():
     assert fab["heating_kwh"][1] > 0.0
     assert "winter_kwh" not in fab
 
+
+class _Floor:
+    """The subset of `FloorLoad` that `exposure_delta` reads."""
+
+    def __init__(self, **kw):
+        self.t_indoor_k_per_w = 1.0 / 4_000.0     # 4 kW/K denominator
+        self.hours_over_per_kelvin = 220.0
+        self.hours_indoor_over_threshold = 1_200.0
+        self.person_hours = 36_000.0
+        self.__dict__.update(kw)
+
+
+def test_exposure_is_a_benefit_for_any_gain_removed_whatever_the_mechanism():
+    """Watts off the room is fewer hours over the threshold. Always.
+
+    This function used to take a shading fraction and a face list, which meant
+    fabric measures could not reach it and were left on the outdoor-delta
+    scaling. That scaling reads an insulated wall's HOTTER OUTER FACE as more
+    indoor exposure, so 28 of the 29 wall-insulation measures in the build
+    reported that insulating a wall makes the people behind it hotter, and a
+    candidate with negative person-hours-avoided sorts to the end of the cost
+    curve at infinite cost and can never be bought at any budget.
+    """
+    fl = _Floor()
+    d = L.exposure_delta(fl, watts_removed=8_000.0)
+    assert d["d_t_indoor_k"] == pytest.approx(2.0)          # 8 kW / 4 kW/K
+    assert d["d_hours"] > 0.0
+    assert d["d_person_hours"] > 0.0
+
+
+def test_exposure_cannot_remove_more_hours_than_the_floor_has():
+    """A local linearisation, clamped. Honest for a fraction of a kelvin and not
+    for a whole-building retrofit, so the clamp is the thing that keeps it from
+    reporting a floor cooler than the weather."""
+    fl = _Floor()
+    huge = L.exposure_delta(fl, watts_removed=10_000_000.0)
+    assert huge["d_hours"] <= fl.hours_indoor_over_threshold
+    assert huge["d_person_hours"] <= fl.person_hours + 1e-6
+
+
+def test_exposure_is_silent_where_the_threshold_is_out_of_reach():
+    """A floor far above or below 28 degC has almost no hours within a kelvin of
+    it, so the slope is near zero and a measure is credited with nothing. That is
+    the whole reason the slope is measured off the real annual series instead of
+    assumed: a constant coefficient would flatter exactly the worst floors."""
+    flat = _Floor(hours_over_per_kelvin=0.0)
+    d = L.exposure_delta(flat, watts_removed=8_000.0)
+    assert d == {"d_t_indoor_k": 0.0, "d_hours": 0.0, "d_person_hours": 0.0}
+    none_at_all = _Floor(hours_indoor_over_threshold=0.0)
+    assert L.exposure_delta(none_at_all, watts_removed=8_000.0)["d_person_hours"] == 0.0
+

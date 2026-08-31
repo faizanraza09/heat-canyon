@@ -1265,9 +1265,8 @@ def fabric_retrofit_delta(
 
 def exposure_delta(
     floor: FloorLoad,
-    treated: Sequence[FaceLoad],
     *,
-    solar_fraction: float,
+    watts_removed: float,
 ) -> dict[str, float]:
     """How many person-hours of indoor heat a solar-control measure removes.
 
@@ -1281,13 +1280,29 @@ def exposure_delta(
 
     THE CHAIN, EACH LINK MEASURED RATHER THAN ASSUMED
 
-    A shading fraction removes ``solar_fraction`` of the treated faces' DAY-MEAN
-    transmitted gain. ``t_indoor_k_per_w`` turns those watts into kelvin off the
-    free-running indoor mean — it is ``1 / den_mean`` from the same balance that
-    produced ``t_indoor_free_c``, not a rule of thumb. ``hours_over_per_kelvin``
-    turns kelvin into hours using the density of the REAL annual air series at
-    the threshold. Person-hours is then hours times the people on the plate,
-    which is what ``person_hours`` already is.
+    ``watts_removed`` is day-mean watts of gain the measure takes off this floor,
+    and the CALLER computes it, because only the caller knows the mechanism: a
+    shading fraction of the transmitted beam for a solar device, a conduction
+    reduction for a fabric one. What happens after that is identical for both and
+    is the reason this function exists once rather than twice.
+    ``t_indoor_k_per_w`` turns those watts into kelvin off the free-running
+    indoor mean — it is ``1 / den_mean`` from the same balance that produced
+    ``t_indoor_free_c``, not a rule of thumb. ``hours_over_per_kelvin`` turns
+    kelvin into hours using the density of the REAL annual air series at the
+    threshold. Person-hours is then hours times the people on the plate, which is
+    what ``person_hours`` already is.
+
+    IT TOOK A SHADING FRACTION AND A FACE LIST BEFORE, AND THAT WAS TOO NARROW.
+
+    Fabric measures were left on the old outdoor-delta scaling, which for them
+    reads a POSITIVE facade delta — an insulated wall genuinely runs hotter
+    outside — and therefore reported that insulation makes indoor heat exposure
+    WORSE. 28 of the 29 `wall_insulation` measures in the build said so. A
+    candidate whose person-hours-avoided is negative sorts to the end of the cost
+    curve at infinite cost, so the measure could never enter a programme at any
+    budget. Insulating a wall lowers the conduction INTO the room; that it also
+    warms the face outside does not reverse the sign of what a person indoors
+    feels.
 
     WHAT THIS REPLACES
 
@@ -1314,16 +1329,11 @@ def exposure_delta(
     h_per_k = float(getattr(floor, "hours_over_per_kelvin", 0.0) or 0.0)
     hours_now = float(getattr(floor, "hours_indoor_over_threshold", 0.0) or 0.0)
     ph_now = float(getattr(floor, "person_hours", 0.0) or 0.0)
-    f = max(0.0, min(1.0, float(solar_fraction)))
-    if k_per_w <= 0.0 or h_per_k <= 0.0 or f <= 0.0 or hours_now <= 0.0:
+    watts = max(0.0, float(watts_removed))
+    if k_per_w <= 0.0 or h_per_k <= 0.0 or watts <= 0.0 or hours_now <= 0.0:
         return {"d_t_indoor_k": 0.0, "d_hours": 0.0, "d_person_hours": 0.0}
 
-    # The LOW corner of the gain, matching `_exceedance_hours` and `severity_of`,
-    # which both score against the reading the assumption table supports even at
-    # its most favourable. Using the high corner here would make every measure's
-    # exposure benefit the most flattering number available.
-    watts = sum(max(0.0, fa.solar_gain_mean_w[0]) for fa in treated)
-    d_t = watts * f * k_per_w
+    d_t = watts * k_per_w
     d_hours = min(hours_now, d_t * h_per_k)
     per_person = (ph_now / hours_now) if hours_now > 0.0 else 0.0
     return {"d_t_indoor_k": d_t, "d_hours": d_hours,
