@@ -365,6 +365,7 @@ def prescriptions_for(d, bin_: str, *, measures: list[str] | None = None,
     # Before pricing, not after: `_price_all` reads `effect.d_annual_kwh`, so a
     # re-derivation that ran afterwards would price the figure it replaced.
     _rederive_solar_effects(pres, bl)
+    _rederive_fabric_effects(pres, bl)
     priced = _price_all(pres, bl)
     return {
         "bin": str(bin_),
@@ -468,6 +469,12 @@ def floors_payload(bl) -> dict:
         "peak_hour_edt": int(bl.peak_hour_edt),
         "worst_floor": int(bl.worst_floor),
         "person_hours": round(float(bl.person_hours)),
+        # Counted from this building's own hourly air series against the two ends
+        # of the balance-point band, so it is (fewer, more). On the wire because
+        # a fabric measure's whole heating-season case rests on it, and a reader
+        # who cannot see the degree hours cannot check the saving.
+        "heating_degree_hours": _rng(
+            getattr(bl, "heating_degree_hours", (0.0, 0.0)) or (0.0, 0.0), 0),
         "basis": bl.basis,
         "notes": list(bl.notes or []),
         "floors": [floor(fl) for fl in bl.floors],
@@ -600,6 +607,119 @@ _SOLAR_LEVER: dict[str, dict] = {
     "fixed_shading_vertical":   {"where": "outside", "winter": 1.00},
     "fixed_shading_eggcrate":   {"where": "outside", "winter": 1.00},
 }
+
+
+#: Measures whose lever is the OPAQUE FABRIC. The mirror of ``_SOLAR_LEVER``.
+#:
+#: These pay in BOTH seasons and were being credited with neither. Their summer
+#: benefit was scaled from the re-solved facade delta, which for this family
+#: points the wrong way — lowering a wall's admittance makes its outer face run
+#: HOTTER, which the canyon model correctly reports as a positive delta, and the
+#: scaling then read that as a cooling penalty. Their winter benefit, which is
+#: the larger of the two and the actual reason anyone insulates a wall, was not
+#: computed at all. So all 29 `wall_insulation` measures in the build came out
+#: as a pure cost, under a `winter_cost` field that reads "this is the one
+#: measure in the catalogue that pays in both seasons".
+#:
+#: `opposite_facade_albedo` is deliberately absent. Its lever is the albedo of a
+#: wall the owner does not own, its benefit is longwave arriving across the
+#: street, and the re-solved facade delta is exactly the right instrument for
+#: that — it is the one fabric-family measure the old path was already suited to.
+_FABRIC_LEVER: dict[str, dict] = {
+    "wall_insulation": {"u_from": "u_wall_retrofit_w_m2k"},
+}
+
+
+def _rederive_fabric_effects(prescriptions, loads) -> int:
+    """Re-derive a fabric measure's effect from its U-value, in both seasons.
+
+    Summer: the opaque conduction term with the new build-up, INCLUDING the
+    penalty from the hotter outer face, because both effects are real and the
+    penalty is the whole reason this measure looked like a loss.
+
+    Winter: the textbook fabric calculation against this building's own heating
+    degree hours. That figure is a SAVING and reaches `price` as
+    `heating_kwh_saved`, which is a different parameter from the solar family's
+    `winter_kwh_thermal` penalty — same tariff, opposite sign, and kept apart so
+    that no arithmetic can ever add them.
+
+    See `loads.fabric_retrofit_delta`, which holds the arithmetic next to the
+    expression it differentiates.
+    """
+    asm = getattr(loads, "assembly", None)
+    if asm is None:
+        return 0
+    hdh = tuple(getattr(loads, "heating_degree_hours", (0.0, 0.0)) or (0.0, 0.0))
+    setpoint = float(getattr(getattr(loads, "occupancy", None), "setpoint_c", 24.0) or 24.0)
+    n = 0
+    for p in prescriptions:
+        lever = _FABRIC_LEVER.get(getattr(p, "key", ""))
+        eff = getattr(p, "effect", None)
+        if lever is None or eff is None:
+            continue
+        u_new = EC.CONSTANTS[lever["u_from"]].pair
+        faces = set(getattr(p, "faces", None) or [])
+        lo_f, hi_f = getattr(p, "floors", (0, 0))
+        # The facade delta for this family is POSITIVE — an insulated wall runs
+        # hotter outside — so it enters as a penalty on the driving difference
+        # rather than as a benefit. Signed use of the same number the shading
+        # path uses, which is why the sign is read here rather than absolute.
+        d_facade = float(getattr(eff, "d_facade_peak_k", 0.0) or 0.0)
+
+        d_kwh = [0.0, 0.0]
+        d_heat = [0.0, 0.0]
+        for fl in getattr(loads, "floors", None) or []:
+            if not (lo_f <= int(getattr(fl, "floor", 0)) <= hi_f):
+                continue
+            drive = max(1.0, float(getattr(fl, "t_surface_peak_c", 0.0)) - setpoint)
+            pen = max(0.0, d_facade / drive) if d_facade > 0.0 else 0.0
+            for fa in getattr(fl, "faces", None) or []:
+                # `faces` is ("all",) on this family — the trap branch names no
+                # single elevation, because longwave arrives from everywhere.
+                if faces and "all" not in faces and \
+                        getattr(fa, "compass", None) not in faces:
+                    continue
+                try:
+                    d = LD.fabric_retrofit_delta(
+                        fa, asm, u_wall_new=u_new,
+                        heating_degree_hours=hdh, cond_frac_penalty=pen)
+                except Exception:  # noqa: BLE001 — one face, not the schedule
+                    continue
+                for i in (0, 1):
+                    d_kwh[i] += d["kwh"][i]
+                    d_heat[i] += d["heating_kwh"][i]
+
+        if not any(d_kwh) and not any(d_heat):
+            continue
+
+        # Deltas: a saving is negative. The summer term can legitimately be zero
+        # where the hotter face cancels the better U-value, and that is reported
+        # rather than clamped away.
+        eff.d_annual_kwh = (-abs(max(d_kwh)), -abs(min(d_kwh)))
+        eff.d_heating_kwh = (abs(min(d_heat)), abs(max(d_heat)))
+        eff.source = "re-solved facade delta; energy from the fabric lever"
+
+        note = getattr(p, "effect_note", "") or ""
+        p.effect_note = (note + " " if note else "") + (
+            f"Energy is the opaque conduction term re-evaluated with the new "
+            f"build-up's U-value, not scaled from the facade temperature delta — "
+            f"which for this measure points the WRONG WAY: insulation lowers the "
+            f"wall's admittance, so its outer face sheds less into its own mass "
+            f"and runs {d_facade:+.2f} K, and scaling by that read a fabric "
+            f"improvement as a cooling penalty. Both effects are carried here, "
+            f"and the U-value dominates. The heating-season saving is the fabric "
+            f"calculation against this building's own "
+            f"{hdh[0]:,.0f}-{hdh[1]:,.0f} heating degree hours, counted from its "
+            f"hourly air series against a 12-18 °C balance point rather than a "
+            f"published normal. It covers the SPANDREL only: exterior insulation "
+            f"stops at the sight line, so the glass keeps its U-value and its "
+            f"losses, which is why this measure is prescribed on masonry. The "
+            f"carbon of the heat it saves is not netted — no fuel-combustion "
+            f"coefficient is in the constants table."
+        )
+        p.confidence = "assumed"
+        n += 1
+    return n
 
 
 def _rederive_solar_effects(prescriptions, loads) -> int:
@@ -837,6 +957,29 @@ def _winter_heat(p) -> tuple[float, float] | None:
     return (abs(lo), abs(hi)) if (lo or hi) else None
 
 
+def _heating_saved(p) -> tuple[float, float] | None:
+    """The heating-season saving to price, or None where there is none.
+
+    Only where ``_rederive_fabric_effects`` computed it, on the same principle as
+    ``_winter_heat``: a figure that reached the effect by a ratio does not get a
+    dollar sign put on it. Nothing else in the catalogue sets this field, so
+    every other family is priced on its cooling side alone and says so.
+    """
+    eff = getattr(p, "effect", None)
+    if eff is None:
+        return None
+    if "fabric lever" not in str(getattr(eff, "source", "") or ""):
+        return None
+    h = getattr(eff, "d_heating_kwh", None)
+    if not h:
+        return None
+    try:
+        lo, hi = float(h[0]), float(h[1])
+    except Exception:  # noqa: BLE001
+        return None
+    return (abs(lo), abs(hi)) if (lo or hi) else None
+
+
 def _price_all(prescriptions, loads) -> int:
     """Put a price on every measure that has an effect. Returns how many.
 
@@ -904,6 +1047,8 @@ def _price_all(prescriptions, loads) -> int:
                 # not. A measure without one is priced on its summer side alone
                 # and `effect_note` already says the penalty is unquantified.
                 winter_kwh_thermal=_winter_heat(p),
+                # And its mirror: the fabric family's heating-season SAVING.
+                heating_kwh_saved=_heating_saved(p),
                 kwh_saved_yr=_as_saving(kwh),
                 kw_peak_saved=_as_saving(kw),
                 occupancy=loads.occupancy,

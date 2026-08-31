@@ -432,3 +432,108 @@ def test_the_free_running_estimate_does_not_use_the_infiltration_rate():
     assert a.peak_kw[1] > b.peak_kw[1]
     assert a.floors[0].t_indoor_free_c[0] == pytest.approx(
         b.floors[0].t_indoor_free_c[0], rel=1e-12)
+
+
+# ------------------------------------------- the two measure-lever derivatives
+#
+# `solar_control_delta`, `fabric_retrofit_delta` and `exposure_delta` are the
+# analytic derivatives of `_solve_corner`'s own expressions, and they live in
+# this module precisely so they cannot drift from it. These pin the arithmetic
+# against the textbook forms rather than against a previous run of the code.
+
+
+class _Face:
+    """The subset of `FaceLoad` the delta functions read."""
+
+    def __init__(self, **kw):
+        self.area_m2 = 400.0
+        self.glazed_m2 = 100.0            # window-to-wall 0.25, a masonry wall
+        self.cond_kwh = (5_000.0, 12_000.0)
+        self.cond_glazed_kwh = (2_000.0, 5_000.0)
+        self.solar_kwh = (8_000.0, 20_000.0)
+        self.solar_gain_w = (6_000.0, 15_000.0)
+        self.conduction_w = (1_000.0, 3_000.0)
+        self.conduction_coincident_w = (800.0, 2_400.0)
+        self.solar_gain_coincident_w = (5_000.0, 12_000.0)
+        self.solar_gain_mean_w = (3_000.0, 7_500.0)
+        self.winter_sun_share = 0.4
+        self.__dict__.update(kw)
+
+
+def _asm(**kw):
+    from dataclasses import replace
+    base = E.ASSEMBLIES[sorted(E.ASSEMBLIES)[0]]
+    return replace(base, **kw)
+
+
+def test_fabric_heating_saving_is_the_textbook_fabric_calculation():
+    """`A_opaque * (U_old - U_new) * heating_degree_hours`, and nothing else.
+
+    Checked against the formula written out by hand, because the whole
+    heating-season case for exterior insulation rests on it and it is the half of
+    that measure that did not exist until it was added.
+    """
+    asm = _asm(u_wall=(1.0, 2.0))
+    face = _Face()
+    hdh = (40_000.0, 60_000.0)
+    d = L.fabric_retrofit_delta(face, asm, u_wall_new=(0.25, 0.45),
+                                heating_degree_hours=hdh)
+    a_op = face.area_m2 - face.glazed_m2                      # 300 m2
+    # Crossed: the low corner pairs the assembly's low U with the new build-up's
+    # HIGH one, so the band cannot be narrowed at both ends.
+    want_lo = a_op * (1.0 - 0.45) * hdh[0] / 1000.0
+    want_hi = a_op * (2.0 - 0.25) * hdh[1] / 1000.0
+    assert d["heating_kwh"] == pytest.approx((want_lo, want_hi))
+    assert d["heating_kwh"][0] < d["heating_kwh"][1]
+
+
+def test_fabric_credits_only_the_spandrel_not_the_glass():
+    """Exterior insulation stops at the sight line.
+
+    A face that is entirely glass must get no heating saving at all, however good
+    the build-up: there is nowhere to put it. This is the reason the measure is
+    prescribed on masonry, and getting it wrong would credit a curtain wall with
+    insulating the nine tenths of its conductance that is window.
+    """
+    all_glass = _Face(glazed_m2=400.0, cond_glazed_kwh=(5_000.0, 12_000.0))
+    d = L.fabric_retrofit_delta(all_glass, _asm(u_wall=(1.0, 2.0)),
+                                u_wall_new=(0.25, 0.45),
+                                heating_degree_hours=(40_000.0, 60_000.0))
+    assert d["heating_kwh"] == pytest.approx((0.0, 0.0))
+    assert d["kwh"] == pytest.approx((0.0, 0.0))
+
+
+def test_fabric_summer_saving_carries_the_hotter_outer_face():
+    """Insulation lowers U AND raises the outer surface. Both, or neither.
+
+    The penalty term is why this measure read as a pure cooling cost for so long,
+    so a version that dropped it would look right and be the old bug again. The
+    U-value must still dominate.
+    """
+    asm = _asm(u_wall=(1.0, 2.0))
+    face = _Face()
+    kw = dict(u_wall_new=(0.25, 0.45), heating_degree_hours=(0.0, 0.0))
+    clean = L.fabric_retrofit_delta(face, asm, cond_frac_penalty=0.0, **kw)
+    hot = L.fabric_retrofit_delta(face, asm, cond_frac_penalty=0.10, **kw)
+    assert hot["kwh"][1] < clean["kwh"][1], "the hotter face must cost something"
+    assert hot["kwh"][0] > 0.0, "and must not swamp the U-value improvement"
+
+
+def test_a_solar_measure_and_a_fabric_measure_never_share_a_winter_field():
+    """One family is charged for January and the other is paid for it.
+
+    `d_winter_kwh` is a penalty and `d_heating_kwh` is a saving. They are two
+    fields rather than one signed one so that nothing can add them, and this
+    asserts the two functions each populate only their own.
+    """
+    asm = _asm(u_wall=(1.0, 2.0), shgc=(0.5, 0.8), u_glass=(3.0, 5.9))
+    face = _Face()
+    sol = L.solar_control_delta(face, asm, shgc_new=0.25,
+                                u_glass_new=(1.3, 2.0), winter_scale=1.0)
+    fab = L.fabric_retrofit_delta(face, asm, u_wall_new=(0.25, 0.45),
+                                  heating_degree_hours=(40_000.0, 60_000.0))
+    assert sol["winter_kwh"][1] > 0.0
+    assert "heating_kwh" not in sol
+    assert fab["heating_kwh"][1] > 0.0
+    assert "winter_kwh" not in fab
+

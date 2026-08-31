@@ -158,6 +158,20 @@ INDOOR_THRESHOLD_C = 28.0
 COOLING_SEASON_HOURS = 2928.0
 COOLING_SEASON_LABEL = "1 June - 30 September"
 
+#: Outdoor air temperature below which the heating plant actually has to run,
+#: degC, as a RANGE. Not the indoor setpoint: a building's own lights, people and
+#: equipment already cover the first several kelvin of the gap, so heating starts
+#: well below the temperature anyone wants to sit at. That offset is the balance
+#: point, it is what heating degree hours must be counted against, and counting
+#: them against the setpoint instead would roughly double them.
+#:
+#: The band spans the stock. A lightly occupied dwelling with small gains starts
+#: heating near 18 degC; a deep-plan office with high lighting and equipment
+#: loads does not call for heat until well below 15. ESTIMATE, and it is the
+#: single most sensitive assumption in a fabric measure's payback, because the
+#: degree-hour count is roughly linear in it.
+HEATING_BALANCE_POINT_C = (12.0, 18.0)
+
 #: Share of the year's incident shortwave on a vertical surface that arrives
 #: inside the cooling season. Carried as a range because it is strongly
 #: orientation-dependent — a south wall collects a large part of its annual total
@@ -399,6 +413,13 @@ class BuildingLoads:
     person_hours: float
     basis: str
     notes: list[str] = field(default_factory=list)
+    #: Heating degree hours over the year, counted from THIS building's own
+    #: hourly air series against the two ends of ``HEATING_BALANCE_POINT_C``, so
+    #: the pair is (cool balance point, warm balance point) and therefore
+    #: (fewer, more). Zero where no annual air series was supplied, and the
+    #: fabric measures then go unpriced on their heating side rather than being
+    #: given an invented one.
+    heating_degree_hours: tuple[float, float] = (0.0, 0.0)
 
 
 # ----------------------------------------------------------- floor to band
@@ -777,6 +798,24 @@ def building_floors(
     worst = max(out_floors,
                 key=lambda fl: (fl.severity, fl.t_indoor_free_c[0], fl.peak_w[1]))
 
+    # Heating degree hours, from the real series rather than a published normal.
+    # The driving temperature for a wall's winter loss is its own SURFACE, and in
+    # January a facade with little sun on it sits close to air temperature, so
+    # air is the standard simplification and it is stated as one. It biases the
+    # saving DOWN on a sunlit elevation, where the surface runs above air even in
+    # winter, which is the conservative direction for a measure's benefit.
+    hdh = (0.0, 0.0)
+    if t_air_year is not None and t_air_year.size:
+        hdh = tuple(
+            float(np.maximum(0.0, base - t_air_year).sum())
+            for base in HEATING_BALANCE_POINT_C
+        )
+    else:
+        notes.append(
+            "No annual air series supplied, so heating degree hours are zero and "
+            "no fabric measure can be credited with a heating-season saving. That "
+            "is an absent figure, not a zero one.")
+
     notes.append(
         f"Floor plate {plate_m2:,.0f} m2 per storey, reconstructed from a "
         f"{perimeter:,.0f} m envelope perimeter at an assumed {PLAN_DEPTH_M:.0f} m "
@@ -794,6 +833,7 @@ def building_floors(
         peak_hour_edt=edt[h_build],
         worst_floor=worst.floor,
         person_hours=float(person_hours),
+        heating_degree_hours=(float(hdh[0]), float(hdh[1])),
         basis=_basis(assembly, occupancy, resolved=True, annual_basis=annual_basis,
                      exceedance=t_air_year is not None),
         notes=notes,
@@ -1130,6 +1170,97 @@ def _solar_fraction_at(assembly: Assembly, i: int,
     if shgc_new is not None and shgc_old > 0.0:
         return max(0.0, 1.0 - min(float(shgc_new), shgc_old) / shgc_old)
     return 0.0
+
+
+def fabric_retrofit_delta(
+    face: FaceLoad,
+    assembly: Assembly,
+    *,
+    u_wall_new: tuple[float, float],
+    heating_degree_hours: tuple[float, float],
+    cond_frac_penalty: float = 0.0,
+) -> dict[str, tuple[float, float]]:
+    """What insulating the OPAQUE wall does, in both seasons.
+
+    THE MIRROR OF ``solar_control_delta``, AND THE ASYMMETRY IT EXISTS TO CLOSE
+
+    A solar-control measure has a summer benefit and a winter cost, and both are
+    now priced. A fabric measure is the other way round — its own catalogue entry
+    says so: "Negative — this is the one measure in the catalogue that pays in
+    both seasons. The same fabric that keeps summer longwave out keeps winter
+    heat in." Neither half of that was computed. The summer half was scaled from
+    the outdoor facade delta, which for this measure moves the WRONG WAY, and the
+    winter half did not exist at all, so every ``wall_insulation`` in the build
+    came out as a pure cooling penalty and read "never, on energy alone".
+
+    TWO EFFECTS IN SUMMER, PULLING AGAINST EACH OTHER, AND BOTH ARE REAL
+
+    Insulation lowers ``u_wall``, which lowers ``U*A*(T_surface - T_indoor)``.
+    It ALSO lowers the wall's admittance, so the outer face sheds less of what it
+    absorbs into its own mass and runs HOTTER — the canyon model reports +0.567 K
+    on 560 3 Avenue, and that is not an error, it is what an insulated wall does.
+    So the driving temperature difference goes UP while the coefficient goes
+    DOWN::
+
+        saving = cond_opaque * [ 1 - (U_new / U_old) * (1 + dT_facade / drive) ]
+
+    The coefficient dominates by a wide margin — halving a U-value beats a
+    half-kelvin rise on a thirty-kelvin difference — but the penalty term is
+    carried rather than dropped, because it is the whole reason this measure
+    looked bad and a reader who has seen the facade delta is owed its effect.
+
+    WINTER IS THE PLAIN ONE
+
+    ``A_opaque * (U_old - U_new) * heating_degree_hours``, the textbook fabric
+    calculation, counted against this building's own hourly air series and the
+    balance point rather than a published degree-day normal. It comes back
+    POSITIVE and is a SAVING, which is the opposite sign convention from
+    ``solar_control_delta``'s ``winter_kwh`` — deliberately, because they are
+    opposite things, and a single field that meant "penalty here and benefit
+    there" is how the two would eventually be added together.
+
+    NOT CREDITED, AND SAID SO RATHER THAN QUIETLY OMITTED: the glazed share.
+    Exterior insulation goes on the spandrel and stops at the sight line, so the
+    glass keeps its U-value and keeps its losses. On a curtain wall where the
+    glass is nine tenths of the assembly's conductance, that is most of the wall
+    and it is why this measure is prescribed on masonry rather than on glass.
+    """
+    u_old = assembly.u_wall
+    out_kwh = [0.0, 0.0]
+    out_heat = [0.0, 0.0]
+
+    # The opaque half of the conduction term, which is all this measure touches.
+    cond_opaque = (face.cond_kwh[0] - face.cond_glazed_kwh[0],
+                   face.cond_kwh[1] - face.cond_glazed_kwh[1])
+    # Opaque area from the assembly's own window-to-wall corner, matching how
+    # `glazed_m2` is reported: the HIGH corner, so the opaque area is the SMALL
+    # one and the heating saving is the conservative reading.
+    a_opaque = max(0.0, float(face.area_m2) - float(face.glazed_m2))
+
+    for i in (0, 1):
+        uo = float(u_old[i])
+        # Crossed, like `u_glass_new` in the solar function: the pessimistic end
+        # of the saving pairs the assembly's own LOW U with the new build-up's
+        # HIGH one, so the band cannot be narrowed at both ends at once.
+        un = min(uo, float(u_wall_new[1 - i]))
+        if uo <= 0.0:
+            continue
+
+        # Summer, both effects at once. `cond_frac_penalty` is the fractional
+        # rise in the driving difference implied by the hotter outer face; the
+        # caller computes it from the re-solved delta the same way the external
+        # shading path does, and it enters with the opposite sign.
+        ratio = (un / uo) * (1.0 + max(0.0, float(cond_frac_penalty)))
+        out_kwh[i] = max(0.0, cond_opaque[i]) * (1.0 - ratio)
+
+        # Winter, the plain fabric calculation. Watts per kelvin times kelvin
+        # hours, into kWh.
+        out_heat[i] = a_opaque * (uo - un) * float(heating_degree_hours[i]) / 1000.0
+
+    return {
+        "kwh": (min(out_kwh), max(out_kwh)),
+        "heating_kwh": (min(out_heat), max(out_heat)),
+    }
 
 
 def exposure_delta(

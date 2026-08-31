@@ -1321,6 +1321,16 @@ export class Brief {
     if (wi && (wi[0] || wi[1])) {
       cash.push(['WINTER HEAT PENALTY', this._rng(wi[0], wi[1], '$'), 'cost']);
     }
+    // And its mirror, in the MONEY colour: a fabric measure keeps winter heat in
+    // where a solar-control measure shuts summer sun out, and for a while only
+    // the second of those reached the arithmetic. Never both on one card -- a
+    // measure either changes the glass or changes the wall -- so the two tiles
+    // are alternatives rather than a pair, and which one appears says which
+    // family the reader is looking at.
+    const he = pair(mo.heating_usd_yr);
+    if (he && (he[0] || he[1])) {
+      cash.push(['WINTER HEAT SAVED', this._rng(he[0], he[1], '$'), 'money']);
+    }
     const co2 = pair(mo.carbon_t_yr);
     if (co2) cash.push(['CARBON AVOIDED', this._rng(co2[0], co2[1], 't/yr'), 'money']);
     const pb = pair(mo.payback_yr);

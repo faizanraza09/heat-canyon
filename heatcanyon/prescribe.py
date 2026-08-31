@@ -78,6 +78,7 @@ called by it.
         "d_peak_kw":        (lo, hi) or float,
         "d_person_hours":   float,    # negative is avoided exposure
         "d_winter_kwh":     (lo, hi) or float,   # POSITIVE is a heating penalty
+        "d_heating_kwh":    (lo, hi) or float,   # POSITIVE is a heating SAVING
         "seasonal":         {"summer_d_facade_k": .., "winter_d_facade_k": ..,
                              "year_d_facade_k": ..},
         "note":             str,      # carried through to Prescription.effect_note
@@ -241,6 +242,12 @@ class Effect:
     d_person_hours: float
     d_winter_kwh: tuple[float, float]      # positive = a heating penalty
     seasonal: dict[str, float]
+    #: The mirror of the field above, for the fabric family: heat the plant no
+    #: longer has to make good, POSITIVE and a SAVING. Two fields rather than one
+    #: signed one, because a penalty and a benefit reaching the same column is
+    #: how they would eventually be summed. Default zero, so a measure that has
+    #: neither reports neither rather than reporting a benefit of nothing.
+    d_heating_kwh: tuple[float, float] = (0.0, 0.0)
     source: str = "re-solved"
 
 
@@ -330,6 +337,7 @@ class Prescription:
                 "d_peak_kw": list(self.effect.d_peak_kw),
                 "d_person_hours": self.effect.d_person_hours,
                 "d_winter_kwh": list(self.effect.d_winter_kwh),
+                "d_heating_kwh": list(self.effect.d_heating_kwh),
                 "seasonal": dict(self.effect.seasonal),
                 "source": self.effect.source,
             }

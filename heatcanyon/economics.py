@@ -815,6 +815,33 @@ CONSTANTS: dict[str, Constant] = {
     # flagged on exactly the same terms as everything else, and this is the
     # module whose whole job is that nothing of the sort lives as a literal.
 
+    "u_wall_retrofit_w_m2k": Constant(
+        value=(0.25, 0.45),
+        unit="W/m2K, opaque build-up",
+        source=(
+            "Trade press and product data: 100-150 mm of external mineral wool or "
+            "EPS over solid masonry quoted at 0.20-0.35 W/m2K, rising toward 0.45 "
+            "where the insulation is thinner or the substrate is uninsulated "
+            "cavity"
+        ),
+        as_of="2026-08-31",
+        verified=False,
+        note=(
+            "TODO: verify against a NYSERDA or NYC Accelerator retrofit case "
+            "study with a stated build-up, and against what the landmarks "
+            "process will actually permit on a street-facing elevation -- which "
+            "is the binding constraint on this measure in this AOI far more often "
+            "than the physics is. Compare against `loads.py`'s assemblies, which "
+            "carry 1.0-2.2 W/m2K for the opaque wall, so this is a three- to "
+            "eight-fold improvement and the largest single fabric change in the "
+            "catalogue. It applies to the SPANDREL ONLY: exterior insulation "
+            "stops at the sight line, the glass keeps its own U-value, and on a "
+            "curtain wall where the glass carries nine tenths of the assembly's "
+            "conductance that is most of the wall left untouched. This is the "
+            "reason the measure is prescribed on masonry."
+        ),
+    ),
+
     "u_glass_retrofit_w_m2k": Constant(
         value=(1.3, 2.0),
         unit="W/m2K, glass element",
@@ -1092,6 +1119,13 @@ class Money:
     #: figure is how that finding disappears.
     winter_usd_yr: tuple[float, float] = (0.0, 0.0)
 
+    #: The heating-season BENEFIT of a fabric measure, positive, already added to
+    #: ``annual_saving_usd``. The opposite of the line above and kept apart from
+    #: it for the same reason: one measure family pays in winter and another is
+    #: charged for it, and a single net column would let a reader believe the two
+    #: were the same quantity with a sign.
+    heating_usd_yr: tuple[float, float] = (0.0, 0.0)
+
     #: Everything above, restated so the caller can show the arithmetic.
     annual_saving_usd: tuple[float, float] = (0.0, 0.0)
     measure_life_years: tuple[float, float] = (0.0, 0.0)
@@ -1112,6 +1146,7 @@ def price(
     gross_floor_m2: float | None = None,
     glazed_m2: float | None = None,
     winter_kwh_thermal: float | tuple[float, float] | None = None,
+    heating_kwh_saved: float | tuple[float, float] | None = None,
 ) -> Money:
     """Put a price on one measure on one building.
 
@@ -1260,7 +1295,19 @@ def price(
     # The tariff constants still cross, and should: heat price and electricity
     # price are independent of the envelope and of each other, so each corner
     # already carries its own worst tariff.
-    summer = _add(energy, demand, ll97)
+    # The heating-season BENEFIT of a fabric measure: heat the plant no longer
+    # has to make good. No utilisation factor, unlike the solar penalty above --
+    # that factor exists because rejected sun may be heat the building did not
+    # want, and a conduction loss the fabric stops was unambiguously heat it was
+    # paying for. Its carbon is not netted for the same reason the penalty's is
+    # not: no fuel-combustion coefficient is in this table.
+    heating = (0.0, 0.0)
+    if heating_kwh_saved is not None:
+        hk = _pair(heating_kwh_saved)
+        heat = take("heating_usd_kwh_thermal")
+        heating = (abs(hk[0]) * heat[0], abs(hk[1]) * heat[1])
+
+    summer = _add(energy, demand, ll97, heating)
     _net = (summer[0] - winter[0], summer[1] - winter[1])
     # ORDERED, like every other interval this module builds -- `_mul` ends on
     # `(min(c), max(c))` for the same reason. Subtracting per corner does NOT
@@ -1302,6 +1349,7 @@ def price(
         carbon_t_yr=carbon_t,
         ll97_usd_yr=ll97,
         winter_usd_yr=winter,
+        heating_usd_yr=heating,
         capex_usd=capex,
         payback_yr=payback,
         npv_usd=npv,
